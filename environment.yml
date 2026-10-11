@@ -29,6 +29,8 @@ dependencies:
   - numpy>=1.26
   - meshio>=5.3
   - h5py
+  # 3D tetrahedral backend (LGPL-2.1, dynamic, optional at runtime; Phase 8)
+  - netgen
   # test / lint
   - pytest
   - pytest-qt

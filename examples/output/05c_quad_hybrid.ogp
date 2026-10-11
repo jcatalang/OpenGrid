@@ -16,7 +16,7 @@
  ],
  "domains": [
   {"edges": [[{"connector": 4, "reversed": true}, {"connector": 3, "reversed": false}], [{"connector": 9, "reversed": false}], [{"connector": 8, "reversed": false}], [{"connector": 9, "reversed": true}]], "generator": {"elliptic": {"attractions": [], "control": "thomas_middlecoff", "max_iterations": 20000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.0001}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "hermite_tfi"}, "id": 11, "name": "ring", "surface": null, "type": "domain"},
-  {"generator": {"algorithm": "advancing_front", "edge_swap": true, "element_type": "quads", "growth_rate": 1.15, "inflation": null, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "smoothing": "angle_based", "smoothing_iterations": 5, "sources": []}, "id": 12, "loops": [[{"connector": 10, "reversed": false}], [{"connector": 8, "reversed": true}]], "name": "outside", "type": "unstructured_domain"}
+  {"generator": {"algorithm": "advancing_front", "edge_swap": true, "element_type": "quads", "growth_rate": 1.15, "inflation": null, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "smoothing": "angle_based", "smoothing_iterations": 5, "sources": []}, "id": 12, "loops": [[{"connector": 10, "reversed": false}], [{"connector": 8, "reversed": true}]], "name": "outside", "surface": null, "type": "unstructured_domain"}
  ],
  "format": "opengrid-project",
  "name_counters": {},

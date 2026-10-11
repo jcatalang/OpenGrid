@@ -33,6 +33,10 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
         for key in SURFACE_CURVES[kind]:
             result[key] = store.get(params[key]).name
         return result
+    if kind == "volume":
+        from opengrid.model.volumes import volume_script_params
+
+        return volume_script_params(params, store)
     if kind == "block":
         from opengrid.model.blocks import block_script_params
 
@@ -51,7 +55,7 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
                 )
             edges.append(tuple(items))
         result[key] = tuple(edges)
-        if kind == "domain" and params.get("surface") is not None:
+        if kind in ("domain", "unstructured_domain") and params.get("surface") is not None:
             result["surface"] = store.get(params["surface"]).name
         if kind == "unstructured_domain" and params["generator"]["inflation"] is not None:
             generator = dict(params["generator"])

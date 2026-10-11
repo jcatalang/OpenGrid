@@ -225,6 +225,11 @@ class MainWindow(QMainWindow):
             self.extrude_selection,
             tip="Block by extruding the selected structured domain (edit the extrusion afterwards)",
         )
+        self.volume_action = self._action(
+            "Volume from faces",
+            self.create_volume_on_selection,
+            tip="Unstructured volume (tetrahedra) enclosed by the selected domains",
+        )
         self.cut_action = QAction("Cut blocks (plane x)", self)
         self.cut_action.setCheckable(True)
         self.cut_action.toggled.connect(self.set_cut_plane)
@@ -297,6 +302,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.unstructured_action)
         create_menu.addAction(self.block_action)
         create_menu.addAction(self.extrude_action)
+        create_menu.addAction(self.volume_action)
         create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
@@ -328,6 +334,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.unstructured_action)
         toolbar.addAction(self.block_action)
         toolbar.addAction(self.extrude_action)
+        toolbar.addAction(self.volume_action)
         toolbar.addWidget(QLabel(" dim "))
         self.dimension_box = QSpinBox()
         self.dimension_box.setRange(2, 100000)
@@ -557,7 +564,7 @@ class MainWindow(QMainWindow):
             if entity_id not in self.session.store:
                 continue
             entity = self.session.store.get(entity_id)
-            if entity.kind in ("domain", "unstructured_domain", "block"):
+            if entity.kind in ("domain", "unstructured_domain", "block", "volume"):
                 names.append(entity.name)
         return names
 
@@ -569,6 +576,17 @@ class MainWindow(QMainWindow):
         name = self._run(lambda: self.session.create_block(faces=faces))
         if name:
             log.info("created %s: %s", name, self.session.block_status(name))
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def create_volume_on_selection(self) -> str | None:
+        faces = self._selected_of_kind("domain") + self._selected_of_kind("unstructured_domain")
+        if len(faces) < 2:
+            self.statusBar().showMessage("Select the domains enclosing the volume", 5000)
+            return None
+        name = self._run(lambda: self.session.create_volume(faces))
+        if name:
+            log.info("created %s: %s", name, self.session.volume_status(name))
             self.set_selection([self.session.store.get(name).id])
         return name
 
@@ -597,9 +615,9 @@ class MainWindow(QMainWindow):
         """Cut the blocks with the plane x = centre of the model (normal +x)."""
         self.scene.cut_plane = None
         if enabled and self.session.is_3d():
-            points = np.concatenate(
-                [self.session.block_grid(n).reshape(-1, 3) for n in self.session.names("block")]
-            )
+            parts = [self.session.block_grid(n).reshape(-1, 3) for n in self.session.names("block")]
+            parts += [self.session.volume_mesh(n)["points"] for n in self.session.names("volume")]
+            points = np.concatenate(parts)
             centre = tuple(float(v) for v in 0.5 * (points.min(axis=0) + points.max(axis=0)))
             self.scene.cut_plane = (centre, (1.0, 0.0, 0.0))
         self.scene.rebuild()
@@ -613,7 +631,7 @@ class MainWindow(QMainWindow):
         if names:
             return names, ", ".join(names)
         if self.session.is_3d():
-            return self.session.names("block"), "all blocks"
+            return self.session.names("block") + self.session.names("volume"), "all blocks"
         return self.session.names("domain") + self.session.names(
             "unstructured_domain"
         ), "all domains"
@@ -694,6 +712,14 @@ class MainWindow(QMainWindow):
         self.quality_dock.show_values(np.concatenate(values), scope)
 
     def _cell_corners(self, name: str, j: int, i: int) -> np.ndarray:
+        if self.session.store.get(name).kind == "volume":
+            mesh = self.session.volume_mesh(name)
+            n = len(mesh["tets"])
+            if i < n:
+                c = mesh["points"][mesh["tets"][i]]
+                return c[[0, 1, 2, 0, 3, 1, 3, 2]]
+            c = mesh["points"][mesh["pyramids"][i - n]]
+            return c[[0, 1, 2, 3, 0, 4, 1, 4, 2, 4, 3]]
         if self.session.store.get(name).kind == "block":
             grid = self.session.block_grid(name)
             nk, nj, ni, _ = grid.shape

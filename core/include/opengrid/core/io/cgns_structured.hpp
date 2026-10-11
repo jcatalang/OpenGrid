@@ -114,6 +114,25 @@ struct CgnsConnection3D {
   std::array<int, 3> transform{};
 };
 
+// 3D unstructured zones (base with cell and physical dimension 3): element sections numbered 1..
+// in the given order; a section with a boundary family is a boundary section (TRI_3 / QUAD_4)
+// referenced by a BC_t (PointRange of its elements, GridLocation FaceCenter).
+struct CgnsSection {
+  std::string name;
+  std::string type;                 // TETRA_4, PYRA_5, PENTA_6, HEXA_8, TRI_3, QUAD_4
+  std::vector<std::int64_t> nodes;  // 0-based vertex ids, element after element
+  std::string bc_family;            // non-empty: boundary condition of this section
+};
+
+struct CgnsUnstructuredZone3D {
+  std::string name;
+  std::vector<double> x;
+  std::vector<double> y;
+  std::vector<double> z;
+  std::vector<CgnsSection> sections;
+  std::string family;
+};
+
 // True when OpenGrid was built with the CGNS library.
 bool cgns_available();
 
@@ -139,5 +158,11 @@ void write_cgns_structured_3d(const std::string& path, const std::string& base_n
                               const std::vector<CgnsFamily>& families,
                               const std::vector<CgnsBoundary3D>& boundaries,
                               const std::vector<CgnsConnection3D>& connections);
+
+// vertex_connections as in write_cgns_2d (1-based vertex numbers on both sides).
+void write_cgns_unstructured_3d(const std::string& path, const std::string& base_name,
+                                const std::vector<CgnsUnstructuredZone3D>& zones,
+                                const std::vector<CgnsFamily>& families,
+                                const std::vector<CgnsVertexConnection>& vertex_connections);
 
 }  // namespace og

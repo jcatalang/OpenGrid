@@ -36,6 +36,7 @@ from opengrid.model.domains import (
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.model.patches import PATCH_TYPES, member_label
 from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
+from opengrid.model.volumes import BACKENDS, PYRAMID_MODES
 from opengrid.validation import ValidationError
 
 # Field editors per kind: (parameter, editor type). Types: vec3, opt_vec3, number, integer,
@@ -141,6 +142,39 @@ class ExtrusionEditor(QWidget):
             "distribution": distribution,
             "edges": tuple(e.strip() for e in self.edges.text().split(",") if e.strip()),
             "dissipation": one(self.dissipation, "dissipation"),
+        }
+
+
+class VolumeEditor(QWidget):
+    """Volume generator: backend, max size (empty: none), grading, pyramids."""
+
+    def __init__(self, value: dict, parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.backend = QComboBox()
+        self.backend.addItems(list(BACKENDS))
+        self.backend.setCurrentText(value["backend"])
+        self.max_size = QLineEdit(format_optional(value["max_size"]))
+        self.max_size.setPlaceholderText("none")
+        self.grading = QLineEdit(format_number(value["grading"]))
+        self.pyramids = QComboBox()
+        self.pyramids.addItems(list(PYRAMID_MODES))
+        self.pyramids.setCurrentText(value["pyramids"])
+        layout.addRow("backend", self.backend)
+        layout.addRow("max size", self.max_size)
+        layout.addRow("grading", self.grading)
+        layout.addRow("pyramids", self.pyramids)
+
+    def value(self) -> dict:
+        grading = parse_numbers(self.grading.text(), "grading")
+        if len(grading) != 1:
+            raise ParseError("grading: expected one number")
+        return {
+            "backend": self.backend.currentText(),
+            "max_size": parse_optional(self.max_size.text(), "max size"),
+            "grading": grading[0],
+            "pyramids": self.pyramids.currentText(),
         }
 
 
@@ -739,6 +773,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "volume":
+            self._volume_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         if entity.kind == "block":
             self._block_rows(entity)
             self.apply_button.setEnabled(True)
@@ -779,6 +818,21 @@ class PropertyPanel(QWidget):
         status.setWordWrap(True)
         self._form.addRow("status", status)
         editor = UnstructuredEditor(entity.params["generator"], self.session.store)
+        self._form.addRow("generator", editor)
+        self._editors["generator"] = ("generator", editor)
+
+    def _volume_rows(self, entity) -> None:
+        try:
+            text = self.session.volume_status(entity.name)
+        except ValidationError as error:
+            text = str(error)
+        status = QLabel(text)
+        status.setWordWrap(True)
+        self._form.addRow("status", status)
+        faces = QLabel(", ".join(self.session.store.get(f).name for f in entity.params["faces"]))
+        faces.setWordWrap(True)
+        self._form.addRow("faces", faces)
+        editor = VolumeEditor(entity.params["generator"])
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 

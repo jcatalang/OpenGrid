@@ -18,7 +18,15 @@ GMSH_LINE = 1
 GMSH_TRIANGLE = 2
 GMSH_QUAD = 3
 GMSH_HEXAHEDRON = 5
-VTK_TO_GMSH = {5: GMSH_TRIANGLE, 9: GMSH_QUAD, 12: GMSH_HEXAHEDRON}
+GMSH_TETRAHEDRON = 4
+GMSH_PYRAMID = 7
+VTK_TO_GMSH = {
+    5: GMSH_TRIANGLE,
+    9: GMSH_QUAD,
+    12: GMSH_HEXAHEDRON,
+    10: GMSH_TETRAHEDRON,
+    14: GMSH_PYRAMID,
+}
 
 
 def write_gmsh(path, assembly) -> dict:
@@ -47,8 +55,14 @@ def write_gmsh(path, assembly) -> dict:
         lines.append(f"0 0 {len(patches)} {len(zones)}")
     else:
         lines.append(f"0 {len(patches)} {len(zones)} 0")
+
+    def boundary_of(p):
+        if dim == 3:
+            return [assembly.boundary_cells[k] for k in np.flatnonzero(assembly.line_patch == p)]
+        return list(assembly.lines[assembly.line_patch == p])
+
     for p in patches:
-        ids = assembly.lines[assembly.line_patch == p]
+        ids = np.concatenate(boundary_of(p))
         lines.append(f"{p + 1} {bbox(ids)} 1 {p + 1} 0")
     for z in zones:
         ids = np.concatenate(assembly.cells(assembly.cell_zone == z))
@@ -66,8 +80,14 @@ def write_gmsh(path, assembly) -> dict:
     blocks = []
     tag = 1
     for p in patches:
-        cells = assembly.lines[assembly.line_patch == p]
-        blocks.append((dim - 1, p + 1, boundary_kind, cells))
+        cells = boundary_of(p)
+        if dim == 3:
+            for size, kind in ((3, GMSH_TRIANGLE), (4, GMSH_QUAD)):
+                group = [c for c in cells if len(c) == size]
+                if group:
+                    blocks.append((dim - 1, p + 1, kind, np.asarray(group)))
+        else:
+            blocks.append((dim - 1, p + 1, boundary_kind, np.asarray(cells)))
     for z in zones:
         for vtk_type, gmsh_type in sorted(VTK_TO_GMSH.items()):
             mask = (assembly.cell_zone == z) & (assembly.cell_type == vtk_type)

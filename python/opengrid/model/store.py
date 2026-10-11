@@ -36,12 +36,17 @@ def references(entity: Entity) -> set[int]:
         if entity.params.get("surface") is not None:
             refs.add(entity.params["surface"])
         return refs
+    if entity.kind == "volume":
+        return set(entity.params["faces"])
     if entity.kind == "block":
         from opengrid.model.blocks import block_references
 
         return block_references(entity.params)
     if entity.kind == "unstructured_domain":
-        return {item["connector"] for loop in entity.params["loops"] for item in loop}
+        refs = {item["connector"] for loop in entity.params["loops"] for item in loop}
+        if entity.params.get("surface") is not None:
+            refs.add(entity.params["surface"])
+        return refs
     if entity.kind == "patch":
         refs = {
             item.get("connector", item.get("domain", item.get("block")))

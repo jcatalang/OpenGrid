@@ -20,7 +20,7 @@ _SECTIONS = {
     "database": DATABASE_KINDS,
     "connectors": ("connector",),
     "domains": ("domain", "unstructured_domain"),
-    "blocks": ("block",),
+    "blocks": ("block", "volume"),
     "patches": ("patch",),
     "zones": ("zone",),
 }

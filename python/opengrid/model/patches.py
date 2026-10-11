@@ -143,7 +143,7 @@ def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
             entity = store.get(ref)
             if entity.kind == "connector":
                 member = {"connector": entity.id}
-            elif entity.kind == "domain":
+            elif entity.kind in ("domain", "unstructured_domain"):
                 member = {"domain": entity.id}
             else:
                 issues.append(
@@ -203,7 +203,7 @@ def normalize_zone(raw: dict, store, where: str) -> dict:
     members = _members(
         raw.get("members", ()),
         "domain",
-        ("domain", "unstructured_domain", "block"),
+        ("domain", "unstructured_domain", "block", "volume"),
         store,
         where,
         issues,

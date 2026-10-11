@@ -24,6 +24,7 @@ import numpy as np
 
 VTK_LINE = 3
 VTK_QUAD = 9
+VTK_TRIANGLE = 5
 VERSION = (1, 0)
 COLLECTION_VERSION = (2, 1)  # PartitionedDataSetCollection with an Assembly needs format 2.1
 RESERVED_NAMES = {"Assembly"}
@@ -169,16 +170,22 @@ def write_vtkhdf_collection(path, assembly) -> dict:
             group = _group(root, patch)
             group.attrs["Index"] = np.int64(index)
             count = int(np.count_nonzero(mask))
-            width = assembly.lines.shape[1]
-            boundary_type = VTK_LINE
-            if width == 4:
-                boundary_type = VTK_QUAD
+            if assembly.dimension == 3:
+                faces = [assembly.boundary_cells[k] for k in np.flatnonzero(mask)]
+                lengths = np.array([len(f) for f in faces], dtype=np.int64)
+                offsets = np.concatenate([[0], np.cumsum(lengths)])
+                connectivity = np.concatenate(faces)
+                boundary_types = np.where(lengths == 3, VTK_TRIANGLE, VTK_QUAD).astype(np.uint8)
+            else:
+                offsets = np.arange(0, 2 * count + 1, 2)
+                connectivity = assembly.lines[mask].reshape(-1)
+                boundary_types = np.full(count, VTK_LINE, dtype=np.uint8)
             _write_unstructured(
                 group,
                 assembly.points,
-                np.arange(0, width * count + 1, width),
-                assembly.lines[mask].reshape(-1),
-                np.full(count, boundary_type, dtype=np.uint8),
+                offsets,
+                connectivity,
+                boundary_types,
                 {"patch_id": assembly.line_patch[mask]},
                 COLLECTION_VERSION,
             )

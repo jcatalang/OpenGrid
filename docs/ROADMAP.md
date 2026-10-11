@@ -112,7 +112,18 @@ Phase 5 generators (triangles, quad-dominant or all-quad).
 
 Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consistency and all exports verified (7a); smoothing and hyperbolic extrusion (7b).
 
-## Phase 8 — 3D unstructured and hybrid *(proposed split: 8a surface mesh + shell + backend, 8b inflation, 8c optimisation + mixed blocks)*
+## Phase 8 — 3D unstructured and hybrid *(split: 8a surface mesh + shell + backend, 8b inflation, 8c optimisation + mixed blocks)*
+- **8a:**
+  - unstructured domains in 3D planes and on surfaces;
+  - volumes from closed shells (watertightness, orientation, inner bodies);
+  - tetrahedral backend interface with Netgen;
+  - pyramids at quad faces;
+  - tet/pyramid quality;
+  - 3D unstructured exports (VTKHDF, Gmsh, CGNS);
+  - GUI.
+- **8b:** prism/hex inflation from wall patches.
+- **8c:** optimisation (mmg or own), mixed structured/unstructured models in CGNS, pyramid
+  quality at sharp edges.
 - Surface meshing on parametric surfaces, a watertight shell check (each edge shared by exactly 2 faces, consistent orientation).
 - `TetBackend` with Netgen first and mmg for optimisation.
 - Prism/hex inflation with ridge/corner handling, pyramids at quad faces.

@@ -227,8 +227,21 @@ def normalize_generator(raw, where: str, store=None) -> dict:
 
 def normalize_unstructured(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
-    for key in sorted(set(raw) - {"loops", "generator"}):
+    for key in sorted(set(raw) - {"loops", "generator", "surface"}):
         issues.append(Issue(f"{where}: {key}", "unexpected key"))
+    surface = raw.get("surface")
+    if surface is not None:
+        from opengrid.model.entities import SURFACE_KINDS
+
+        if isinstance(surface, bool) or not isinstance(surface, (str, int)) or surface not in store:
+            issues.append(Issue(f"{where}: surface", f"no surface {surface!r}"))
+            surface = None
+        elif store.get(surface).kind not in SURFACE_KINDS:
+            entity = store.get(surface)
+            issues.append(Issue(f"{where}: surface", f"{entity.name!r} is a {entity.kind}"))
+            surface = None
+        else:
+            surface = store.get(surface).id
     loops_raw = raw.get("loops")
     if not isinstance(loops_raw, (list, tuple)) or not loops_raw:
         raise ValidationError(
@@ -261,7 +274,7 @@ def normalize_unstructured(raw: dict, store, where: str) -> dict:
                 )
         if issues:
             raise ValidationError(issues)
-    params = {"loops": tuple(loops), "generator": generator}
+    params = {"loops": tuple(loops), "generator": generator, "surface": surface}
     check_loops(params, store, ConnectorEvaluator(store), where)
     return params
 
@@ -288,14 +301,21 @@ def loop_points(params, store, connectors, where) -> list[np.ndarray]:
     return result
 
 
+def domain_frame(params, store, loops, where: str = ""):
+    """2D frame of an unstructured domain (opengrid.model.frames)."""
+    from opengrid.model.frames import make_frame
+
+    surface = None
+    if params.get("surface") is not None:
+        surface = store.geometry(params["surface"])
+    return make_frame(loops, surface, where)
+
+
 def check_loops(params, store, connectors, where) -> None:
-    loops = loop_points(params, store, connectors, where)
+    loops3 = loop_points(params, store, connectors, where)
+    frame = domain_frame(params, store, loops3, where)
+    loops = [frame.to2d(loop) for loop in loops3]
     issues = []
-    everything = np.concatenate(loops)
-    if np.ptp(everything[:, 2]) > _tolerance(everything):
-        raise ValidationError(
-            [Issue(where, "unstructured domains must lie in a plane z = const (2D)")]
-        )
     for k, points in enumerate(loops):
         if len(points) < 3:
             issues.append(Issue(f"{where}: loops[{k}]", "needs at least 3 nodes"))
@@ -322,7 +342,9 @@ def _inside(point, polygon) -> bool:
     return bool(np.count_nonzero(crosses & (point[0] < at)) % 2)
 
 
-def assemble_loops(store, connectors: ConnectorEvaluator, names: list[str]) -> list[list[dict]]:
+def assemble_loops(
+    store, connectors: ConnectorEvaluator, names: list[str], surface=None
+) -> list[list[dict]]:
     """Closed loops from a set of connectors: the loop enclosing the largest area becomes the
     outer loop (counter-clockwise), the others holes (clockwise)."""
     from opengrid.model.domains import _walk
@@ -377,7 +399,15 @@ def assemble_loops(store, connectors: ConnectorEvaluator, names: list[str]) -> l
             parts.append(points[:-1])
         return np.concatenate(parts)
 
-    areas = [_signed_area(oriented(order)) for order in loops]
+    from opengrid.model.frames import make_frame
+
+    surface_geometry = None
+    if surface is not None:
+        surface_geometry = store.geometry(surface)
+    frame = make_frame(
+        [oriented(order) for order in loops], surface_geometry, "unstructured domain"
+    )
+    areas = [_signed_area(frame.to2d(oriented(order))) for order in loops]
     outer = int(np.argmax([abs(a) for a in areas]))
     result = []
     for k in [outer] + [k for k in range(len(loops)) if k != outer]:
@@ -436,6 +466,10 @@ class UnstructuredEvaluator:
         points, segments = self.boundary(entity_id)
         digest = hashlib.sha256(repr(generator).encode())
         digest.update(points.tobytes())
+        if entity.params.get("surface") is not None:
+            from opengrid.model.domains import surface_signature
+
+            digest.update(repr(surface_signature(self.store, entity.params["surface"])).encode())
         key = digest.hexdigest()
         if key in self._cache:
             self._cache.move_to_end(key)
@@ -465,8 +499,10 @@ class UnstructuredEvaluator:
                     "total_thickness": inflation["total_thickness"],
                     "transition": inflation["transition"],
                 }
+            loops3 = loop_points(entity.params, self.store, self.connectors, entity.name)
+            frame = domain_frame(entity.params, self.store, loops3, entity.name)
             xy, triangles, quads, rejected, warnings, layers = _core.mesh_domain(
-                np.ascontiguousarray(points[:, :2]),
+                frame.to2d(points),
                 segments,
                 algorithm=generator["algorithm"],
                 element_type=generator["element_type"],
@@ -485,8 +521,8 @@ class UnstructuredEvaluator:
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None
         xyz = np.zeros((len(xy), 3))
-        xyz[:, :2] = xy
-        xyz[:, 2] = points[0, 2]
+        if len(xy) > len(points):
+            xyz[len(points) :] = frame.to3d(xy[len(points) :])
         # Boundary points are the connector nodes themselves (bitwise), so they merge exactly.
         xyz[: len(points)] = points
         result = {

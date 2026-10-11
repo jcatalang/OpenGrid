@@ -42,6 +42,9 @@ class MeshAssembly:
     # 2: quads / triangles with boundary lines; 3: hexahedra with boundary quads ("lines" then
     # holds the boundary quads).
     dimension: int = 2
+    # 3D: boundary faces (triangles and quads, outward) and their patch indices.
+    boundary_cells: list = field(default_factory=list)
+    boundary_patch: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
 
     def cells(self, mask=None) -> list[np.ndarray]:
         """Point ids of each (selected) cell."""

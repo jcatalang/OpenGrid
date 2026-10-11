@@ -372,6 +372,45 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "inverted_layers, warnings).");
 
   m.def(
+      "write_cgns_unstructured_3d",
+      [](const std::string& path, const std::string& base_name,
+         const std::vector<
+             std::tuple<std::string, std::vector<double>, std::vector<double>, std::vector<double>,
+                        std::vector<std::tuple<std::string, std::string, std::vector<std::int64_t>,
+                                               std::string>>,
+                        std::string>>& zones,
+         const std::vector<std::tuple<std::string, std::string>>& families,
+         const std::vector<std::tuple<int, std::string, int, std::vector<std::int64_t>,
+                                      std::vector<std::int64_t>>>& connections) {
+        std::vector<og::CgnsUnstructuredZone3D> z;
+        z.reserve(zones.size());
+        for (const auto& [name, x, y, zz, sections, family] : zones) {
+          og::CgnsUnstructuredZone3D zone{name, x, y, zz, {}, family};
+          for (const auto& [sname, type, nodes, bc] : sections) {
+            zone.sections.push_back({sname, type, nodes, bc});
+          }
+          z.push_back(std::move(zone));
+        }
+        std::vector<og::CgnsFamily> f;
+        f.reserve(families.size());
+        for (const auto& [name, bc_type] : families) {
+          f.push_back({name, bc_type});
+        }
+        std::vector<og::CgnsVertexConnection> c;
+        c.reserve(connections.size());
+        for (const auto& [zone, name, donor, points, donor_points] : connections) {
+          c.push_back({zone, name, donor, points, donor_points});
+        }
+        const nb::gil_scoped_release release;
+        og::write_cgns_unstructured_3d(path, base_name, z, f, c);
+      },
+      nb::arg("path"), nb::arg("base_name"), nb::arg("zones"), nb::arg("families"),
+      nb::arg("connections"),
+      "Write a 3D unstructured CGNS file. zones: (name, x, y, z, sections [(name, type, 0-based "
+      "nodes, bc family or '')], family); connections: (zone, name, donor zone, 1-based points, "
+      "1-based donor points).");
+
+  m.def(
       "quality_3d",
       [](const Block& grid) {
         const og::Grid3D g = block_from(grid);

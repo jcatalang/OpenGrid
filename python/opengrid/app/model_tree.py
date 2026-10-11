@@ -91,6 +91,16 @@ class ModelTree(QTreeWidget):
                 except ValidationError:
                     pass
                 item = QTreeWidgetItem(blocks, [entity.name, info])
+            elif entity.kind == "volume":
+                info = "invalid"
+                try:
+                    mesh = session.volume_mesh(entity.name)
+                    info = f"{len(mesh['tets'])} tets"
+                    if len(mesh["pyramids"]):
+                        info += f", {len(mesh['pyramids'])} pyr"
+                except ValidationError:
+                    pass
+                item = QTreeWidgetItem(blocks, [entity.name, info])
             elif entity.kind == "patch":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(

@@ -585,3 +585,43 @@
 - **3D elliptic smoothing** uses point SOR only (no line relaxation): about 850 iterations for
   18 000 cells.
 - **Surface smoothing** supports no wall control.
+
+## Phase 8a — Unstructured 3D volumes (2026-10-11) — approved
+- **Environment:** `netgen` (conda-forge, LGPL-2.1) added to `environment.yml` and installed;
+  VTK 9.7, PySide6 6.11, pyvista 0.49 and NumPy 2.5.4 are unchanged.
+- **Python:**
+  - Frames for unstructured domains in 3D planes and on surfaces (`surface` key, API
+    `create_unstructured_domain(..., surface=)`); 3D face quality.
+  - `volume` entity (`create_volume`, `set_volume_generator`, `volume_mesh`,
+    `volume_quality`, `volume_status`): shell assembly, watertightness and orientation, inner
+    bodies, pyramid modes, Netgen backend, vectorised tet/pyramid quality.
+  - Combined 3D topology for blocks and volumes. Exports: VTKHDF/Gmsh mixed cells; CGNS
+    unstructured 3D zones (new C++ writer and binding).
+- **GUI:** volumes in the tree and viewport (cut, shrink, quality, worst cell), "Volume from
+  faces", volume generator editor.
+- **Demo** `examples/08a_volumes.py`: finite cylinder in a channel; the sides lie on surfaces.
+  - "near" refinement volume: 117 689 tetrahedra, min dihedral 18.1°.
+  - "far" volume: 41 574 tetrahedra, min dihedral 12.8°.
+  - Conforming across the 6 refinement-box faces; volume within 1.3e-5 of analytic (cylinder
+    as a polygon).
+  - cgnscheck clean. Outputs: `08a_volumes.png`, `phase8a_main_window.png`, CGNS / VTKHDF /
+    msh, project, journal.
+
+### Verified
+- `ctest`: 107/107; clang-tidy: 0 findings.
+- `pytest`: 239/239 (+7). Covered:
+  - 3D domains: plane area exact, cylinder patch on the surface, non-planar rejected, replay;
+  - volume with an inner body: volume exact (35), positive cells, boundary nodes bitwise,
+    tetrahedron faces paired twice except exactly the boundary faces, report OK;
+  - shell errors; pyramids always/never with exact volume;
+  - two volumes sharing a face: identical interface nodes, CGNS connectivity, cgnscheck;
+  - Gmsh/VTKHDF counts; GUI.
+- All Phase 1–7 demos still run.
+
+### Not verified / known limitations
+- **Pyramids at sharp edges:** pyramids on boundary quads meeting at sharp edges give thin
+  tetrahedra ("auto" avoids pyramids except where blocks share a face; 8c).
+- **Surface frames:** a constant metric correction; strongly varying metrics are approximated.
+- **Not in 8a:** CGNS for mixed blocks + volumes and mmg optimisation (8c); 3D inflation (8b).
+- **Performance:** "5 M tets < 2 min" not measured (the demo's 118 k tetrahedra including
+  quality take about 1 s; most of the demo's 11 s is surface meshing and assembly in Python).

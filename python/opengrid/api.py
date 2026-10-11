@@ -32,6 +32,7 @@ from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.store import Entity, Store
 from opengrid.model.unstructured import UnstructuredEvaluator, assemble_loops
+from opengrid.model.volumes import VolumeEvaluator
 from opengrid.validation import Issue, ValidationError
 
 IMPORT_MODES = ("spline", "split", "polyline")
@@ -45,6 +46,7 @@ class Session:
         self.domains = DomainEvaluator(self.store, self.connectors)
         self.unstructured = UnstructuredEvaluator(self.store, self.connectors)
         self.blocks = BlockEvaluator(self.store, self.domains)
+        self.volumes = VolumeEvaluator(self)
         self.commands.add_listener(self._invalidate_derived)
         self.project_path: Path | None = None
         # GUI/report threshold for the stretching-ratio warning (not stored in projects).
@@ -315,7 +317,7 @@ class Session:
         return self._create("domain", params, name)
 
     def create_unstructured_domain(
-        self, loops=None, generator=None, name: str | None = None, connectors=None
+        self, loops=None, generator=None, name: str | None = None, connectors=None, surface=None
     ) -> str:
         """Unstructured (triangle) domain.
 
@@ -338,7 +340,7 @@ class Session:
                 raise ValueError("give either loops or connectors")
             if isinstance(connectors, str):
                 connectors = [connectors]
-            assembled = assemble_loops(self.store, self.connectors, list(connectors))
+            assembled = assemble_loops(self.store, self.connectors, list(connectors), surface)
             loops = []
             for loop in assembled:
                 loops.append(
@@ -350,7 +352,8 @@ class Session:
                         for i in loop
                     ]
                 )
-        return self._create("unstructured_domain", {"loops": loops, "generator": generator}, name)
+        params = {"loops": loops, "generator": generator, "surface": surface}
+        return self._create("unstructured_domain", params, name)
 
     def set_unstructured_generator(self, name: str, **changes) -> str:
         generator = dict(self.entity(name).params["generator"])
@@ -426,13 +429,27 @@ class Session:
     def domain_quality(self, name: str) -> dict:
         """Per-cell quality metrics: arrays of shape (nj - 1, ni - 1) for structured domains,
         (1, m) for unstructured ones (triangles first, then quads)."""
+        from opengrid.model.face_quality import face_quality
+
         entity = self.store.get(name)
         if entity.kind == "unstructured_domain":
             mesh = self.unstructured_mesh(name)
+            if np.ptp(mesh["points"][:, 2]) > 0.0 or entity.params.get("surface") is not None:
+                return face_quality(mesh["points"], mesh["triangles"], mesh["quads"])
             return _core.quality_cells(
                 np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"], mesh["quads"]
             )
-        return _core.quality_2d(self.domain_grid(name))
+        grid = self.domain_grid(name)
+        if np.ptp(grid[..., 2]) > 0.0 or entity.params.get("surface") is not None:
+            # Faces of 3D blocks: 3D metrics, arrays (nj - 1, ni - 1) as for planar domains.
+            nj, ni, _ = grid.shape
+            index = np.arange(ni * nj).reshape(nj, ni)
+            quads = np.stack(
+                [index[:-1, :-1], index[:-1, 1:], index[1:, 1:], index[1:, :-1]], axis=-1
+            ).reshape(-1, 4)
+            q = face_quality(grid.reshape(-1, 3), np.zeros((0, 3), dtype=np.int64), quads)
+            return {key: value.reshape(nj - 1, ni - 1) for key, value in q.items()}
+        return _core.quality_2d(grid)
 
     def _export_names(self, domains) -> list[str]:
         if domains is None:
@@ -442,6 +459,38 @@ class Session:
         return list(domains)
 
     # ------------------------------------------------------ patches and zones
+    # --------------------------------------------------------------- volumes
+    def create_volume(self, faces, generator=None, name: str | None = None) -> str:
+        """Unstructured 3D volume (tetrahedra, pyramids on quad faces) enclosed by the given
+        domains (one or more closed shells). ``generator``: ``{"backend": "netgen",
+        "max_size": None, "grading": 0.3, "pyramids": True}``."""
+        return self._create("volume", {"faces": faces, "generator": generator}, name)
+
+    def set_volume_generator(self, name: str, **changes) -> str:
+        generator = dict(self.entity(name).params["generator"])
+        generator.update(changes)
+        return self.modify(name, generator=generator)
+
+    def volume_mesh(self, name: str) -> dict:
+        """``{"points", "tets" (m, 4), "pyramids" (k, 5), "faces" {domain id: surface cells},
+        "warnings", ...}`` (boundary nodes first, identical to the face meshes)."""
+        return self.volumes.mesh(self.store.get(name).id)
+
+    def volume_quality(self, name: str) -> dict:
+        from opengrid.model.volumes import volume_quality
+
+        return volume_quality(self.volume_mesh(name))
+
+    def volume_status(self, name: str) -> str:
+        mesh = self.volume_mesh(name)
+        text = f"{len(mesh['tets'])} tetrahedra"
+        if len(mesh["pyramids"]):
+            text += f", {len(mesh['pyramids'])} pyramids"
+        text += f", {len(mesh['points'])} points, {mesh['shells']} shell(s)"
+        if mesh["warnings"]:
+            text += "; " + "; ".join(mesh["warnings"])
+        return text
+
     # ---------------------------------------------------------------- blocks
     def create_block(
         self, faces=None, extrusion=None, name: str | None = None, smoothing=None
@@ -594,7 +643,7 @@ class Session:
 
     def is_3d(self) -> bool:
         """True when the model has blocks (exports and boundary checks are then 3D)."""
-        return bool(self.store.entities("block"))
+        return bool(self.store.entities("block")) or bool(self.store.entities("volume"))
 
     def topology(self):
         """2D: connector uses of domains. 3D models: block faces (boundary / interfaces)."""
@@ -611,36 +660,14 @@ class Session:
         boundary entities without a patch and all problems
         (opengrid.model.topology.BoundaryReport)."""
         if self.is_3d():
-            from opengrid.model.blocks import patch_faces
             from opengrid.model.topology import BoundaryReport
+            from opengrid.model.volumes import analyze_3d
 
-            topo = self.topology()
-            _assigned, issues = patch_faces(self.store, topo)
-            issues = list(topo.problems) + issues
-            for patch in self.store.entities("patch"):
-                for item in patch.params["members"]:
-                    if "connector" in item:
-                        issues.append(
-                            Issue(
-                                self.store.get(item["connector"]).name,
-                                f"is a connector in patch {patch.name}; 3D patches contain "
-                                "domains or block faces",
-                            )
-                        )
-                if patch.params["periodic"] is not None:
-                    issues.append(
-                        Issue(patch.name, "periodic pairing of 3D faces is not supported yet")
-                    )
-
-            def label(f):
-                return f"{self.store.get(f.block).name}.{f.face}"
-
-            boundary = [label(f) for f in topo.boundary]
-            interfaces = [f"{label(a)} | {label(b)}" for a, b in topo.interfaces]
-            unassigned = [
-                str(i.where) for i in issues if "is a boundary face in no patch" in i.message
-            ]
-            return BoundaryReport(boundary, interfaces, [], unassigned, issues, [])
+            result = analyze_3d(self)
+            issues = result["issues"]
+            boundary = [e["label"] for e in result["entries"]]
+            unassigned = [e["label"] for e in result["entries"] if e["patch"] is None]
+            return BoundaryReport(boundary, result["interfaces"], [], unassigned, issues, [])
         from opengrid.model.topology import validate_patches
 
         return validate_patches(self.store, self.topology(), self)
@@ -668,11 +695,12 @@ class Session:
 
         if self.is_3d():
             from opengrid.io.assembly3d import assemble_blocks
+            from opengrid.model.volumes import analyze_3d
 
             if not self.store.entities("patch") and not self.store.entities("zone"):
                 return write_vtkhdf_grid(path, assemble_blocks(self))
             self._require_valid_boundary()
-            return write_vtkhdf_collection(path, assemble_blocks(self, self.topology()))
+            return write_vtkhdf_collection(path, assemble_blocks(self, analyze_3d(self)))
         if not self.store.entities("patch") and not self.store.entities("zone"):
             names = None
             if domains is not None:
@@ -694,8 +722,9 @@ class Session:
         report = self._require_valid_boundary()
         if self.is_3d():
             from opengrid.io.assembly3d import assemble_blocks
+            from opengrid.model.volumes import analyze_3d
 
-            return write_gmsh(path, assemble_blocks(self, self.topology(), quality=False))
+            return write_gmsh(path, assemble_blocks(self, analyze_3d(self), quality=False))
         return write_gmsh(
             path, assemble(self, self.topology(), quality=False, periodic=report.periodic)
         )
@@ -707,6 +736,10 @@ class Session:
 
         report = self._require_valid_boundary()
         if self.is_3d():
+            if self.store.entities("volume"):
+                from opengrid.io.cgns import write_cgns_volumes
+
+                return write_cgns_volumes(path, self, base_name)
             return write_cgns_blocks(path, self, self.topology(), base_name)
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
@@ -714,6 +747,10 @@ class Session:
         """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1); in a model with
         blocks, the blocks (3D)."""
         if self.is_3d() and domains is None:
+            if self.store.entities("volume"):
+                raise ValidationError(
+                    [Issue("Plot3D", "holds structured blocks only; the model has volumes")]
+                )
             grids = [self.block_grid(b.name) for b in self.store.entities("block")]
             write_plot3d(path, grids, binary=binary, three_d=True)
             return
@@ -888,6 +925,7 @@ class Session:
         self.domains = DomainEvaluator(store, self.connectors)
         self.unstructured = UnstructuredEvaluator(store, self.connectors)
         self.blocks = BlockEvaluator(store, self.domains)
+        self.volumes = VolumeEvaluator(self)
         self.commands = CommandStack(store)
         for listener in listeners:
             self.commands.add_listener(listener)

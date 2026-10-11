@@ -63,7 +63,7 @@ class Scene:
         # redraw all of them together with the changed entities.
         targets = set(ids)
         for entity in self.session.store:
-            if entity.kind in ("connector", "domain", "unstructured_domain", "block"):
+            if entity.kind in ("connector", "domain", "unstructured_domain", "block", "volume"):
                 targets.add(entity.id)
         for entity_id in sorted(targets):
             self._remove_entity_actor(entity_id)
@@ -231,13 +231,25 @@ class Scene:
         self._actors[entity.id] = [name]
 
     def block_mesh(self, entity) -> pv.DataSet:
-        """The block as a structured grid, with the cut plane and shrink applied."""
-        grid = np.asarray(self.session.block_grid(entity.name))
-        mesh = pv.StructuredGrid(
-            np.ascontiguousarray(grid[..., 0].transpose(2, 1, 0)),
-            np.ascontiguousarray(grid[..., 1].transpose(2, 1, 0)),
-            np.ascontiguousarray(grid[..., 2].transpose(2, 1, 0)),
-        )
+        """The block (structured grid) or volume (tetrahedra and pyramids), with the cut plane
+        and shrink applied."""
+        if entity.kind == "volume":
+            m = self.session.volume_mesh(entity.name)
+            cells = [np.hstack([np.full((len(m["tets"]), 1), 4), m["tets"]]).ravel()]
+            types = [np.full(len(m["tets"]), pv.CellType.TETRA, dtype=np.uint8)]
+            if len(m["pyramids"]):
+                cells.append(
+                    np.hstack([np.full((len(m["pyramids"]), 1), 5), m["pyramids"]]).ravel()
+                )
+                types.append(np.full(len(m["pyramids"]), pv.CellType.PYRAMID, dtype=np.uint8))
+            mesh = pv.UnstructuredGrid(np.concatenate(cells), np.concatenate(types), m["points"])
+        else:
+            grid = np.asarray(self.session.block_grid(entity.name))
+            mesh = pv.StructuredGrid(
+                np.ascontiguousarray(grid[..., 0].transpose(2, 1, 0)),
+                np.ascontiguousarray(grid[..., 1].transpose(2, 1, 0)),
+                np.ascontiguousarray(grid[..., 2].transpose(2, 1, 0)),
+            )
         if self.quality_metric is not None:
             values = self._display_quality(entity)[self.quality_metric]
             mesh.cell_data[self.quality_metric] = values.reshape(-1)
@@ -303,8 +315,11 @@ class Scene:
         the 3D metrics, with area / area_ratio standing for volume / volume_ratio."""
         from opengrid import _core
 
-        if entity.kind == "block":
-            q = dict(self.session.block_quality(entity.name))
+        if entity.kind in ("block", "volume"):
+            if entity.kind == "volume":
+                q = dict(self.session.volume_quality(entity.name))
+            else:
+                q = dict(self.session.block_quality(entity.name))
             q["area"] = q["volume"]
             q["area_ratio"] = q["volume_ratio"]
             return q
@@ -345,7 +360,7 @@ class Scene:
         if entity.kind in ("domain", "unstructured_domain"):
             self._add_domain_actor(entity)
             return
-        if entity.kind == "block":
+        if entity.kind in ("block", "volume"):
             self._add_block_actor(entity)
             return
         if entity.kind in SURFACE_KINDS:

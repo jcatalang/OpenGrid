@@ -31,6 +31,13 @@ void write_cgns_structured_3d(const std::string&, const std::string&, const std:
   throw std::runtime_error("cgns: OpenGrid was built without the CGNS library");
 }
 
+void write_cgns_unstructured_3d(const std::string&, const std::string&,
+                                const std::vector<CgnsUnstructuredZone3D>&,
+                                const std::vector<CgnsFamily>&,
+                                const std::vector<CgnsVertexConnection>&) {
+  throw std::runtime_error("cgns: OpenGrid was built without the CGNS library");
+}
+
 #else
 
 namespace {
@@ -463,6 +470,172 @@ void write_cgns_structured_3d(const std::string& path, const std::string& base_n
     check(cg_1to1_write(file.handle, base, z, c.name.c_str(), donor.c_str(), range.data(),
                         donor_range.data(), transform.data(), &index),
           "1to1");
+  }
+  const int handle = file.handle;
+  file.handle = -1;
+  check(cg_close(handle), "close");
+}
+
+void write_cgns_unstructured_3d(const std::string& path, const std::string& base_name,
+                                const std::vector<CgnsUnstructuredZone3D>& zones,
+                                const std::vector<CgnsFamily>& families,
+                                const std::vector<CgnsVertexConnection>& vertex_connections) {
+  check_name(base_name, "base");
+  auto element_type = [](const std::string& t, int& nodes) {
+    if (t == "TETRA_4") {
+      nodes = 4;
+      return CGNS_ENUMV(TETRA_4);
+    }
+    if (t == "PYRA_5") {
+      nodes = 5;
+      return CGNS_ENUMV(PYRA_5);
+    }
+    if (t == "PENTA_6") {
+      nodes = 6;
+      return CGNS_ENUMV(PENTA_6);
+    }
+    if (t == "HEXA_8") {
+      nodes = 8;
+      return CGNS_ENUMV(HEXA_8);
+    }
+    if (t == "TRI_3") {
+      nodes = 3;
+      return CGNS_ENUMV(TRI_3);
+    }
+    if (t == "QUAD_4") {
+      nodes = 4;
+      return CGNS_ENUMV(QUAD_4);
+    }
+    throw std::invalid_argument("cgns: unknown element type '" + t + "'");
+  };
+  for (const CgnsFamily& family : families) {
+    check_name(family.name, "family");
+    if (!family.bc_type.empty()) {
+      bc_type(family.bc_type);
+    }
+  }
+  File file;
+  check(cg_open(path.c_str(), CG_MODE_WRITE, &file.handle), "open");
+  int base = 0;
+  check(cg_base_write(file.handle, base_name.c_str(), 3, 3, &base), "base");
+  check(cg_goto(file.handle, base, "end"), "goto base");
+  check(cg_dataclass_write(CGNS_ENUMV(Dimensional)), "data class");
+  check(cg_units_write(CGNS_ENUMV(Kilogram), CGNS_ENUMV(Meter), CGNS_ENUMV(Second),
+                       CGNS_ENUMV(Kelvin), CGNS_ENUMV(Radian)),
+        "units");
+  for (const CgnsFamily& family : families) {
+    int fam = 0;
+    check(cg_family_write(file.handle, base, family.name.c_str(), &fam), "family");
+    if (!family.bc_type.empty()) {
+      int fambc = 0;
+      check(cg_fambc_write(file.handle, base, fam, "FamBC", bc_type(family.bc_type), &fambc),
+            "family BC");
+    }
+  }
+  std::vector<int> zone_ids;
+  std::vector<std::string> zone_names;
+  for (const CgnsUnstructuredZone3D& zone : zones) {
+    check_name(zone.name, "zone");
+    const std::size_t nv = zone.x.size();
+    cgsize_t cells = 0;
+    for (const CgnsSection& s : zone.sections) {
+      int nodes = 0;
+      (void)element_type(s.type, nodes);
+      if (s.nodes.size() % static_cast<std::size_t>(nodes) != 0) {
+        throw std::invalid_argument("cgns: section '" + s.name + "' has a partial element");
+      }
+      for (const std::int64_t v : s.nodes) {
+        if (v < 0 || std::cmp_greater_equal(v, nv)) {
+          throw std::invalid_argument("cgns: section '" + s.name + "' refers to a missing vertex");
+        }
+      }
+      if (s.bc_family.empty()) {
+        cells += static_cast<cgsize_t>(s.nodes.size()) / nodes;
+      }
+    }
+    std::array<cgsize_t, 3> size = {static_cast<cgsize_t>(nv), cells, 0};
+    int z = 0;
+    check(cg_zone_write(file.handle, base, zone.name.c_str(), size.data(), CGNS_ENUMV(Unstructured),
+                        &z),
+          "zone");
+    for (const auto& [label, values] :
+         {std::pair{"CoordinateX", &zone.x}, std::pair{"CoordinateY", &zone.y},
+          std::pair{"CoordinateZ", &zone.z}}) {
+      int coord = 0;
+      check(cg_coord_write(file.handle, base, z, CGNS_ENUMV(RealDouble), label, values->data(),
+                           &coord),
+            label);
+      const std::array<double, 5> exponents = {0.0, 1.0, 0.0, 0.0, 0.0};
+      check(cg_goto(file.handle, base, "Zone_t", z, "GridCoordinates_t", 1, "DataArray_t", coord,
+                    "end"),
+            "goto coordinate");
+      check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents.data()), "exponents");
+    }
+    if (!zone.family.empty()) {
+      check(cg_goto(file.handle, base, "Zone_t", z, "end"), "goto zone");
+      check(cg_famname_write(zone.family.c_str()), "zone family");
+    }
+    // Volume sections first, then boundary sections (CGNS numbers volume cells first).
+    cgsize_t next = 1;
+    for (const bool boundary : {false, true}) {
+      for (const CgnsSection& s : zone.sections) {
+        if (s.bc_family.empty() == boundary) {
+          continue;
+        }
+        check_name(s.name, "section");
+        int nodes = 0;
+        const auto type = element_type(s.type, nodes);
+        const auto count = static_cast<cgsize_t>(s.nodes.size()) / nodes;
+        if (count == 0) {
+          continue;
+        }
+        std::vector<cgsize_t> data;
+        data.reserve(s.nodes.size());
+        for (const std::int64_t v : s.nodes) {
+          data.push_back(static_cast<cgsize_t>(v + 1));
+        }
+        const cgsize_t last = next + count - 1;
+        int section = 0;
+        check(cg_section_write(file.handle, base, z, s.name.c_str(), type, next, last, 0,
+                               data.data(), &section),
+              "section");
+        if (boundary) {
+          std::array<cgsize_t, 2> range = {next, last};
+          int b = 0;
+          check(cg_boco_write(file.handle, base, z, s.name.c_str(), CGNS_ENUMV(FamilySpecified),
+                              CGNS_ENUMV(PointRange), 2, range.data(), &b),
+                "BC");
+          check(cg_boco_gridlocation_write(file.handle, base, z, b, CGNS_ENUMV(FaceCenter)),
+                "BC location");
+          check(cg_goto(file.handle, base, "Zone_t", z, "ZoneBC_t", 1, "BC_t", b, "end"),
+                "goto BC");
+          check(cg_famname_write(s.bc_family.c_str()), "BC family");
+        }
+        next = last + 1;
+      }
+    }
+    zone_ids.push_back(z);
+    zone_names.push_back(zone.name);
+  }
+  CGNS_ENUMT(DataType_t) donor_data_type = CGNS_ENUMV(Integer);
+  if (sizeof(cgsize_t) == 8) {
+    donor_data_type = CGNS_ENUMV(LongInteger);
+  }
+  for (const CgnsVertexConnection& c : vertex_connections) {
+    check_name(c.name, "connection");
+    if (c.points.empty() || c.points.size() != c.donor_points.size()) {
+      throw std::invalid_argument("cgns: connection '" + c.name + "' has inconsistent points");
+    }
+    std::vector<cgsize_t> points(c.points.begin(), c.points.end());
+    std::vector<cgsize_t> donor(c.donor_points.begin(), c.donor_points.end());
+    int index = 0;
+    check(cg_conn_write(file.handle, base, zone_ids.at(static_cast<std::size_t>(c.zone)),
+                        c.name.c_str(), CGNS_ENUMV(Vertex), CGNS_ENUMV(Abutting1to1),
+                        CGNS_ENUMV(PointList), static_cast<cgsize_t>(points.size()), points.data(),
+                        zone_names.at(static_cast<std::size_t>(c.donor_zone)).c_str(),
+                        CGNS_ENUMV(Unstructured), CGNS_ENUMV(PointListDonor), donor_data_type,
+                        static_cast<cgsize_t>(donor.size()), donor.data(), &index),
+          "connectivity");
   }
   const int handle = file.handle;
   file.handle = -1;

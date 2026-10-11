@@ -617,6 +617,53 @@ segment, so derivative jumps at knots never cost accuracy.
     layers are reported as warnings.
   - Cylinder demo: radii exact to 1e-9, first cell exactly 1e-3, worst SJ 0.9997.
 
+### 3D unstructured volumes (Phase 8a)
+- **Unstructured domains in 3D** (`model/frames.py`):
+  - The 2D meshers run in a frame: the identity for z = const (2D models are unchanged); an
+    SVD plane frame for other planar domains (planarity checked); for domains on a `surface`,
+    the projected (u, v) scaled by the mean tangent lengths (a constant metric correction).
+  - Frames are flipped so the outer loop is counter-clockwise. Interior points map back to the
+    plane or surface; boundary points stay bitwise the connector nodes.
+  - 3D face metrics: `model/face_quality.py` (angles in 3D, signed by the Newell normal; equal
+    to the planar metrics on z = const domains).
+- **Volumes** (`model/volumes.py`, entity `volume`): the faces (domains) are merged by exact
+  coordinates, then:
+  - watertightness: every edge used exactly twice; open and non-manifold edges are reported
+    with the domains;
+  - shells are oriented consistently (propagation across edges);
+  - the largest shell points outward and inner shells (bodies) inward, so normals point out of
+    the region.
+- **Pyramids:**
+  - `"auto"`: quads of faces shared with structured blocks become pyramids (apex at 0.3 h
+    inward); other quads are split into triangles.
+  - Pyramids on two faces meeting at an edge leave thin tetrahedra between them (minimum
+    dihedral about 2.6°, measured on a box); that is why "auto" avoids them on plain
+    boundaries.
+  - At 0.5 h the pyramid sides on right-angled edges coincide, and Netgen stops with
+    "boundary mesh is overlapping".
+  - Netgen's own quad handling failed ("mesh has still open quads").
+- **Backend:**
+  - `TetBackend` is a Python class, a change from the C++ interface planned in §7. The
+    Netgen backend uses `netgen.meshing` (conda-forge `netgen`, LGPL-2.1, dynamic, optional):
+    surface triangles with `domin = 1`, `GenerateVolumeMesh(maxh, grading)`.
+  - Boundary points must come back first and unchanged (checked). Tetrahedra are flipped to
+    positive volume. mmg is not on conda-forge for osx-arm64 (deferred to 8c, source build).
+- **Volume quality** (vectorised NumPy):
+  - scaled Jacobian (regular tet / square pyramid = 1), radius-ratio aspect, dihedral angles;
+  - non-orthogonality and volume ratio across faces (paired by sorted vertex triples).
+
+  A first version looped in Python and took 19 s for 118 k tetrahedra; it now takes 0.4 s.
+- **3D topology** (`analyze_3d`):
+  - Block faces and volume faces are combined. A domain bounding one block or volume is a
+    boundary; two make an interface (including a block face shared with a volume).
+  - Patch members are domains or block faces.
+- **Exports:**
+  - VTKHDF and Gmsh: mixed hexahedra, tetrahedra and pyramids, with triangle/quad boundary
+    faces.
+  - CGNS `write_cgns_unstructured_3d`: TETRA_4/PYRA_5 sections; boundary TRI_3/QUAD_4
+    sections with BC_t at FaceCenter; vertex connectivity between volumes. Models with both
+    blocks and volumes in CGNS are deferred to 8c.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

@@ -195,11 +195,6 @@ def test_hybrid_conformity_and_exports(tmp_path):
 
 def test_unsupported_exports_are_reported(tmp_path):
     og = hybrid()
-    from opengrid import _core
-
-    if _core.cgns_available():
-        with pytest.raises(opengrid.ValidationError, match="CGNS export of unstructured domains"):
-            og.export_cgns(tmp_path / "h.cgns")
     with pytest.raises(opengrid.ValidationError, match="Plot3D holds structured blocks only"):
         og.export_plot3d(tmp_path / "h.xyz")
 

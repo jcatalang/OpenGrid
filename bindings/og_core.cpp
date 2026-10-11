@@ -30,11 +30,13 @@
 #include "opengrid/core/geom/polyline.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality2d.hpp"
+#include "opengrid/core/quality/quality_cells.hpp"
 #include "opengrid/core/quality/quality_tri.hpp"
 #include "opengrid/core/structured/elliptic.hpp"
 #include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/topo/connector_nodes.hpp"
 #include "opengrid/core/unstructured/advancing_front.hpp"
+#include "opengrid/core/unstructured/domain_mesher.hpp"
 #include "opengrid/core/unstructured/triangulate.hpp"
 #include "opengrid/core/version.hpp"
 
@@ -440,6 +442,91 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
 
   m.def("cgns_available", &og::cgns_available, "True if built with the CGNS library.");
   m.def(
+      "write_cgns_2d",
+      [](const std::string& path, const std::string& base_name,
+         const std::vector<std::tuple<std::string, int, int, std::vector<double>,
+                                      std::vector<double>, std::string>>& zones,
+         const std::vector<std::tuple<
+             std::string, std::vector<double>, std::vector<double>,
+             nb::ndarray<const std::int64_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>,
+             nb::ndarray<const std::int64_t, nb::shape<-1, 4>, nb::c_contig, nb::device::cpu>,
+             std::string>>& unstructured_zones,
+         const std::vector<std::tuple<std::string, std::string>>& families,
+         const std::vector<std::tuple<int, std::string, std::string, std::array<int, 4>>>& bcs,
+         const std::vector<std::tuple<int, std::string, std::string,
+                                      std::vector<std::array<std::int64_t, 2>>>>& edge_bcs,
+         const std::vector<std::tuple<int, std::string, int, std::array<int, 4>, std::array<int, 4>,
+                                      std::array<int, 2>, std::optional<std::array<double, 2>>>>&
+             connections,
+         const std::vector<
+             std::tuple<int, std::string, int, std::vector<std::int64_t>, std::vector<std::int64_t>,
+                        std::optional<std::array<double, 2>>>>& vertex_connections) {
+        std::vector<og::CgnsZone> z;
+        z.reserve(zones.size());
+        for (const auto& [name, ni, nj, x, y, family] : zones) {
+          z.push_back({name, ni, nj, x, y, family});
+        }
+        std::vector<og::CgnsUnstructuredZone> uz;
+        uz.reserve(unstructured_zones.size());
+        for (const auto& [name, x, y, triangles, quads, family] : unstructured_zones) {
+          og::CgnsUnstructuredZone zone{name, x, y, {}, {}, family};
+          for (std::size_t k = 0; k < triangles.shape(0); ++k) {
+            zone.triangles.push_back({triangles(k, 0), triangles(k, 1), triangles(k, 2)});
+          }
+          for (std::size_t k = 0; k < quads.shape(0); ++k) {
+            zone.quads.push_back({quads(k, 0), quads(k, 1), quads(k, 2), quads(k, 3)});
+          }
+          uz.push_back(std::move(zone));
+        }
+        std::vector<og::CgnsFamily> f;
+        f.reserve(families.size());
+        for (const auto& [name, bc_type] : families) {
+          f.push_back({name, bc_type});
+        }
+        std::vector<og::CgnsBoundary> b;
+        b.reserve(bcs.size());
+        for (const auto& [zone, name, family, range] : bcs) {
+          b.push_back({zone, name, family, range});
+        }
+        std::vector<og::CgnsEdgeBoundary> eb;
+        eb.reserve(edge_bcs.size());
+        for (const auto& [zone, name, family, edges] : edge_bcs) {
+          eb.push_back({zone, name, family, edges});
+        }
+        std::vector<og::CgnsConnection> c;
+        for (const auto& [zone, name, donor, range, donor_range, transform, translation] :
+             connections) {
+          og::CgnsConnection connection{zone, name, donor, range, donor_range, transform};
+          if (translation) {
+            connection.periodic = true;
+            connection.translation = *translation;
+          }
+          c.push_back(connection);
+        }
+        std::vector<og::CgnsVertexConnection> vc;
+        for (const auto& [zone, name, donor, points, donor_points, translation] :
+             vertex_connections) {
+          og::CgnsVertexConnection connection{zone, name, donor, points, donor_points};
+          if (translation) {
+            connection.periodic = true;
+            connection.translation = *translation;
+          }
+          vc.push_back(connection);
+        }
+        const nb::gil_scoped_release release;
+        og::write_cgns_2d(path, base_name, z, uz, f, b, eb, c, vc);
+      },
+      nb::arg("path"), nb::arg("base_name"), nb::arg("zones"), nb::arg("unstructured_zones"),
+      nb::arg("families"), nb::arg("boundaries"), nb::arg("edge_boundaries"),
+      nb::arg("connections"), nb::arg("vertex_connections"),
+      "Write a 2D CGNS file with structured and unstructured zones. unstructured_zones: (name, x, "
+      "y, triangles (m, 3), quads (k, 4), family), 0-based vertex ids; edge_boundaries: "
+      "(unstructured zone index, name, family, [(v0, v1), ...]); vertex_connections: (zone, name, "
+      "donor zone, points, donor points, periodic translation or None) with global zone indices "
+      "(structured first) and 1-based points ((i, j) pairs for structured zones). Other "
+      "arguments as write_cgns_structured_2d.");
+
+  m.def(
       "write_cgns_structured_2d",
       [](const std::string& path, const std::string& base_name,
          const std::vector<std::tuple<std::string, int, int, std::vector<double>,
@@ -582,6 +669,149 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       },
       nb::arg("points"), nb::arg("triangles"),
       "Per-triangle quality metrics, each of shape (1, m) (same keys as quality_2d).");
+
+  m.def(
+      "quality_cells",
+      [](const nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>&
+             triangles,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 4>, nb::c_contig, nb::device::cpu>&
+             quads) {
+        std::vector<std::array<double, 2>> p;
+        p.reserve(points.shape(0));
+        for (std::size_t k = 0; k < points.shape(0); ++k) {
+          p.push_back({points(k, 0), points(k, 1)});
+        }
+        std::vector<std::array<std::int64_t, 3>> t;
+        t.reserve(triangles.shape(0));
+        for (std::size_t k = 0; k < triangles.shape(0); ++k) {
+          t.push_back({triangles(k, 0), triangles(k, 1), triangles(k, 2)});
+        }
+        std::vector<std::array<std::int64_t, 4>> qd;
+        qd.reserve(quads.shape(0));
+        for (std::size_t k = 0; k < quads.shape(0); ++k) {
+          qd.push_back({quads(k, 0), quads(k, 1), quads(k, 2), quads(k, 3)});
+        }
+        const og::Quality2D q = og::quality_cells(p, t, qd);
+        const auto n = static_cast<int>(t.size() + qd.size());
+        std::map<std::string, CellsOut> out;
+        out.emplace("scaled_jacobian", cells_to(q.scaled_jacobian, n, 1));
+        out.emplace("skewness", cells_to(q.skewness, n, 1));
+        out.emplace("aspect_ratio", cells_to(q.aspect_ratio, n, 1));
+        out.emplace("min_angle", cells_to(q.min_angle, n, 1));
+        out.emplace("max_angle", cells_to(q.max_angle, n, 1));
+        out.emplace("non_orthogonality", cells_to(q.non_orthogonality, n, 1));
+        out.emplace("area_ratio", cells_to(q.area_ratio, n, 1));
+        out.emplace("area", cells_to(q.area, n, 1));
+        return out;
+      },
+      nb::arg("points"), nb::arg("triangles"), nb::arg("quads"),
+      "Per-cell quality metrics of a triangle/quad mesh (triangles first, then quads), each of "
+      "shape (1, m) (same keys as quality_2d).");
+
+  m.def(
+      "mesh_domain",
+      [](const nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>&
+             segments,
+         const std::string& algorithm, const std::string& element_type, bool refine,
+         double min_angle, double growth_rate, std::optional<double> max_size,
+         const std::vector<std::tuple<double, double, double, double, double, double>>& sources,
+         std::int64_t max_points, const std::string& smoothing, int smoothing_iterations,
+         bool edge_swap) {
+        og::DomainMeshOptions options;
+        if (algorithm == "delaunay") {
+          options.algorithm = og::TriangleAlgorithm::delaunay;
+        } else if (algorithm == "advancing_front") {
+          options.algorithm = og::TriangleAlgorithm::advancing_front;
+        } else {
+          throw std::invalid_argument("algorithm must be 'delaunay' or 'advancing_front'");
+        }
+        if (element_type == "triangles") {
+          options.element_type = og::ElementType::triangles;
+        } else if (element_type == "quad_dominant") {
+          options.element_type = og::ElementType::quad_dominant;
+        } else if (element_type == "quads") {
+          options.element_type = og::ElementType::quads;
+        } else {
+          throw std::invalid_argument(
+              "element_type must be 'triangles', 'quad_dominant' or 'quads'");
+        }
+        if (smoothing == "none") {
+          options.smoothing.method = og::SmoothingMethod::none;
+        } else if (smoothing == "laplacian") {
+          options.smoothing.method = og::SmoothingMethod::laplacian;
+        } else if (smoothing == "length_weighted") {
+          options.smoothing.method = og::SmoothingMethod::length_weighted;
+        } else if (smoothing == "angle_based") {
+          options.smoothing.method = og::SmoothingMethod::angle_based;
+        } else {
+          throw std::invalid_argument(
+              "smoothing must be 'none', 'laplacian', 'length_weighted' or 'angle_based'");
+        }
+        options.smoothing.iterations = smoothing_iterations;
+        options.smoothing.edge_swap = edge_swap;
+        og::TriangulationInput input;
+        for (std::size_t k = 0; k < points.shape(0); ++k) {
+          input.points.push_back({points(k, 0), points(k, 1)});
+        }
+        for (std::size_t k = 0; k < segments.shape(0); ++k) {
+          input.segments.push_back({segments(k, 0), segments(k, 1)});
+        }
+        options.refinement.refine = refine;
+        options.refinement.min_angle_deg = min_angle;
+        options.refinement.size.growth_rate = growth_rate;
+        options.refinement.size.max_size = max_size;
+        for (const auto& [x0, y0, x1, y1, size, radius] : sources) {
+          options.refinement.size.sources.push_back({{x0, y0}, {x1, y1}, size, radius});
+        }
+        options.refinement.max_points = max_points;
+        og::MixedMesh mesh;
+        {
+          const nb::gil_scoped_release release;
+          mesh = og::mesh_domain(input, options);
+        }
+        auto* xy = new double[mesh.points.size() * 2];
+        for (std::size_t k = 0; k < mesh.points.size(); ++k) {
+          xy[2 * k] = mesh.points[k][0];
+          xy[2 * k + 1] = mesh.points[k][1];
+        }
+        auto* tri = new std::int64_t[mesh.triangles.size() * 3];
+        for (std::size_t k = 0; k < mesh.triangles.size(); ++k) {
+          for (std::size_t j = 0; j < 3; ++j) {
+            tri[3 * k + j] = mesh.triangles[k][j];
+          }
+        }
+        auto* quad = new std::int64_t[mesh.quads.size() * 4];
+        for (std::size_t k = 0; k < mesh.quads.size(); ++k) {
+          for (std::size_t j = 0; j < 4; ++j) {
+            quad[4 * k + j] = mesh.quads[k][j];
+          }
+        }
+        const nb::capsule own_xy(xy,
+                                 [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+        const nb::capsule own_tri(
+            tri, [](void* ptr) noexcept { delete[] static_cast<std::int64_t*>(ptr); });
+        const nb::capsule own_quad(
+            quad, [](void* ptr) noexcept { delete[] static_cast<std::int64_t*>(ptr); });
+        return std::make_tuple(
+            nb::ndarray<nb::numpy, double, nb::ndim<2>>(xy, {mesh.points.size(), 2}, own_xy),
+            nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>>(tri, {mesh.triangles.size(), 3},
+                                                              own_tri),
+            nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>>(quad, {mesh.quads.size(), 4},
+                                                              own_quad),
+            mesh.rejected, mesh.warnings);
+      },
+      nb::arg("points"), nb::arg("segments"), nb::arg("algorithm") = "delaunay",
+      nb::arg("element_type") = "triangles", nb::arg("refine") = true, nb::arg("min_angle") = 25.0,
+      nb::arg("growth_rate") = 1.2, nb::arg("max_size") = nb::none(),
+      nb::arg("sources") = nb::list(), nb::arg("max_points") = 20'000'000,
+      nb::arg("smoothing") = "none", nb::arg("smoothing_iterations") = 5,
+      nb::arg("edge_swap") = true,
+      "Mesh a 2D domain bounded by oriented segments (domain on the left): triangulation "
+      "(algorithm), element type ('triangles', 'quad_dominant', 'quads'), smoothing ('none', "
+      "'laplacian', 'length_weighted', 'angle_based') with optional edge swapping, untangling. "
+      "Returns (points (n, 2), triangles (m, 3), quads (k, 4), rejected, warnings).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

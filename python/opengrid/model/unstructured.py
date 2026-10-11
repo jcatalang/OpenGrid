@@ -1,6 +1,8 @@
 """Unstructured 2D domains: an outer loop and optional inner loops (holes) of connectors,
 triangulated by the C++ meshers (opengrid._core.triangulate): constrained Delaunay with
-refinement (algorithm "delaunay", the default) or advancing front ("advancing_front").
+refinement (algorithm "delaunay", the default) or advancing front ("advancing_front"), then
+optionally recombined into quad-dominant or all-quad meshes, smoothed, edge-swapped and untangled
+(opengrid._core.mesh_domain). Cells are numbered triangles first, then quads.
 
 Loops are closed chains of connectors (each possibly reversed). The outer loop runs
 counter-clockwise and inner loops clockwise, i.e. the domain lies on the left of every loop.
@@ -20,6 +22,8 @@ from opengrid.model.domains import _edge_item, _signed_area, _tolerance, edge_po
 from opengrid.validation import Issue, ValidationError
 
 ALGORITHMS = ("delaunay", "advancing_front")
+ELEMENT_TYPES = ("triangles", "quad_dominant", "quads")
+SMOOTHING_METHODS = ("none", "laplacian", "length_weighted", "angle_based")
 
 DEFAULT_GENERATOR = {
     "algorithm": "delaunay",
@@ -29,6 +33,10 @@ DEFAULT_GENERATOR = {
     "max_size": None,
     "sources": (),
     "max_points": 2_000_000,
+    "element_type": "triangles",
+    "smoothing": "none",
+    "smoothing_iterations": 5,
+    "edge_swap": True,
 }
 
 
@@ -72,6 +80,30 @@ def normalize_generator(raw, where: str) -> dict:
                 f"{label}.algorithm", f"must be one of {', '.join(ALGORITHMS)}, got {algorithm!r}"
             )
         )
+    element_type = merged["element_type"]
+    if element_type not in ELEMENT_TYPES:
+        issues.append(
+            Issue(
+                f"{label}.element_type",
+                f"must be one of {', '.join(ELEMENT_TYPES)}, got {element_type!r}",
+            )
+        )
+    smoothing = merged["smoothing"]
+    if smoothing not in SMOOTHING_METHODS:
+        issues.append(
+            Issue(
+                f"{label}.smoothing",
+                f"must be one of {', '.join(SMOOTHING_METHODS)}, got {smoothing!r}",
+            )
+        )
+    iterations = merged["smoothing_iterations"]
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 0:
+        issues.append(
+            Issue(f"{label}.smoothing_iterations", f"must be an integer >= 0, got {iterations!r}")
+        )
+    edge_swap = merged["edge_swap"]
+    if not isinstance(edge_swap, bool):
+        issues.append(Issue(f"{label}.edge_swap", f"must be true or false, got {edge_swap!r}"))
     refine = merged["refine"]
     if not isinstance(refine, bool):
         issues.append(Issue(f"{label}.refine", f"must be true or false, got {refine!r}"))
@@ -110,6 +142,10 @@ def normalize_generator(raw, where: str) -> dict:
         "max_size": max_size,
         "sources": tuple(sources),
         "max_points": max_points,
+        "element_type": element_type,
+        "smoothing": smoothing,
+        "smoothing_iterations": iterations,
+        "edge_swap": edge_swap,
     }
 
 
@@ -315,16 +351,20 @@ class UnstructuredEvaluator:
                 )
             )
         try:
-            xy, triangles, rejected, warnings = _core.triangulate(
+            xy, triangles, quads, rejected, warnings = _core.mesh_domain(
                 np.ascontiguousarray(points[:, :2]),
                 segments,
+                algorithm=generator["algorithm"],
+                element_type=generator["element_type"],
                 refine=generator["refine"],
                 min_angle=generator["min_angle"],
                 growth_rate=generator["growth_rate"],
                 max_size=generator["max_size"],
                 sources=sources,
                 max_points=generator["max_points"],
-                algorithm=generator["algorithm"],
+                smoothing=generator["smoothing"],
+                smoothing_iterations=generator["smoothing_iterations"],
+                edge_swap=generator["edge_swap"],
             )
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None
@@ -336,6 +376,7 @@ class UnstructuredEvaluator:
         result = {
             "points": xyz,
             "triangles": triangles,
+            "quads": quads,
             "rejected": int(rejected),
             "warnings": list(warnings),
         }

@@ -343,7 +343,12 @@ class Session:
         entity = self.store.get(name)
         if entity.kind == "unstructured_domain":
             mesh = self.unstructured_mesh(name)
-            text = f"{len(mesh['triangles'])} triangles, {len(mesh['points'])} points"
+            parts = []
+            if len(mesh["triangles"]) or not len(mesh["quads"]):
+                parts.append(f"{len(mesh['triangles'])} triangles")
+            if len(mesh["quads"]):
+                parts.append(f"{len(mesh['quads'])} quads")
+            text = f"{', '.join(parts)}, {len(mesh['points'])} points"
             if mesh["rejected"]:
                 text += f" ({mesh['rejected']} refinement points rejected near the boundary)"
             return text
@@ -351,12 +356,12 @@ class Session:
 
     def domain_quality(self, name: str) -> dict:
         """Per-cell quality metrics: arrays of shape (nj - 1, ni - 1) for structured domains,
-        (1, m) for unstructured ones."""
+        (1, m) for unstructured ones (triangles first, then quads)."""
         entity = self.store.get(name)
         if entity.kind == "unstructured_domain":
             mesh = self.unstructured_mesh(name)
-            return _core.quality_triangles(
-                np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"]
+            return _core.quality_cells(
+                np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"], mesh["quads"]
             )
         return _core.quality_2d(self.domain_grid(name))
 

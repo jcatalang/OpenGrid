@@ -624,7 +624,10 @@ class MainWindow(QMainWindow):
     def _cell_corners(self, name: str, j: int, i: int) -> np.ndarray:
         if self.session.store.get(name).kind == "unstructured_domain":
             mesh = self.session.unstructured_mesh(name)
-            return mesh["points"][mesh["triangles"][i]]
+            n = len(mesh["triangles"])
+            if i < n:
+                return mesh["points"][mesh["triangles"][i]]
+            return mesh["points"][mesh["quads"][i - n]]
         grid = self.session.domain_grid(name, compute=False)
         return np.array([grid[j, i], grid[j, i + 1], grid[j + 1, i + 1], grid[j + 1, i]])
 

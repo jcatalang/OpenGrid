@@ -69,7 +69,17 @@ Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(ma
   a warning.
 - Selectable per domain (`generator.algorithm`) in the API, projects, journal and GUI.
 
-## Phase 5c — Quad-dominant / all-quad, smoothing and edge swapping; CGNS unstructured zones.
+## Phase 5c — Quad-dominant / all-quad, smoothing and edge swapping; CGNS unstructured zones
+- Element types `triangles`, `quad_dominant`, `quads` per domain (API, projects, journal, GUI).
+- Every mesh: boundary nodes are the connector nodes, each boundary segment present exactly once,
+  exact area, scaled Jacobian > 0 for every cell, deterministic.
+- All-quad: no triangles at all. A loop with an odd number of segments is reported (an all-quad
+  mesh of it does not exist).
+- Smoothing (Laplacian, length-weighted, angle-based) improves mean quality and never lowers the
+  worst cell; edge swapping; untangling repairs inverted cells.
+- CGNS: unstructured zones (element sections, BCs as BAR_2 sections at EdgeCenter) and vertex
+  connectivity with structured zones and for periodic pairs; cgnscheck clean.
+- 1 M cells < 10 s for every element type.
 
 ## Phase 6 — 2D inflation (hybrid)
 - First-cell height and growth rate achieved (relative error < 1e-6 on straight walls, < 2% on curved walls).

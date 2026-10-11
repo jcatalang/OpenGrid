@@ -6,6 +6,9 @@ add_library(og_core STATIC
   src/unstructured/size_field.cpp
   src/unstructured/triangulate.cpp
   src/unstructured/advancing_front.cpp
+  src/unstructured/recombine.cpp
+  src/unstructured/smoothing.cpp
+  src/unstructured/domain_mesher.cpp
   src/dist/distribution.cpp
   src/dist/geometric.cpp
   src/dist/vinokur.cpp
@@ -21,6 +24,7 @@ add_library(og_core STATIC
   src/structured/elliptic.cpp
   src/quality/quality2d.cpp
   src/quality/quality_tri.cpp
+  src/quality/quality_cells.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 

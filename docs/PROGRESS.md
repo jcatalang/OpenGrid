@@ -1,6 +1,6 @@
 # OpenGrid — Progress log
 
-## Phase 0 — Kickoff and scaffold (2026-10-11) — awaiting review
+## Phase 0 — Kickoff and scaffold (2026-10-11) — approved
 - Docs: `docs/ARCHITECTURE.md` (layout, licenses, build, C++/Python boundary, command/undo/journal,
   `.ogp` v1 schema, tet backend decision, spec risks), `docs/ROADMAP.md`.
 - Scaffold: CMake + presets + scikit-build-core; `og_core` library; nanobind module `opengrid._core`
@@ -25,7 +25,7 @@
 - conda-forge `clang-tools` lacks clang builtin headers, so clang-tidy needs
   `--extra-arg=-resource-dir=$(clang++ -print-resource-dir)` (see CLAUDE.md).
 
-## Phase 1 — 2D geometry kernel + project I/O (2026-10-11) — awaiting review
+## Phase 1 — 2D geometry kernel + project I/O (2026-10-11) — approved
 - **C++ core (`core/…/geom`, `util`)**: `Curve` base class (eval, d1, d2, breakpoints, arc
   length, arc-length inversion, closest-point projection, adaptive tessellation). Line, Arc,
   Polyline, CubicSpline (natural / clamped / Catmull-Rom, Hermite form on chord-length knots)
@@ -82,7 +82,7 @@
   runs leak-free with it enabled (`OG_LEAK_WARNINGS=1`).
 - CI not run (no remote).
 
-## Phase 2 — Connectors and distributions (2026-10-11) — awaiting review
+## Phase 2 — Connectors and distributions (2026-10-11) — approved
 - **C++**:
   - Distributions: uniform; geometric (begin, end or growth ratio); tanh and sine, one- and
     two-sided. Discrete end-spacing matching, and fallbacks with warnings.
@@ -142,7 +142,7 @@
   them among the GUI edit tools); they're candidates for Phase 3 prep.
 - Interaction was not tested with a real mouse or trackpad. CI not run (no remote).
 
-## Phase 3 — Structured 2D domains + first export (2026-10-11) — awaiting review
+## Phase 3 — Structured 2D domains + first export (2026-10-11) — approved
 - **C++**:
   - `tfi_linear` (Soni arc-length blending) and `tfi_hermite` (wall-orthogonal).
   - `smooth_elliptic`: Laplace / Thomas–Middlecoff / TTM controls, Steger–Sorenson wall
@@ -222,7 +222,7 @@
   - With connectors present, snapping in the creation tools crashed (regression test added).
   - Line SOR was unstable with explicit sources.
 
-## Phase 4 — Patches, zones, solver-ready export (2026-10-11) — awaiting review
+## Phase 4 — Patches, zones, solver-ready export (2026-10-11) — approved
 - **Model**:
   - `patch` and `zone` entities: validation, dependency protection, journal and `.ogp`
     sections.
@@ -373,3 +373,58 @@
   Delaunay-fallback path for leftover edges is covered by code but never triggered in the tests.
 - **Speed:** the advancing front is about 2× slower than Delaunay at 1 M triangles.
 - **Status label:** clipped in the GUI property panel (pre-existing).
+
+## Phase 5c — Quad-dominant / all-quad, smoothing, edge swapping, CGNS unstructured (2026-10-11) — approved
+- **C++:**
+  - `quality_cells` (mixed metrics); `recombine` (greedy + augmenting paths);
+    `smoothing` (Laplacian / length-weighted / angle-based, guarded, edge swapping, untangling);
+  - `domain_mesher` (pipeline; all-quad via coarse boundary + subdivision);
+  - `write_cgns_2d` (unstructured zones, BAR_2 BCs, vertex connectivity, periodic).
+- **Python / GUI:**
+  - New generator keys `element_type`, `smoothing`, `smoothing_iterations`, `edge_swap`,
+    validated, saved and journaled; older projects keep their meshes.
+  - Mesh dict gains `quads`.
+  - Quality, picking, worst cell, model tree and status handle quads.
+  - Gmsh/VTKHDF write mixed cells.
+  - CGNS writes hybrid and unstructured meshes; Plot3D still refuses unstructured domains.
+  - GUI editor: element type, smoothing method, iterations, edge swapping.
+- **Demo** `examples/05c_quads.py`: NACA 0012 in R = 20 c (advancing front + angle-based
+  smoothing).
+
+  | Element type | Cells | Min SJ | Mean SJ |
+  |---|---|---|---|
+  | Triangles | 7490 | 0.624 | 0.913 |
+  | Quad-dominant | 3641 quads + 208 triangles | 0.668 | 0.888 |
+  | All-quad | 10760 quads | 0.683 | 0.920 |
+
+  - Hybrid O-ring + all-quad outside: 7208 quads, min SJ 0.665.
+  - cgnscheck, Gmsh 4.12 and meshio read everything clean.
+  - Outputs: `05c_quads.png`, `phase5c_main_window.png`, CGNS / msh / VTKHDF, projects,
+    journals.
+
+### Verified
+- `ctest`: 88/88 (`-Werror`); clang-tidy: 0 findings. Covered:
+  - right-triangle pairs → exact squares;
+  - quad-dominant annulus: conforming, exact area, ≥ 90% of the area in convex quads;
+  - all-quad annulus with both triangulators: no triangles, conforming, exact area, min SJ > 0.3;
+  - odd loop rejected; determinism;
+  - triangles without smoothing = Phase 5a output;
+  - all three smoothing methods: worst kept, mean improved, boundary fixed;
+  - untangling repairs a node thrown across its ring.
+- `pytest`: 215/215 (+9). Covered:
+  - quad-dominant / all-quad annulus: area, SJ > 0, conformity, boundary nodes;
+  - even-loop check; generator validation, save/load, replay; smoothing;
+  - CGNS hybrid for all three element types (structure, coordinates, BAR_2 ranges,
+    EdgeCenter, interface point lists matching coordinates, cgnscheck);
+  - periodic unstructured channel (triangles and quads) in CGNS (translated point lists) and
+    Gmsh.
+- 1 M-cell benchmark: every element type in 1.2–3.4 s.
+
+### Not verified / known limitations
+- **All-quad parity:** needs an even number of segments on each loop. Two odd loops (even
+  total) are not handled; loops touching at a point are rejected.
+- **Quad-dominant:** is not guaranteed to be all-quad (2–8% triangles).
+- **No angle guarantee for quads:** quality is measured (min SJ 0.45–0.68 in tests and demos),
+  not proven.
+- **Plot3D:** still structured only.
+- **GUI:** the property panel's status label clipping (pre-existing) remains.

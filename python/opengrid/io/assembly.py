@@ -115,18 +115,21 @@ def assemble(
             mesh = session.unstructured_mesh(entity.name)
             pool.append(mesh["points"])
             tris = mesh["triangles"] + offset
+            quads = mesh["quads"] + offset
             cells.extend(tris)
+            cells.extend(quads)
             types.append(np.full(len(tris), VTK_TRIANGLE, dtype=np.uint8))
+            types.append(np.full(len(quads), VTK_QUAD, dtype=np.uint8))
+            count = len(tris) + len(quads)
             cell_ij.append(
-                np.stack([np.arange(len(tris)), np.full(len(tris), -1)], axis=1).astype(np.int32)
+                np.stack([np.arange(count), np.full(count, -1)], axis=1).astype(np.int32)
             )
             metrics = None
             if quality:
-                metrics = _core.quality_triangles(
-                    np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"]
+                metrics = _core.quality_cells(
+                    np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"], mesh["quads"]
                 )
             offset += len(mesh["points"])
-            count = len(tris)
         cell_domain.append(np.full(count, number, dtype=np.int32))
         cell_zone.append(np.full(count, domain_zone[entity.name], dtype=np.int32))
         if metrics is not None:

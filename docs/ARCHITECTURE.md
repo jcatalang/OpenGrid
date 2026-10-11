@@ -419,6 +419,62 @@ segment, so derivative jumps at knots never cost accuracy.
     stage B); it handles the 16% of tests the filter cannot decide in near-equilateral meshes.
   - Delaunay on a 6000-node disc: 2.8 s → 0.3 s, same mesh.
 
+### Quads, smoothing, CGNS unstructured zones (Phase 5c)
+- **Pipeline** (`unstructured/domain_mesher.cpp`): triangulation (Delaunay or advancing front),
+  then by `generator.element_type`:
+  - `triangles`: kept as is;
+  - `quad_dominant`: recombined (`recombine.cpp`);
+  - `quads`: coarse mesh + recombination + subdivision.
+
+  Then the requested smoothing (with edge swapping), then untangling. With `smoothing = "none"`
+  and triangles, the output is bit-identical to Phase 5a/5b (tested).
+- **Recombination.** Greedy matching of triangle pairs by Remacle's quad quality η (only strictly
+  convex quads with η ≥ 0.3), then bounded augmenting paths (≤ 4 matched pairs) to cut the
+  leftover triangles. Typically 2–8% of cells stay triangles.
+  - Blossom-Quad's minimum-cost perfect matching was not used: it needs Edmonds' weighted
+    blossom algorithm, a large piece of code, and a perfect matching does not always exist on a
+    given triangulation.
+- **All-quad** ("recombine, then subdivide", as Gmsh's full-quad option):
+  1. Mesh a coarse boundary made of every second node of each loop, at twice the target size.
+  2. Recombine.
+  3. Split every triangle into 3 quads and every quad into 4. The midpoint of a coarse boundary
+     edge is the skipped connector node, so the boundary is exactly the connector nodes.
+  4. Smooth the new nodes with three guarded Laplacian sweeps.
+
+  Requirements and choices:
+  - Each loop must have an even number of segments. This is stricter than the necessary
+    condition (an even total); two odd loops are not handled.
+  - Loops touching at a point are rejected for `quads`.
+  - The quad-dominant leftovers become 3 quads each, so no triangles remain.
+- **Smoothing** (`smoothing.cpp`, Gauss–Seidel over free nodes):
+  - Methods: Laplacian, length-weighted, and angle-based (Zhou–Shimada 2000).
+  - Every move is guarded on the worst signed scaled Jacobian around the node, so smoothing
+    never inverts a cell or worsens the worst cell.
+  - Edge swapping (Delaunay flips between triangle pairs; boundary segments fixed) after each
+    sweep.
+  - Untangling: compass search on the worst signed scaled Jacobian, started from the
+    neighbours' centre. A cell that stays bad produces a warning, never a silent result.
+- **Quality.** `quality_cells` computes all 2D metrics for mixed meshes (triangles first, then
+  quads; the same definitions as structured quads). `quality_triangles` delegates to it.
+- **CGNS** (`io/cgns_structured.cpp` → `write_cgns_2d`; the structured function is a wrapper):
+  - Unstructured zones get `TRI_3`/`QUAD_4` sections numbered 1.., then one `BAR_2` section
+    per BC. The BC_t is a PointRange of those bars with GridLocation EdgeCenter (SIDS face BCs
+    for CellDim 2).
+  - Interfaces and periodic pairs involving an unstructured zone use GridConnectivity_t
+    (Abutting1to1, Vertex, PointList/PointListDonor, (i, j) pairs on the structured side;
+    periodic translation as for 1-to-1).
+  - Vertex numbers come from an exact coordinate lookup (boundary points are the connector
+    nodes bitwise).
+  - cgnscheck reports no warnings or errors on the tests and demos.
+- **Measured at 1 M cells** (disc, uniform size):
+
+  | Triangulation | Element type | Cells | Time | Min SJ |
+  |---|---|---|---|---|
+  | Delaunay | triangles | 1.41 M | 1.2 s | 0.58 |
+  | Delaunay | quad-dominant | 0.74 M (8% triangles) | 2.9 s | 0.45 |
+  | Delaunay | all-quad | 0.72 M | 2.3 s | 0.46 |
+  | Advancing front | all-quad | 0.57 M | 2.0 s | 0.62 (mean 0.89) |
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

@@ -32,7 +32,7 @@ from opengrid.model.domains import (
 )
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.model.patches import PATCH_TYPES
-from opengrid.model.unstructured import ALGORITHMS
+from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
 from opengrid.validation import ValidationError
 
 # Field editors per kind: (parameter, editor type). Types: vec3, opt_vec3, number, integer,
@@ -355,6 +355,18 @@ class UnstructuredEditor(QWidget):
         self.sources.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.sources.setPlaceholderText("x0 y0 size radius  |  x0 y0 x1 y1 size radius")
         self.sources.setMaximumHeight(60)
+        self.element_type = QComboBox()
+        self.element_type.addItems(list(ELEMENT_TYPES))
+        self.element_type.setCurrentText(value["element_type"])
+        self.smoothing = QComboBox()
+        self.smoothing.addItems(list(SMOOTHING_METHODS))
+        self.smoothing.setCurrentText(value["smoothing"])
+        self.smoothing_iterations = QSpinBox()
+        self.smoothing_iterations.setRange(0, 1000)
+        self.smoothing_iterations.setValue(value["smoothing_iterations"])
+        self.edge_swap = QCheckBox("edge swapping")
+        self.edge_swap.setChecked(value["edge_swap"])
+        layout.addRow("element type", self.element_type)
         layout.addRow("algorithm", self.algorithm)
         layout.addRow(self.refine)
         layout.addRow("min angle [deg]", self.min_angle)
@@ -362,6 +374,9 @@ class UnstructuredEditor(QWidget):
         layout.addRow("max size", self.max_size)
         layout.addRow("max points", self.max_points)
         layout.addRow("sources", self.sources)
+        layout.addRow("smoothing", self.smoothing)
+        layout.addRow("iterations", self.smoothing_iterations)
+        layout.addRow(self.edge_swap)
         # refine and min angle apply to the Delaunay mesher only.
         self.algorithm.currentTextChanged.connect(self._update_enabled)
         self._update_enabled(self.algorithm.currentText())
@@ -386,6 +401,10 @@ class UnstructuredEditor(QWidget):
             "max_size": parse_optional(self.max_size.text(), "max size"),
             "sources": parse_sources(self.sources.toPlainText()),
             "max_points": self.max_points.value(),
+            "element_type": self.element_type.currentText(),
+            "smoothing": self.smoothing.currentText(),
+            "smoothing_iterations": self.smoothing_iterations.value(),
+            "edge_swap": self.edge_swap.isChecked(),
         }
 
 

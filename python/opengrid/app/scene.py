@@ -163,7 +163,9 @@ class Scene:
     def _add_domain_actor(self, entity) -> None:
         if entity.kind == "unstructured_domain":
             unstructured = self.session.unstructured_mesh(entity.name)
-            mesh = triangle_mesh(unstructured["points"], unstructured["triangles"])
+            mesh = triangle_mesh(
+                unstructured["points"], unstructured["triangles"], unstructured["quads"]
+            )
         else:
             mesh = quad_mesh(self.session.domain_grid(entity.name, compute=False))
         name = f"entity-{entity.id}"
@@ -346,9 +348,10 @@ def pick_entity(session: Session, xyz, tolerance: float) -> str | None:
             score = tolerance
         elif entity.kind == "unstructured_domain":
             mesh = session.unstructured_mesh(entity.name)
-            if not _inside_triangles(
-                np.asarray(xyz, dtype=float), mesh["points"], mesh["triangles"]
-            ):
+            # Quads are convex: test them as two triangles each.
+            quads = mesh["quads"]
+            pieces = np.concatenate([mesh["triangles"], quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
+            if not _inside_triangles(np.asarray(xyz, dtype=float), mesh["points"], pieces):
                 continue
             distance = 0.0
             score = tolerance
@@ -374,9 +377,12 @@ def quad_mesh(grid: np.ndarray) -> pv.PolyData:
     return pv.PolyData(grid.reshape(-1, 3), faces=faces)
 
 
-def triangle_mesh(points: np.ndarray, triangles: np.ndarray) -> pv.PolyData:
-    faces = np.hstack([np.full((len(triangles), 1), 3), triangles]).ravel()
-    return pv.PolyData(np.asarray(points, dtype=float), faces=faces)
+def triangle_mesh(points: np.ndarray, triangles: np.ndarray, quads=None) -> pv.PolyData:
+    """Triangles, then quads (optional), as PolyData; the cell order matches the quality arrays."""
+    faces = [np.hstack([np.full((len(triangles), 1), 3), triangles]).ravel()]
+    if quads is not None and len(quads):
+        faces.append(np.hstack([np.full((len(quads), 1), 4), quads]).ravel())
+    return pv.PolyData(np.asarray(points, dtype=float), faces=np.concatenate(faces))
 
 
 def _distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:

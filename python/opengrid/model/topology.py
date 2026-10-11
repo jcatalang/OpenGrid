@@ -67,7 +67,26 @@ def analyze(store, session) -> Topology:
     topo = Topology()
     for entity in store.entities("connector"):
         topo.uses[entity.id] = []
-    for domain in store.entities("domain"):
+    # All domains in id order (both kinds), so uses and interface labels follow creation order.
+    for domain in store:
+        if domain.kind == "unstructured_domain":
+            for loop in domain.params["loops"]:
+                for m, item in enumerate(loop):
+                    # No structured index range: edge -1 marks a loop use.
+                    topo.uses[item["connector"]].append(
+                        EdgeUse(
+                            domain.id,
+                            -1,
+                            m,
+                            item["connector"],
+                            item["reversed"],
+                            (-1, -1),
+                            (-1, -1),
+                        )
+                    )
+            continue
+        if domain.kind != "domain":
+            continue
         ni, nj = session.domain_dimensions(domain.name)
         topo.dimensions[domain.id] = (ni, nj)
         for k, edge in enumerate(domain.params["edges"]):
@@ -239,7 +258,7 @@ def validate_patches(store, topology: Topology, session=None) -> BoundaryReport:
             )
         elif not uses:
             issues.append(Issue(name, f"is in patch {', '.join(patches)} but used by no domain"))
-    zones_of: dict[int, list[str]] = {}
+    zones_of: dict[int, list[str]] = {}  # domains of either kind
     for zone in store.entities("zone"):
         for item in zone.params["members"]:
             zones_of.setdefault(item["domain"], []).append(zone.name)

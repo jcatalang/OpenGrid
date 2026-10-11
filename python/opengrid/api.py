@@ -26,10 +26,11 @@ from opengrid.commands import (
     RenameEntity,
 )
 from opengrid.commands.base import JOURNAL_HEADER
-from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d, write_vtkhdf
+from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d
 from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.store import Entity, Store
+from opengrid.model.unstructured import UnstructuredEvaluator, assemble_loops
 from opengrid.validation import Issue, ValidationError
 
 IMPORT_MODES = ("spline", "split", "polyline")
@@ -41,6 +42,7 @@ class Session:
         self.commands = CommandStack(self.store)
         self.connectors = ConnectorEvaluator(self.store)
         self.domains = DomainEvaluator(self.store, self.connectors)
+        self.unstructured = UnstructuredEvaluator(self.store, self.connectors)
         self.commands.add_listener(self._invalidate_derived)
         self.project_path: Path | None = None
         # GUI/report threshold for the stretching-ratio warning (not stored in projects).
@@ -249,6 +251,50 @@ class Session:
         params = {"edges": edges, "generator": generator}
         return self._create("domain", params, name)
 
+    def create_unstructured_domain(
+        self, loops=None, generator=None, name: str | None = None, connectors=None
+    ) -> str:
+        """Unstructured (triangle) domain.
+
+        Either ``loops``: the outer loop (counter-clockwise) followed by holes (clockwise), each a
+        list of connector names or ``(name, reversed)`` items; or ``connectors``: a set of
+        connector names assembled into closed loops automatically (largest loop = outer).
+        ``generator``: ``{"min_angle": 25, "growth_rate": 1.2, "max_size": None, "sources": [],
+        "max_points": 2000000, "refine": True}``; sources are ``{"p0", "p1" (optional; line
+        source), "size", "radius"}``.
+        """
+        if loops is None:
+            if connectors is None:
+                raise ValueError("give either loops or connectors")
+            if isinstance(connectors, str):
+                connectors = [connectors]
+            assembled = assemble_loops(self.store, self.connectors, list(connectors))
+            loops = []
+            for loop in assembled:
+                loops.append(
+                    [
+                        {
+                            "connector": self.store.get(i["connector"]).name,
+                            "reversed": i["reversed"],
+                        }
+                        for i in loop
+                    ]
+                )
+        return self._create("unstructured_domain", {"loops": loops, "generator": generator}, name)
+
+    def set_unstructured_generator(self, name: str, **changes) -> str:
+        generator = dict(self.entity(name).params["generator"])
+        generator.update(changes)
+        return self.modify(name, generator=generator)
+
+    def unstructured_mesh(self, name: str) -> dict:
+        """``{"points" (n, 3), "triangles" (m, 3), "rejected", "warnings"}`` of an unstructured
+        domain (boundary points first, in loop order)."""
+        entity = self.store.get(name)
+        if entity.kind != "unstructured_domain":
+            raise ValueError(f"{name!r} is a {entity.kind}, not an unstructured domain")
+        return self.unstructured.mesh(entity.id)
+
     def set_domain_generator(self, name: str, **changes) -> str:
         """Update generator settings, e.g. ``set_domain_generator("d", method="hermite_tfi")`` or
         ``elliptic={"walls": [{"edge": 0, "spacing": 1e-5}]}`` (merged into the current elliptic
@@ -291,15 +337,29 @@ class Session:
         return self.domains.smooth(self._domain_id(name), progress)
 
     def domain_status(self, name: str) -> str:
+        entity = self.store.get(name)
+        if entity.kind == "unstructured_domain":
+            mesh = self.unstructured_mesh(name)
+            text = f"{len(mesh['triangles'])} triangles, {len(mesh['points'])} points"
+            if mesh["rejected"]:
+                text += f" ({mesh['rejected']} refinement points rejected near the boundary)"
+            return text
         return self.domains.status(self._domain_id(name))
 
     def domain_quality(self, name: str) -> dict:
-        """Per-cell quality metrics of the final grid, arrays of shape (nj - 1, ni - 1)."""
+        """Per-cell quality metrics: arrays of shape (nj - 1, ni - 1) for structured domains,
+        (1, m) for unstructured ones."""
+        entity = self.store.get(name)
+        if entity.kind == "unstructured_domain":
+            mesh = self.unstructured_mesh(name)
+            return _core.quality_triangles(
+                np.ascontiguousarray(mesh["points"][:, :2]), mesh["triangles"]
+            )
         return _core.quality_2d(self.domain_grid(name))
 
     def _export_names(self, domains) -> list[str]:
         if domains is None:
-            return self.names("domain")
+            return self.names("domain") + self.names("unstructured_domain")
         if isinstance(domains, str):
             return [domains]
         return list(domains)
@@ -400,23 +460,22 @@ class Session:
     def export_vtkhdf(self, path, domains=None) -> dict:
         """Write domains to VTKHDF.
 
-        Without patches and zones: one UnstructuredGrid (quads, shared points merged) with
-        ``block_id``, cell indices and all quality metrics as cell data. With patches or zones
-        (the boundary must then validate): a PartitionedDataSetCollection with one quad block
-        per zone (``zone_id``, ``block_id``, quality) and one line block per patch
-        (``patch_id``), grouped in the assembly as Volume/<zone> and Patches/<patch>.
+        Without patches and zones: one UnstructuredGrid (quads and triangles, shared points
+        merged) with ``block_id``, ``zone_id``, cell indices and all quality metrics as cell
+        data. With patches or zones (the boundary must then validate): a
+        PartitionedDataSetCollection with one cell block per zone and one line block per patch,
+        grouped in the assembly as Volume/<zone> and Patches/<patch>.
         """
+        from opengrid.io.assembly import assemble
+        from opengrid.io.vtkhdf import write_vtkhdf_collection, write_vtkhdf_grid
+
         if not self.store.entities("patch") and not self.store.entities("zone"):
-            blocks = []
-            for name in self._export_names(domains):
-                grid = self.domain_grid(name)
-                blocks.append({"name": name, "grid": grid, "cell_data": _core.quality_2d(grid)})
-            return write_vtkhdf(path, blocks)
+            names = None
+            if domains is not None:
+                names = self._export_names(domains)
+            return write_vtkhdf_grid(path, assemble(self, None, domains=names))
         if domains is not None:
             raise ValueError("with patches or zones the whole model is exported (domains=None)")
-        from opengrid.io.assembly import assemble
-        from opengrid.io.vtkhdf import write_vtkhdf_collection
-
         report = self._require_valid_boundary()
         return write_vtkhdf_collection(
             path, assemble(self, self.topology(), periodic=report.periodic)
@@ -443,7 +502,20 @@ class Session:
 
     def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:
         """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1)."""
-        grids = [self.domain_grid(name) for name in self._export_names(domains)]
+        names = self._export_names(domains)
+        unstructured = [n for n in names if self.store.get(n).kind == "unstructured_domain"]
+        if unstructured:
+            raise ValidationError(
+                [
+                    Issue(
+                        n,
+                        "Plot3D holds structured blocks only; "
+                        "unstructured domains cannot be exported",
+                    )
+                    for n in unstructured
+                ]
+            )
+        grids = [self.domain_grid(name) for name in names]
         write_plot3d(path, grids, binary=binary, three_d=three_d)
 
     # -------------------------------------------------------------- editing
@@ -599,6 +671,7 @@ class Session:
         self.store = store
         self.connectors = ConnectorEvaluator(store)
         self.domains = DomainEvaluator(store, self.connectors)
+        self.unstructured = UnstructuredEvaluator(store, self.connectors)
         self.commands = CommandStack(store)
         for listener in listeners:
             self.commands.add_listener(listener)

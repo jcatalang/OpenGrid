@@ -47,14 +47,22 @@ Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(ma
 - VTKHDF with patches (collection or fallback), CGNS (zones, 1-to-1, BC_t) validated by `cgnscheck` if available, and Gmsh 4.1 read by meshio with the correct physical groups.
 - The patch face counts in exported files equal the model counts.
 
-## Phase 5 — Unstructured 2D *(proposed split: 5a CDT+refinement, 5b advancing front, 5c quads+smoothing)*
-- Constrained Delaunay (Bowyer–Watson, robust predicates, edge recovery) and Ruppert/Chew refinement with a size field.
-- Boundary conformity: every boundary segment appears exactly once. The total area matches the geometry to 1e-12 relative. There are no inverted cells.
-- The minimum angle bound is met where theory allows (e.g. ≥ 20.7° away from small input angles).
-- Determinism: two runs give byte-identical output.
-- Advancing-front alternative, quad-dominant and all-quad options, Laplacian/angle-based smoothing, and edge swapping.
-- Structured + unstructured domains that share connectors are conforming.
-- Demo: an airfoil in a circular farfield, as triangles and as quad-dominant.
+## Phase 5a — Unstructured 2D: constrained Delaunay + refinement (split approved after Phase 4)
+- Unstructured domains from an outer loop and inner loops of connectors (automatic loop assembly
+  and orientation); boundary nodes are exactly the connector nodes (no boundary Steiner points).
+- Robust orient2d/incircle (filtered + exact expansion arithmetic), Bowyer–Watson insertion,
+  segment recovery by flips, constrained Lawson flips, domain classification by flood fill.
+- Delaunay refinement (circumcenters, rejected when they would encroach on a boundary segment)
+  driven by a size field: boundary spacing with growth rate, maximum size, point/line sources.
+- Tests: every boundary segment present exactly once, total area equals the geometric area
+  (1e-12 relative), no inverted triangles, min angle >= 20.7 degrees away from small input
+  angles, determinism (identical output on repeated runs), conformity with structured neighbours.
+- Exports: triangles in VTKHDF and Gmsh (CGNS unstructured zones later).
+- Demo: NACA 0012 in a circular farfield (triangles), and a hybrid structured O-ring + triangles.
+
+## Phase 5b — Advancing-front triangulation (alternative generator).
+
+## Phase 5c — Quad-dominant / all-quad, smoothing and edge swapping; CGNS unstructured zones.
 
 ## Phase 6 — 2D inflation (hybrid)
 - First-cell height and growth rate achieved (relative error < 1e-6 on straight walls, < 2% on curved walls).

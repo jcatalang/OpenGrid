@@ -55,7 +55,7 @@ class Scene:
         # redraw all of them together with the changed entities.
         targets = set(ids)
         for entity in self.session.store:
-            if entity.kind in ("connector", "domain"):
+            if entity.kind in ("connector", "domain", "unstructured_domain"):
                 targets.add(entity.id)
         for entity_id in sorted(targets):
             self._remove_entity_actor(entity_id)
@@ -161,12 +161,15 @@ class Scene:
         self._actors[entity.id] = names
 
     def _add_domain_actor(self, entity) -> None:
-        grid = self.session.domain_grid(entity.name, compute=False)
-        mesh = quad_mesh(grid)
+        if entity.kind == "unstructured_domain":
+            unstructured = self.session.unstructured_mesh(entity.name)
+            mesh = triangle_mesh(unstructured["points"], unstructured["triangles"])
+        else:
+            mesh = quad_mesh(self.session.domain_grid(entity.name, compute=False))
         name = f"entity-{entity.id}"
         selected = entity.id in self.selected_ids
         if self.quality_metric is not None:
-            values = _core_quality(grid)[self.quality_metric]
+            values = self._display_quality(entity)[self.quality_metric]
             mesh.cell_data[self.quality_metric] = values.reshape(-1)
             self.plotter.add_mesh(
                 mesh,
@@ -200,14 +203,21 @@ class Scene:
             )
         self._actors[entity.id] = [name]
 
-    def show_worst_cell(self, grid: np.ndarray | None, j: int = 0, i: int = 0) -> None:
-        if grid is None:
+    def _display_quality(self, entity) -> dict:
+        """Quality of the displayed mesh (the TFI grid while smoothing is pending)."""
+        from opengrid import _core
+
+        if entity.kind == "unstructured_domain":
+            return self.session.domain_quality(entity.name)
+        return _core.quality_2d(self.session.domain_grid(entity.name, compute=False))
+
+    def show_worst_cell(self, corners: np.ndarray | None) -> None:
+        """Outline a cell given its corner points (or remove the outline)."""
+        if corners is None:
             self.plotter.remove_actor("worst-cell", render=False)
             self.plotter.render()
             return
-        corners = np.array(
-            [grid[j, i], grid[j, i + 1], grid[j + 1, i + 1], grid[j + 1, i], grid[j, i]]
-        )
+        corners = np.vstack([corners, corners[:1]])
         self.plotter.add_mesh(
             _polyline(corners),
             color=WORST_COLOR,
@@ -216,7 +226,7 @@ class Scene:
             pickable=False,
             reset_camera=False,
         )
-        center = corners[:4].mean(axis=0)
+        center = corners[:-1].mean(axis=0)
         size = float(np.max(np.ptp(corners, axis=0)))
         camera = self.plotter.camera
         camera.focal_point = tuple(center)
@@ -231,7 +241,7 @@ class Scene:
         if entity.kind == "connector":
             self._add_connector_actor(entity)
             return
-        if entity.kind == "domain":
+        if entity.kind in ("domain", "unstructured_domain"):
             self._add_domain_actor(entity)
             return
         if entity.kind not in CURVE_KINDS and entity.kind != "point":
@@ -334,6 +344,14 @@ def pick_entity(session: Session, xyz, tolerance: float) -> str | None:
                 continue
             distance = 0.0
             score = tolerance
+        elif entity.kind == "unstructured_domain":
+            mesh = session.unstructured_mesh(entity.name)
+            if not _inside_triangles(
+                np.asarray(xyz, dtype=float), mesh["points"], mesh["triangles"]
+            ):
+                continue
+            distance = 0.0
+            score = tolerance
         elif entity.kind in CURVE_KINDS:
             _t, _point, distance = session.geometry(entity.name).project(tuple(xyz))
             score = distance
@@ -356,10 +374,9 @@ def quad_mesh(grid: np.ndarray) -> pv.PolyData:
     return pv.PolyData(grid.reshape(-1, 3), faces=faces)
 
 
-def _core_quality(grid):
-    from opengrid import _core
-
-    return _core.quality_2d(grid)
+def triangle_mesh(points: np.ndarray, triangles: np.ndarray) -> pv.PolyData:
+    faces = np.hstack([np.full((len(triangles), 1), 3), triangles]).ravel()
+    return pv.PolyData(np.asarray(points, dtype=float), faces=faces)
 
 
 def _distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:
@@ -387,6 +404,18 @@ def _inside_loop(point: np.ndarray, grid: np.ndarray) -> bool:
     with np.errstate(divide="ignore", invalid="ignore"):
         at = x + (point[1] - y) * (xn - x) / (yn - y)
     return bool(np.count_nonzero(crosses & (point[0] < at)) % 2)
+
+
+def _inside_triangles(point: np.ndarray, points: np.ndarray, triangles: np.ndarray) -> bool:
+    a = points[triangles[:, 0], :2]
+    b = points[triangles[:, 1], :2]
+    c = points[triangles[:, 2], :2]
+    p = point[:2]
+
+    def side(o, v):
+        return (v[:, 0] - o[:, 0]) * (p[1] - o[:, 1]) - (v[:, 1] - o[:, 1]) * (p[0] - o[:, 0])
+
+    return bool(np.any((side(a, b) >= 0) & (side(b, c) >= 0) & (side(c, a) >= 0)))
 
 
 def _segment_cells(n: int) -> np.ndarray:

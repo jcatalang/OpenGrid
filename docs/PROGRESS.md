@@ -286,3 +286,47 @@
   `periodic_source`. Project load handles pairings in a second pass.
 - Gmsh 4.12 (/Applications/Gmsh.app, or $OPENGRID_GMSH) reads all exported meshes without errors or
   warnings, with matching node/element counts (tests skip if Gmsh is absent).
+
+## Phase 5a — Unstructured 2D: constrained Delaunay + refinement (2026-10-11) — awaiting review
+- **C++**: exact predicates, Bowyer–Watson + Sloan recovery + Lawson flips + classification,
+  Delaunay refinement (circumcenters / off-centers, boundary never split, diametral-lens
+  rejection), size field (boundary spacing + growth, max size, point/line sources), triangle
+  quality metrics.
+- **Python**:
+  - `unstructured_domain` entity (validation of loops/orientation/holes, automatic loop
+    assembly, generator settings, cached meshes).
+  - API: `create_unstructured_domain`, `set_unstructured_generator`, `unstructured_mesh`;
+    `domain_quality` and `domain_status` cover both kinds.
+  - Topology, zones and patches cover both kinds. Exports handle mixed cells (Gmsh, VTKHDF).
+- **GUI**: unstructured domains drawn (wireframe or quality colouring), picking, tree count,
+  generator editor (min angle, growth, max size, max points, sources), "Unstructured domain"
+  from the selected connectors, Quality dock and worst cell for triangles.
+- **Demo** `examples/05a_unstructured.py`:
+  - NACA 0012 in a farfield: 9866 triangles, min angle 28.15°.
+  - Hybrid structured O-ring (wall 1e-4 c, elliptic) + triangles (7806, min angle 28.61°),
+    conforming along the shared ellipse.
+  - Gmsh files read clean by Gmsh 4.12. Outputs: `05a_unstructured.png`,
+    `phase5a_main_window.png`, projects, journals.
+
+### Verified
+- `ctest`: 73/73 (`-Werror`); clang-tidy: 0 findings. Covered:
+  - orient2d exact on 20 000 near-collinear lattice cases (checked against 128-bit integers);
+    incircle exact on cocircular points.
+  - Size field equal to brute force; conformity (every segment exactly once, on its left).
+  - Exact area, no inverted triangles, ≥ 20.7° on uniform and graded domains, holes,
+    determinism, invalid input, the abrupt-spacing case terminating with < 5 % bad triangles.
+- `pytest`: 202/202. Covered:
+  - Annulus area to 1e-12 vs the polygon, ≥ 20.7°, conformity, boundary points identical to
+    the connector nodes.
+  - Determinism and caching, size controls, loop validation and assembly, dependencies,
+    round trip, replay.
+  - Hybrid conformity: merged node count, every interior edge shared twice, Gmsh read clean,
+    VTKHDF mixed cells.
+  - CGNS and Plot3D refusals; GUI create, pick, edit, quality.
+- Performance: 1.39 M triangles in 1.0 s (target 1 M in < 10 s).
+
+### Not verified / known limitations
+- **Quality next to abrupt boundary-spacing jumps** is not guaranteed (boundary nodes are
+  fixed); quality checks run away from such jumps.
+- **CGNS unstructured export**: Phase 5c.
+- **Not in 5a:** advancing front (5b); quads and smoothing (5c).

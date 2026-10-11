@@ -2,6 +2,9 @@ add_library(og_core STATIC
   src/version.cpp
   src/util/gauss_kronrod.cpp
   src/util/roots.cpp
+  src/util/predicates.cpp
+  src/unstructured/size_field.cpp
+  src/unstructured/triangulate.cpp
   src/dist/distribution.cpp
   src/dist/geometric.cpp
   src/dist/vinokur.cpp
@@ -16,6 +19,7 @@ add_library(og_core STATIC
   src/structured/tfi.cpp
   src/structured/elliptic.cpp
   src/quality/quality2d.cpp
+  src/quality/quality_tri.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 

@@ -24,7 +24,11 @@ CGNS_BC_TYPES = {
 }
 
 
-def _members(raw, key: str, kind: str, store, where: str, issues: list[Issue]) -> tuple:
+def _members(raw, key: str, kind, store, where: str, issues: list[Issue]) -> tuple:
+    """Member references; ``kind`` is an entity kind or a tuple of accepted kinds."""
+    kinds = kind
+    if isinstance(kinds, str):
+        kinds = (kinds,)
     if isinstance(raw, (str, int, dict)):
         raw = [raw]
     result = []
@@ -41,8 +45,8 @@ def _members(raw, key: str, kind: str, store, where: str, issues: list[Issue]) -
             issues.append(Issue(label, f"no entity {ref!r}"))
             continue
         entity = store.get(ref)
-        if entity.kind != kind:
-            issues.append(Issue(label, f"{entity.name!r} is a {entity.kind}, not a {kind}"))
+        if entity.kind not in kinds:
+            issues.append(Issue(label, f"{entity.name!r} is a {entity.kind}, not a {kinds[0]}"))
             continue
         if entity.id in seen:
             issues.append(Issue(label, f"{entity.name!r} listed twice"))
@@ -122,7 +126,9 @@ def normalize_zone(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
     for key in sorted(set(raw) - {"members"}):
         issues.append(Issue(f"{where}: {key}", "unexpected parameter for a zone"))
-    members = _members(raw.get("members", ()), "domain", "domain", store, where, issues)
+    members = _members(
+        raw.get("members", ()), "domain", ("domain", "unstructured_domain"), store, where, issues
+    )
     if issues:
         raise ValidationError(issues)
     return {"members": members}

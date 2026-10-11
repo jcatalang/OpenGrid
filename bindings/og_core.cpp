@@ -30,9 +30,11 @@
 #include "opengrid/core/geom/polyline.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality2d.hpp"
+#include "opengrid/core/quality/quality_tri.hpp"
 #include "opengrid/core/structured/elliptic.hpp"
 #include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/topo/connector_nodes.hpp"
+#include "opengrid/core/unstructured/triangulate.hpp"
 #include "opengrid/core/version.hpp"
 
 namespace nb = nanobind;
@@ -481,6 +483,94 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       "bc_type or ''); boundaries: (zone index, name, family, (imin, jmin, imax, jmax)); "
       "connections: (zone, name, donor zone, range, donor range, transform, periodic translation "
       "or None). 1-based ranges.");
+
+  m.def(
+      "triangulate",
+      [](const nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>&
+             segments,
+         bool refine, double min_angle, double growth_rate, std::optional<double> max_size,
+         const std::vector<std::tuple<double, double, double, double, double, double>>& sources,
+         std::int64_t max_points) {
+        og::TriangulationInput input;
+        for (std::size_t k = 0; k < points.shape(0); ++k) {
+          input.points.push_back({points(k, 0), points(k, 1)});
+        }
+        for (std::size_t k = 0; k < segments.shape(0); ++k) {
+          input.segments.push_back({segments(k, 0), segments(k, 1)});
+        }
+        og::RefinementOptions options;
+        options.refine = refine;
+        options.min_angle_deg = min_angle;
+        options.size.growth_rate = growth_rate;
+        options.size.max_size = max_size;
+        for (const auto& [x0, y0, x1, y1, size, radius] : sources) {
+          options.size.sources.push_back({{x0, y0}, {x1, y1}, size, radius});
+        }
+        options.max_points = max_points;
+        og::TriangleMesh mesh;
+        {
+          const nb::gil_scoped_release release;
+          mesh = og::triangulate_domain(input, options);
+        }
+        auto* xy = new double[mesh.points.size() * 2];
+        for (std::size_t k = 0; k < mesh.points.size(); ++k) {
+          xy[2 * k] = mesh.points[k][0];
+          xy[2 * k + 1] = mesh.points[k][1];
+        }
+        auto* tri = new std::int64_t[mesh.triangles.size() * 3];
+        for (std::size_t k = 0; k < mesh.triangles.size(); ++k) {
+          for (std::size_t j = 0; j < 3; ++j) {
+            tri[3 * k + j] = mesh.triangles[k][j];
+          }
+        }
+        const nb::capsule own_xy(xy,
+                                 [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+        const nb::capsule own_tri(
+            tri, [](void* ptr) noexcept { delete[] static_cast<std::int64_t*>(ptr); });
+        return std::make_tuple(
+            nb::ndarray<nb::numpy, double, nb::ndim<2>>(xy, {mesh.points.size(), 2}, own_xy),
+            nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>>(tri, {mesh.triangles.size(), 3},
+                                                              own_tri),
+            mesh.rejected, mesh.warnings);
+      },
+      nb::arg("points"), nb::arg("segments"), nb::arg("refine") = true, nb::arg("min_angle") = 25.0,
+      nb::arg("growth_rate") = 1.2, nb::arg("max_size") = nb::none(),
+      nb::arg("sources") = nb::list(), nb::arg("max_points") = 20'000'000,
+      "Constrained Delaunay triangulation + refinement; segments oriented with the domain on the "
+      "left. sources: (x0, y0, x1, y1, size, radius). Returns (points (n, 2), triangles (m, 3), "
+      "rejected, warnings).");
+
+  m.def(
+      "quality_triangles",
+      [](const nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>&
+             triangles) {
+        std::vector<std::array<double, 2>> p;
+        p.reserve(points.shape(0));
+        for (std::size_t k = 0; k < points.shape(0); ++k) {
+          p.push_back({points(k, 0), points(k, 1)});
+        }
+        std::vector<std::array<std::int64_t, 3>> t;
+        t.reserve(triangles.shape(0));
+        for (std::size_t k = 0; k < triangles.shape(0); ++k) {
+          t.push_back({triangles(k, 0), triangles(k, 1), triangles(k, 2)});
+        }
+        const og::Quality2D q = og::quality_triangles(p, t);
+        const auto n = static_cast<int>(t.size());
+        std::map<std::string, CellsOut> out;
+        out.emplace("scaled_jacobian", cells_to(q.scaled_jacobian, n, 1));
+        out.emplace("skewness", cells_to(q.skewness, n, 1));
+        out.emplace("aspect_ratio", cells_to(q.aspect_ratio, n, 1));
+        out.emplace("min_angle", cells_to(q.min_angle, n, 1));
+        out.emplace("max_angle", cells_to(q.max_angle, n, 1));
+        out.emplace("non_orthogonality", cells_to(q.non_orthogonality, n, 1));
+        out.emplace("area_ratio", cells_to(q.area_ratio, n, 1));
+        out.emplace("area", cells_to(q.area, n, 1));
+        return out;
+      },
+      nb::arg("points"), nb::arg("triangles"),
+      "Per-triangle quality metrics, each of shape (1, m) (same keys as quality_2d).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

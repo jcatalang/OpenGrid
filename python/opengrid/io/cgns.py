@@ -19,6 +19,16 @@ def write_cgns(path, session, topology, base_name: str = "OpenGrid", periodic=()
     if not _core.cgns_available():
         raise RuntimeError("OpenGrid was built without CGNS support")
     store = session.store
+    unstructured = store.entities("unstructured_domain")
+    if unstructured:
+        raise ValidationError(
+            [
+                Issue(
+                    d.name, "CGNS export of unstructured domains is not implemented yet (Phase 5c)"
+                )
+                for d in unstructured
+            ]
+        )
     domains = store.entities("domain")
     zone_index = {d.id: k for k, d in enumerate(domains)}
     # Zone families: every domain gets one (unzoned domains: the implicit "default" zone, as in

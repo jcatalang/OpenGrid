@@ -355,6 +355,39 @@ segment, so derivative jumps at knots never cost accuracy.
     as VTK's own writer does.
   - Without any patch or zone, the Phase 3 single UnstructuredGrid is still written.
 
+### Unstructured 2D domains (Phase 5a)
+- **Entity.** `unstructured_domain`: an outer loop (CCW) plus holes (CW), each a closed chain of
+  connectors, together with generator settings (min angle, growth rate, max size, sources, max
+  points). Loops can be assembled automatically from a set of connectors (largest loop =
+  outer). Boundary nodes are exactly the connector nodes, so structured and unstructured
+  neighbours conform and merge bitwise in the exports. Zones and patches accept both domain
+  kinds. Topology counts loop uses, so interfaces between the kinds are detected.
+- **Mesher** (C++, `unstructured/triangulate.cpp`, own implementation, no third-party code):
+  - Predicates (`util/predicates.cpp`): orient2d/incircle with Shewchuk's stage-A filters and
+    an exact expansion-arithmetic fallback, written from the 1997 paper.
+  - Bowyer–Watson insertion inside a super triangle; Sloan's flip-based segment recovery;
+    Lawson restoration of the constrained Delaunay property; flood-fill classification from
+    the oriented segments.
+  - Refinement: circumcenters for oversized triangles and Üngör off-centers for bad shapes.
+  - *Boundary segments are never split*: points across a segment or in its diametral lens
+    (120°) are rejected. The centroid is tried only for oversized interior triangles. A
+    triangle's target size is at least its longest boundary edge.
+  - The size field is the minimum of boundary spacing + (g − 1)·distance, the maximum size,
+    and point/line sources, evaluated through bucketed ring search (exact).
+- **Found while testing:**
+  - A centroid fallback for badly shaped triangles cascades into ever thinner triangles.
+  - Triangles standing on a long boundary segment next to a much finer boundary can never meet
+    the size field. Both made refinement loop until the point cap; fixed as described above.
+- **Limitation.** Where the boundary spacing jumps abruptly (tenfold at a corner), triangles
+  next to the coarse segments cannot be well shaped without splitting the boundary.
+  Quality ≥ 20.7° holds for consistently spaced boundaries and away from such jumps.
+- **Performance:** about 1.4 M triangles/s (1.39 M triangles in 1.0 s on the M1).
+- **Exports.** The mesh assembly now holds mixed cells (quads and triangles; offsets +
+  connectivity + VTK types). Boundary lines and periodic correspondences come straight from
+  connector nodes. Gmsh writes triangles (type 2); VTKHDF writes mixed cells. CGNS unstructured
+  zones are deferred to Phase 5c (export refuses with a message), and Plot3D refuses
+  unstructured domains.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

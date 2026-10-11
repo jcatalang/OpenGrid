@@ -26,17 +26,20 @@ def format_kwargs(params: dict) -> str:
 def _for_script(kind: str, params: dict, store: Store) -> dict:
     if kind == "connector":
         return script_params(params, store)
-    if kind == "domain":
+    if kind in ("domain", "unstructured_domain"):
+        key = "edges"
+        if kind == "unstructured_domain":
+            key = "loops"
         result = dict(params)
         edges = []
-        for edge in params["edges"]:
+        for edge in params[key]:
             items = []
             for item in edge:
                 items.append(
                     {"connector": store.get(item["connector"]).name, "reversed": item["reversed"]}
                 )
             edges.append(tuple(items))
-        result["edges"] = tuple(edges)
+        result[key] = tuple(edges)
         return result
     if kind in ("patch", "zone"):
         key = "connector"

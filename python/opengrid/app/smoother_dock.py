@@ -70,7 +70,13 @@ class SmootherDock(QWidget):
             self.status.setText("Select a domain with elliptic smoothing")
             self.run_button.setEnabled(False)
             return
-        generator = self.session.entity(name).params["generator"]
+        entity = self.session.entity(name)
+        if entity.kind != "domain":
+            self.domain_name = None
+            self.status.setText(f"{name}: elliptic smoothing applies to structured domains only")
+            self.run_button.setEnabled(False)
+            return
+        generator = entity.params["generator"]
         self.run_button.setEnabled(generator["elliptic"] is not None)
         self.status.setText(f"{name}: {self.session.domain_status(name)}")
         cached = self.session.domains.smoothing_result(self.session.entity(name).id)

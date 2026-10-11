@@ -205,6 +205,11 @@ class MainWindow(QMainWindow):
         self.nodes_action.setChecked(True)
         self.nodes_action.toggled.connect(self.set_show_nodes)
         self.threshold_action = self._action("Stretching ratio threshold…", self.ask_threshold)
+        self.unstructured_action = self._action(
+            "Unstructured domain",
+            self.create_unstructured_on_selection,
+            tip="Triangulated domain bounded by the selected connectors (closed loops)",
+        )
         self.domain_action = self._action(
             "Structured domain",
             self.create_domain_on_selection,
@@ -273,6 +278,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.connectors_action)
         create_menu.addAction(self.chain_action)
         create_menu.addAction(self.domain_action)
+        create_menu.addAction(self.unstructured_action)
         create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
@@ -298,6 +304,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.connectors_action)
         toolbar.addAction(self.chain_action)
         toolbar.addAction(self.domain_action)
+        toolbar.addAction(self.unstructured_action)
         toolbar.addWidget(QLabel(" dim "))
         self.dimension_box = QSpinBox()
         self.dimension_box.setRange(2, 100000)
@@ -524,18 +531,20 @@ class MainWindow(QMainWindow):
     def _selected_domains(self) -> list[str]:
         names = []
         for entity_id in self.selected_ids:
-            if (
-                entity_id in self.session.store
-                and self.session.store.get(entity_id).kind == "domain"
-            ):
-                names.append(self.session.store.get(entity_id).name)
+            if entity_id not in self.session.store:
+                continue
+            entity = self.session.store.get(entity_id)
+            if entity.kind in ("domain", "unstructured_domain"):
+                names.append(entity.name)
         return names
 
     def _quality_scope(self) -> tuple[list[str], str]:
         names = self._selected_domains()
         if names:
             return names, ", ".join(names)
-        return self.session.names("domain"), "all domains"
+        return self.session.names("domain") + self.session.names(
+            "unstructured_domain"
+        ), "all domains"
 
     def create_domain_on_selection(self) -> str | None:
         connectors = []
@@ -549,6 +558,17 @@ class MainWindow(QMainWindow):
         if name:
             ni, nj = self.session.domain_dimensions(name)
             log.info("created %s (%d x %d)", name, ni, nj)
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def create_unstructured_on_selection(self) -> str | None:
+        connectors = self._selected_of_kind("connector")
+        if not connectors:
+            self.statusBar().showMessage("Select the connectors of the boundary loops first", 5000)
+            return None
+        name = self._run(lambda: self.session.create_unstructured_domain(connectors=connectors))
+        if name:
+            log.info("created %s: %s", name, self.session.domain_status(name))
             self.set_selection([self.session.store.get(name).id])
         return name
 
@@ -596,15 +616,17 @@ class MainWindow(QMainWindow):
         key = self.quality_dock.metric_key()
         values = []
         for name in names:
-            grid = self.session.domain_grid(name, compute=False)
-            values.append(self.session_quality(grid)[key].reshape(-1))
+            values.append(
+                self.scene._display_quality(self.session.store.get(name))[key].reshape(-1)
+            )
         self.quality_dock.show_values(np.concatenate(values), scope)
 
-    @staticmethod
-    def session_quality(grid):
-        from opengrid import _core
-
-        return _core.quality_2d(grid)
+    def _cell_corners(self, name: str, j: int, i: int) -> np.ndarray:
+        if self.session.store.get(name).kind == "unstructured_domain":
+            mesh = self.session.unstructured_mesh(name)
+            return mesh["points"][mesh["triangles"][i]]
+        grid = self.session.domain_grid(name, compute=False)
+        return np.array([grid[j, i], grid[j, i + 1], grid[j + 1, i + 1], grid[j + 1, i]])
 
     def show_worst_cell(self) -> tuple[str, int, int] | None:
         names, _scope = self._quality_scope()
@@ -614,8 +636,7 @@ class MainWindow(QMainWindow):
         larger_is_worse = METRICS[key][1]
         best = None
         for name in names:
-            grid = self.session.domain_grid(name, compute=False)
-            values = self.session_quality(grid)[key]
+            values = self.scene._display_quality(self.session.store.get(name))[key]
             j, i = worst_cell(values, larger_is_worse)
             value = float(values[j, i])
             better = best is None
@@ -625,9 +646,9 @@ class MainWindow(QMainWindow):
                 else:
                     better = value < best[0]
             if better:
-                best = (value, name, j, i, grid)
-        value, name, j, i, grid = best
-        self.scene.show_worst_cell(grid, j, i)
+                best = (value, name, j, i)
+        value, name, j, i = best
+        self.scene.show_worst_cell(self._cell_corners(name, j, i))
         log.info("worst %s: %.4g in %s at cell (i=%d, j=%d)", key, value, name, i, j)
         return name, i, j
 

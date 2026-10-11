@@ -33,9 +33,9 @@
  "name_counters": {},
  "next_id": 29,
  "patches": [
-  {"id": 24, "members": [{"connector": 11}, {"connector": 12}, {"connector": 15}, {"connector": 16}, {"connector": 18}], "name": "walls", "patch_type": "wall", "type": "patch"},
-  {"id": 25, "members": [{"connector": 13}], "name": "inflow", "patch_type": "inlet", "type": "patch"},
-  {"id": 26, "members": [{"connector": 19}, {"connector": 20}], "name": "outflow", "patch_type": "outlet", "type": "patch"}
+  {"id": 24, "members": [{"connector": 11}, {"connector": 12}, {"connector": 15}, {"connector": 16}, {"connector": 18}], "name": "walls", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 25, "members": [{"connector": 13}], "name": "inflow", "patch_type": "inlet", "periodic": null, "type": "patch"},
+  {"id": 26, "members": [{"connector": 19}, {"connector": 20}], "name": "outflow", "patch_type": "outlet", "periodic": null, "type": "patch"}
  ],
  "settings": {},
  "tolerance": 1e-09,

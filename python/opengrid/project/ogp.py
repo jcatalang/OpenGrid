@@ -19,7 +19,7 @@ _FUTURE_SECTIONS = ("blocks",)
 _SECTIONS = {
     "database": DATABASE_KINDS,
     "connectors": ("connector",),
-    "domains": ("domain",),
+    "domains": ("domain", "unstructured_domain"),
     "patches": ("patch",),
     "zones": ("zone",),
 }

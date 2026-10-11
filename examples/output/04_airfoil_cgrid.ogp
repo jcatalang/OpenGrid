@@ -27,9 +27,9 @@
  "name_counters": {},
  "next_id": 22,
  "patches": [
-  {"id": 18, "members": [{"connector": 3}, {"connector": 4}], "name": "airfoil", "patch_type": "wall", "type": "patch"},
-  {"id": 19, "members": [{"connector": 14}, {"connector": 16}, {"connector": 15}], "name": "farfield", "patch_type": "farfield", "type": "patch"},
-  {"id": 20, "members": [{"connector": 12}, {"connector": 13}], "name": "outflow", "patch_type": "outlet", "type": "patch"}
+  {"id": 18, "members": [{"connector": 3}, {"connector": 4}], "name": "airfoil", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 19, "members": [{"connector": 14}, {"connector": 16}, {"connector": 15}], "name": "farfield", "patch_type": "farfield", "periodic": null, "type": "patch"},
+  {"id": 20, "members": [{"connector": 12}, {"connector": 13}], "name": "outflow", "patch_type": "outlet", "periodic": null, "type": "patch"}
  ],
  "settings": {},
  "tolerance": 1e-09,

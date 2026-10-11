@@ -294,6 +294,87 @@ class GeneratorEditor(QWidget):
         return result
 
 
+def format_sources(sources) -> str:
+    """One per line: 'x0 y0 size radius' (point) or 'x0 y0 x1 y1 size radius' (line)."""
+    lines = []
+    for item in sources:
+        values = list(item["p0"][:2])
+        if item["p1"] != item["p0"]:
+            values += list(item["p1"][:2])
+        values += [item["size"], item["radius"]]
+        lines.append(" ".join(format_number(v) for v in values))
+    return "\n".join(lines)
+
+
+def parse_sources(text: str) -> tuple:
+    result = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        values = parse_numbers(line, f"sources line {number}")
+        if len(values) == 4:
+            p0 = (values[0], values[1], 0.0)
+            result.append({"p0": p0, "p1": p0, "size": values[2], "radius": values[3]})
+        elif len(values) == 6:
+            result.append(
+                {
+                    "p0": (values[0], values[1], 0.0),
+                    "p1": (values[2], values[3], 0.0),
+                    "size": values[4],
+                    "radius": values[5],
+                }
+            )
+        else:
+            raise ParseError(
+                f"sources line {number}: expected 'x0 y0 size radius' or 'x0 y0 x1 y1 size radius'"
+            )
+    return tuple(result)
+
+
+class UnstructuredEditor(QWidget):
+    """Triangulation settings of an unstructured domain."""
+
+    def __init__(self, value: dict, parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.refine = QCheckBox("refine")
+        self.refine.setChecked(value["refine"])
+        self.min_angle = QLineEdit(format_number(value["min_angle"]))
+        self.growth = QLineEdit(format_number(value["growth_rate"]))
+        self.max_size = QLineEdit(format_optional(value["max_size"]))
+        self.max_size.setPlaceholderText("none")
+        self.max_points = QSpinBox()
+        self.max_points.setRange(3, 2_000_000_000)
+        self.max_points.setValue(value["max_points"])
+        self.sources = QPlainTextEdit(format_sources(value["sources"]))
+        self.sources.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.sources.setPlaceholderText("x0 y0 size radius  |  x0 y0 x1 y1 size radius")
+        self.sources.setMaximumHeight(60)
+        layout.addRow(self.refine)
+        layout.addRow("min angle [deg]", self.min_angle)
+        layout.addRow("growth rate", self.growth)
+        layout.addRow("max size", self.max_size)
+        layout.addRow("max points", self.max_points)
+        layout.addRow("sources", self.sources)
+
+    def value(self) -> dict:
+        def one(edit, label):
+            values = parse_numbers(edit.text(), label)
+            if len(values) != 1:
+                raise ParseError(f"{label}: expected one number")
+            return values[0]
+
+        return {
+            "refine": self.refine.isChecked(),
+            "min_angle": one(self.min_angle, "min angle"),
+            "growth_rate": one(self.growth, "growth rate"),
+            "max_size": parse_optional(self.max_size.text(), "max size"),
+            "sources": parse_sources(self.sources.toPlainText()),
+            "max_points": self.max_points.value(),
+        }
+
+
 class DistributionEditor(QWidget):
     """Type + begin/end spacing + growth ratio (empty fields mean 'not specified')."""
 
@@ -421,6 +502,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "unstructured_domain":
+            self._unstructured_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         if entity.kind in ("patch", "zone"):
             self._group_rows(entity)
             self.apply_button.setEnabled(True)
@@ -435,6 +521,29 @@ class PropertyPanel(QWidget):
             self._form.addRow("length", QLabel(f"{length:.10g}"))
         self.apply_button.setEnabled(True)
         self.revert_button.setEnabled(True)
+
+    def _unstructured_rows(self, entity) -> None:
+        lines = []
+        for k, loop in enumerate(entity.params["loops"]):
+            names = []
+            for item in loop:
+                name = self.session.store.get(item["connector"]).name
+                if item["reversed"]:
+                    name += " (rev)"
+                names.append(name)
+            kind = "outer"
+            if k > 0:
+                kind = f"hole {k}"
+            lines.append(f"{kind}: {', '.join(names)}")
+        loops = QLabel("\n".join(lines))
+        loops.setWordWrap(True)
+        self._form.addRow("loops", loops)
+        status = QLabel(self.session.domain_status(entity.name))
+        status.setWordWrap(True)
+        self._form.addRow("status", status)
+        editor = UnstructuredEditor(entity.params["generator"])
+        self._form.addRow("generator", editor)
+        self._editors["generator"] = ("generator", editor)
 
     def _group_rows(self, entity) -> None:
         key = "domain"

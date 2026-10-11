@@ -31,6 +31,8 @@ def references(entity: Entity) -> set[int]:
         return {segment["curve"] for segment in entity.params["segments"]}
     if entity.kind == "domain":
         return {item["connector"] for edge in entity.params["edges"] for item in edge}
+    if entity.kind == "unstructured_domain":
+        return {item["connector"] for loop in entity.params["loops"] for item in loop}
     if entity.kind == "patch":
         refs = {item["connector"] for item in entity.params["members"]}
         if entity.params.get("periodic") is not None:

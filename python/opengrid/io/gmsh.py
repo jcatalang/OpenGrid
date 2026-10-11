@@ -1,6 +1,7 @@
 """Gmsh MSH 4.1 (ASCII) export of a 2D mesh assembly with physical groups.
 
-Physical groups: one 2D group per zone (quads), one 1D group per patch (boundary lines). Each
+Physical groups: one 2D group per zone (quads and triangles), one 1D group per patch
+(boundary lines). Each
 zone is a surface entity and each patch a curve entity carrying its physical tag; all nodes are
 listed in one block attached to the first surface. Paired periodic patches are written to the
 $Periodic section (slave = target curve, master = source curve, affine transform and node
@@ -13,12 +14,14 @@ from pathlib import Path
 import numpy as np
 
 GMSH_LINE = 1
+GMSH_TRIANGLE = 2
 GMSH_QUAD = 3
+VTK_TO_GMSH = {5: GMSH_TRIANGLE, 9: GMSH_QUAD}
 
 
 def write_gmsh(path, assembly) -> dict:
     lines = ["$MeshFormat", "4.1 0 8", "$EndMeshFormat", "$PhysicalNames"]
-    zones = [z for z in range(len(assembly.zone_names)) if np.any(assembly.quad_zone == z)]
+    zones = [z for z in range(len(assembly.zone_names)) if np.any(assembly.cell_zone == z)]
     patches = [p for p in range(len(assembly.patch_names)) if np.any(assembly.line_patch == p)]
     lines.append(str(len(zones) + len(patches)))
     for p in patches:
@@ -39,7 +42,7 @@ def write_gmsh(path, assembly) -> dict:
         ids = assembly.lines[assembly.line_patch == p]
         lines.append(f"{p + 1} {bbox(ids)} 1 {p + 1} 0")
     for z in zones:
-        ids = assembly.quads[assembly.quad_zone == z]
+        ids = np.concatenate(assembly.cells(assembly.cell_zone == z))
         lines.append(f"{z + 1} {bbox(ids)} 1 {z + 1} 0")
     lines.append("$EndEntities")
 
@@ -57,8 +60,10 @@ def write_gmsh(path, assembly) -> dict:
         cells = assembly.lines[assembly.line_patch == p]
         blocks.append((1, p + 1, GMSH_LINE, cells))
     for z in zones:
-        cells = assembly.quads[assembly.quad_zone == z]
-        blocks.append((2, z + 1, GMSH_QUAD, cells))
+        for vtk_type, gmsh_type in sorted(VTK_TO_GMSH.items()):
+            mask = (assembly.cell_zone == z) & (assembly.cell_type == vtk_type)
+            if np.any(mask):
+                blocks.append((2, z + 1, gmsh_type, np.array(assembly.cells(mask))))
     total = sum(len(b[3]) for b in blocks)
     lines.append("$Elements")
     lines.append(f"{len(blocks)} {total} 1 {total}")

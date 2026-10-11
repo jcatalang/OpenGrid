@@ -72,6 +72,9 @@ class ModelTree(QTreeWidget):
                 item = QTreeWidgetItem(connectors, [entity.name, connector_info(session, entity)])
             elif entity.kind == "domain":
                 item = QTreeWidgetItem(domains, [entity.name, domain_info(session, entity)])
+            elif entity.kind == "unstructured_domain":
+                count = len(session.unstructured_mesh(entity.name)["triangles"])
+                item = QTreeWidgetItem(domains, [entity.name, f"{count} tris"])
             elif entity.kind == "patch":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(

@@ -82,6 +82,8 @@ Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(ma
 - 1 M cells < 10 s for every element type.
 
 ## Phase 6 — 2D inflation (hybrid)
+Implemented inside unstructured domains (`generator.inflation`); the core is filled by the
+Phase 5 generators (triangles, quad-dominant or all-quad).
 - First-cell height and growth rate achieved (relative error < 1e-6 on straight walls, < 2% on curved walls).
 - No overlaps (exact segment-intersection checks), positive Jacobians, and sharp and blunt TE handled.
 - Proximity/collision termination works (two-element airfoil gap). The last-layer size matches the core size field within 20%.

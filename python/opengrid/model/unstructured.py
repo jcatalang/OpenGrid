@@ -4,6 +4,11 @@ refinement (algorithm "delaunay", the default) or advancing front ("advancing_fr
 optionally recombined into quad-dominant or all-quad meshes, smoothed, edge-swapped and untangled
 (opengrid._core.mesh_domain). Cells are numbered triangles first, then quads.
 
+Boundary layers: ``generator["inflation"]`` (None or a dict) inflates quad layers from the given
+wall connectors (part of the domain's loops) before the core is meshed: first height, growth
+rate, at most ``layers`` layers or ``total_thickness``, and with ``transition`` columns stop when
+cells become isotropic (core size).
+
 Loops are closed chains of connectors (each possibly reversed). The outer loop runs
 counter-clockwise and inner loops clockwise, i.e. the domain lies on the left of every loop.
 Boundary nodes are exactly the connector nodes, so neighbouring domains (structured or
@@ -37,7 +42,69 @@ DEFAULT_GENERATOR = {
     "smoothing": "none",
     "smoothing_iterations": 5,
     "edge_swap": True,
+    "inflation": None,
 }
+
+DEFAULT_INFLATION = {
+    "connectors": (),
+    "first_height": None,
+    "growth_rate": 1.2,
+    "layers": 30,
+    "total_thickness": None,
+    "transition": True,
+}
+
+
+def normalize_inflation(raw, label: str, store, issues: list) -> dict | None:
+    """Canonical inflation settings; connectors (names or ids) become ids."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        issues.append(Issue(label, f"expected a dict or None, got {raw!r}"))
+        return None
+    for key in sorted(set(raw) - set(DEFAULT_INFLATION)):
+        issues.append(Issue(f"{label}.{key}", "unexpected key"))
+    merged = dict(DEFAULT_INFLATION)
+    merged.update(raw)
+    connectors = []
+    refs = merged["connectors"]
+    if isinstance(refs, (str, int)):
+        refs = [refs]
+    if not isinstance(refs, (list, tuple)) or not refs:
+        issues.append(Issue(f"{label}.connectors", "at least one wall connector is required"))
+        refs = []
+    for k, ref in enumerate(refs):
+        where = f"{label}.connectors[{k}]"
+        if isinstance(ref, bool) or not isinstance(ref, (str, int)) or ref not in store:
+            issues.append(Issue(where, f"no connector {ref!r}"))
+            continue
+        entity = store.get(ref)
+        if entity.kind != "connector":
+            issues.append(Issue(where, f"{entity.name!r} is a {entity.kind}, not a connector"))
+            continue
+        if entity.id not in connectors:
+            connectors.append(entity.id)
+    first = _number(merged["first_height"], f"{label}.first_height", issues)
+    growth = _number(merged["growth_rate"], f"{label}.growth_rate", issues)
+    if growth is not None and growth < 1.0:
+        issues.append(Issue(f"{label}.growth_rate", "must be >= 1"))
+    layers = merged["layers"]
+    if isinstance(layers, bool) or not isinstance(layers, int) or layers < 1:
+        issues.append(Issue(f"{label}.layers", f"must be an integer >= 1, got {layers!r}"))
+    thickness = _number(
+        merged["total_thickness"], f"{label}.total_thickness", issues, optional=True
+    )
+    transition = merged["transition"]
+    if not isinstance(transition, bool):
+        issues.append(Issue(f"{label}.transition", f"must be true or false, got {transition!r}"))
+    return {
+        "connectors": tuple(connectors),
+        "first_height": first,
+        "growth_rate": growth,
+        "layers": layers,
+        "total_thickness": thickness,
+        "transition": transition,
+    }
 
 
 def _number(value, label, issues, positive=True, optional=False):
@@ -62,7 +129,7 @@ def _point(value, label, issues):
     return tuple(coords)
 
 
-def normalize_generator(raw, where: str) -> dict:
+def normalize_generator(raw, where: str, store=None) -> dict:
     issues: list[Issue] = []
     if raw is None:
         raw = {}
@@ -101,6 +168,14 @@ def normalize_generator(raw, where: str) -> dict:
         issues.append(
             Issue(f"{label}.smoothing_iterations", f"must be an integer >= 0, got {iterations!r}")
         )
+    inflation = None
+    if merged["inflation"] is not None:
+        if store is None:
+            issues.append(Issue(f"{label}.inflation", "needs the model to resolve connectors"))
+        else:
+            inflation = normalize_inflation(
+                merged["inflation"], f"{label}.inflation", store, issues
+            )
     edge_swap = merged["edge_swap"]
     if not isinstance(edge_swap, bool):
         issues.append(Issue(f"{label}.edge_swap", f"must be true or false, got {edge_swap!r}"))
@@ -146,6 +221,7 @@ def normalize_generator(raw, where: str) -> dict:
         "smoothing": smoothing,
         "smoothing_iterations": iterations,
         "edge_swap": edge_swap,
+        "inflation": inflation,
     }
 
 
@@ -167,12 +243,24 @@ def normalize_unstructured(raw: dict, store, where: str) -> dict:
             items.append(_edge_item(item, f"{where}: loops[{k}][{m}]", store, issues))
         loops.append(tuple(items))
     try:
-        generator = normalize_generator(raw.get("generator"), where)
+        generator = normalize_generator(raw.get("generator"), where, store)
     except ValidationError as error:
         issues.extend(error.issues)
         generator = None
     if issues:
         raise ValidationError(issues)
+    if generator["inflation"] is not None:
+        in_loops = {item["connector"] for loop in loops for item in loop}
+        for ref in generator["inflation"]["connectors"]:
+            if ref not in in_loops:
+                issues.append(
+                    Issue(
+                        f"{where}: generator.inflation.connectors",
+                        f"{store.get(ref).name!r} is not part of the domain's loops",
+                    )
+                )
+        if issues:
+            raise ValidationError(issues)
     params = {"loops": tuple(loops), "generator": generator}
     check_loops(params, store, ConnectorEvaluator(store), where)
     return params
@@ -315,6 +403,20 @@ class UnstructuredEvaluator:
     def invalidate(self) -> None:
         """Nothing to drop: the cache key covers every input."""
 
+    def wall_flags(self, entity_id: int) -> list[bool]:
+        """One flag per boundary segment (loop order): True on inflation wall connectors."""
+        entity = self.store.get(entity_id)
+        inflation = entity.params["generator"]["inflation"]
+        walls = set()
+        if inflation is not None:
+            walls = set(inflation["connectors"])
+        flags = []
+        for loop in entity.params["loops"]:
+            for item in loop:
+                count = len(self.connectors.nodes(item["connector"]).points) - 1
+                flags.extend([item["connector"] in walls] * count)
+        return flags
+
     def boundary(self, entity_id: int):
         entity = self.store.get(entity_id)
         loops = loop_points(entity.params, self.store, self.connectors, entity.name)
@@ -351,7 +453,19 @@ class UnstructuredEvaluator:
                 )
             )
         try:
-            xy, triangles, quads, rejected, warnings = _core.mesh_domain(
+            inflation = generator["inflation"]
+            wall = []
+            options = {}
+            if inflation is not None:
+                wall = self.wall_flags(entity_id)
+                options = {
+                    "first_height": inflation["first_height"],
+                    "inflation_growth": inflation["growth_rate"],
+                    "layers": inflation["layers"],
+                    "total_thickness": inflation["total_thickness"],
+                    "transition": inflation["transition"],
+                }
+            xy, triangles, quads, rejected, warnings, layers = _core.mesh_domain(
                 np.ascontiguousarray(points[:, :2]),
                 segments,
                 algorithm=generator["algorithm"],
@@ -365,6 +479,8 @@ class UnstructuredEvaluator:
                 smoothing=generator["smoothing"],
                 smoothing_iterations=generator["smoothing_iterations"],
                 edge_swap=generator["edge_swap"],
+                wall=wall,
+                **options,
             )
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None
@@ -377,6 +493,7 @@ class UnstructuredEvaluator:
             "points": xyz,
             "triangles": triangles,
             "quads": quads,
+            "layers": int(layers),
             "rejected": int(rejected),
             "warnings": list(warnings),
         }

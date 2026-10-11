@@ -428,3 +428,58 @@
   not proven.
 - **Plot3D:** still structured only.
 - **GUI:** the property panel's status label clipping (pre-existing) remains.
+
+## Phase 6 — 2D inflation layers (2026-10-11) — approved
+- **C++:**
+  - `inflation.cpp`: advancing layers with smoothed normals, fans, merges, transition, slope,
+    crossing and proximity termination, cell checks, and corner-aware parity for all-quad
+    cores.
+  - `domain_mesher` runs the inflation, then meshes the core.
+  - `loop_corners.hpp`; the untangler gains a quality threshold (0.3).
+- **Python:**
+  - `generator.inflation = {"connectors", "first_height", "growth_rate", "layers",
+    "total_thickness", "transition"}`, validated (connectors must be in the loops).
+  - Stored as ids; the journal writes names; save/load and undo work.
+  - The mesh reports `layers`, and the status shows the layer count.
+- **GUI:** inflation walls, first height, layer growth, max layers, total thickness and a
+  "stop at core size" checkbox in the unstructured editor.
+- **Demo** `examples/06_inflation.py` (first height 1e-5 c, growth 1.2, at most 60 layers;
+  the transition stops at 43):
+
+  | Case | Cells | Min SJ | Mean SJ |
+  |---|---|---|---|
+  | NACA 0012, triangle core | 6748 triangles + 7735 quads | 0.360 (trailing-edge fan triangles) | 0.957 |
+  | NACA 0012, all-quad core | 16971 quads + 78 layer triangles | 0.357 | 0.959 |
+  | Two-element (30% flap, 20°, small gap) | 8492 triangles + 11905 quads | 0.360 | 0.959 |
+
+  - First-layer height error is at most 0.25%.
+  - Layers stop short of each other in the gap.
+  - cgnscheck and Gmsh 4.12 read everything clean.
+  - Outputs: `06_inflation.png`, `phase6_main_window.png`, CGNS / msh / VTKHDF, projects,
+    journals.
+
+### Verified
+- `ctest`: 95/95 (`-Werror`); clang-tidy: 0 findings. Inflation tests:
+  - straight wall: every layer exactly h₀gᵏ (1e-6);
+  - cylinder with triangle and all-quad cores: first height within 2%, transition before the
+    layer limit, valid and conforming, exact area;
+  - sharp and blunt trailing edges: fans with layers behind the edge, valid;
+  - two-element gap: valid, core cells in the gap;
+  - last layer within 20% of the core size;
+  - invalid options rejected; determinism.
+- `pytest`: 220/220 (+5). Covered:
+  - first-layer height; validation (missing first height, connector not in the loops,
+    layers < 1);
+  - save/load/replay, rename, undo;
+  - Gmsh conformity (only wall and farfield edges unmatched), cgnscheck for triangle and
+    all-quad cores;
+  - GUI fields.
+- All Phase 1–5 demos still run. Phase 5c all-quad meshes changed slightly (see ARCHITECTURE).
+
+### Not verified / known limitations
+- **Open wall ends:** layers taper to zero height where a wall meets a non-wall connector
+  (fixed connector nodes).
+- **Layer smoothing:** layer cells are not smoothed.
+- **First-layer fan triangles** at sharp trailing edges are the worst cells (SJ ≈ 0.36).
+- **Python options:** `max_slope`, the fan angles and the proximity factor are not exposed.
+- **3D:** no inflation yet (Phase 8).

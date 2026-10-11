@@ -718,8 +718,16 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
          double min_angle, double growth_rate, std::optional<double> max_size,
          const std::vector<std::tuple<double, double, double, double, double, double>>& sources,
          std::int64_t max_points, const std::string& smoothing, int smoothing_iterations,
-         bool edge_swap) {
+         bool edge_swap, const std::vector<bool>& wall, double first_height,
+         double inflation_growth, int layers, std::optional<double> total_thickness,
+         bool transition) {
         og::DomainMeshOptions options;
+        options.wall = wall;
+        options.inflation.first_height = first_height;
+        options.inflation.growth_rate = inflation_growth;
+        options.inflation.max_layers = layers;
+        options.inflation.total_thickness = total_thickness;
+        options.inflation.transition = transition;
         if (algorithm == "delaunay") {
           options.algorithm = og::TriangleAlgorithm::delaunay;
         } else if (algorithm == "advancing_front") {
@@ -800,18 +808,22 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
                                                               own_tri),
             nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>>(quad, {mesh.quads.size(), 4},
                                                               own_quad),
-            mesh.rejected, mesh.warnings);
+            mesh.rejected, mesh.warnings, mesh.layers);
       },
       nb::arg("points"), nb::arg("segments"), nb::arg("algorithm") = "delaunay",
       nb::arg("element_type") = "triangles", nb::arg("refine") = true, nb::arg("min_angle") = 25.0,
       nb::arg("growth_rate") = 1.2, nb::arg("max_size") = nb::none(),
       nb::arg("sources") = nb::list(), nb::arg("max_points") = 20'000'000,
       nb::arg("smoothing") = "none", nb::arg("smoothing_iterations") = 5,
-      nb::arg("edge_swap") = true,
+      nb::arg("edge_swap") = true, nb::arg("wall") = std::vector<bool>{},
+      nb::arg("first_height") = 1e-3, nb::arg("inflation_growth") = 1.2, nb::arg("layers") = 30,
+      nb::arg("total_thickness") = nb::none(), nb::arg("transition") = true,
       "Mesh a 2D domain bounded by oriented segments (domain on the left): triangulation "
       "(algorithm), element type ('triangles', 'quad_dominant', 'quads'), smoothing ('none', "
       "'laplacian', 'length_weighted', 'angle_based') with optional edge swapping, untangling. "
-      "Returns (points (n, 2), triangles (m, 3), quads (k, 4), rejected, warnings).");
+      "wall: one flag per segment; flagged segments get inflation layers (first_height, "
+      "inflation_growth, layers, total_thickness, transition). Returns (points (n, 2), triangles "
+      "(m, 3), quads (k, 4), rejected, warnings, layers).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

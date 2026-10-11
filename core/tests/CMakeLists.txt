@@ -11,6 +11,7 @@ add_executable(og_core_tests
   test_connector.cpp
   test_structured.cpp
   test_triangulate.cpp
-  test_quads.cpp)
+  test_quads.cpp
+  test_inflation.cpp)
 target_link_libraries(og_core_tests PRIVATE og_core og_options GTest::gtest_main)
 gtest_discover_tests(og_core_tests)

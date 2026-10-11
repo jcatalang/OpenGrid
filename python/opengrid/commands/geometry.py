@@ -40,6 +40,12 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
                 )
             edges.append(tuple(items))
         result[key] = tuple(edges)
+        if kind == "unstructured_domain" and params["generator"]["inflation"] is not None:
+            generator = dict(params["generator"])
+            inflation = dict(generator["inflation"])
+            inflation["connectors"] = tuple(store.get(c).name for c in inflation["connectors"])
+            generator["inflation"] = inflation
+            result["generator"] = generator
         return result
     if kind in ("patch", "zone"):
         key = "connector"

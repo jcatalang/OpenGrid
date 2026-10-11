@@ -9,6 +9,7 @@ add_library(og_core STATIC
   src/unstructured/recombine.cpp
   src/unstructured/smoothing.cpp
   src/unstructured/domain_mesher.cpp
+  src/unstructured/inflation.cpp
   src/dist/distribution.cpp
   src/dist/geometric.cpp
   src/dist/vinokur.cpp

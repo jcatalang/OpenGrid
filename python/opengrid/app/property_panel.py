@@ -335,8 +335,9 @@ def parse_sources(text: str) -> tuple:
 class UnstructuredEditor(QWidget):
     """Triangulation settings of an unstructured domain."""
 
-    def __init__(self, value: dict, parent=None):
+    def __init__(self, value: dict, store=None, parent=None):
         super().__init__(parent)
+        self.store = store
         layout = QFormLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.algorithm = QComboBox()
@@ -377,6 +378,38 @@ class UnstructuredEditor(QWidget):
         layout.addRow("smoothing", self.smoothing)
         layout.addRow("iterations", self.smoothing_iterations)
         layout.addRow(self.edge_swap)
+        # Boundary layers: wall connectors (empty: no inflation) and layer settings.
+        inflation = value["inflation"]
+        if inflation is None:
+            inflation = {
+                "connectors": (),
+                "first_height": None,
+                "growth_rate": 1.2,
+                "layers": 30,
+                "total_thickness": None,
+                "transition": True,
+            }
+        names = []
+        for ref in inflation["connectors"]:
+            if store is not None and ref in store:
+                names.append(store.get(ref).name)
+        self.walls = QLineEdit(", ".join(names))
+        self.walls.setPlaceholderText("wall connectors (none: no layers)")
+        self.first_height = QLineEdit(format_optional(inflation["first_height"]))
+        self.layer_growth = QLineEdit(format_number(inflation["growth_rate"]))
+        self.layers = QSpinBox()
+        self.layers.setRange(1, 1000)
+        self.layers.setValue(inflation["layers"])
+        self.thickness = QLineEdit(format_optional(inflation["total_thickness"]))
+        self.thickness.setPlaceholderText("none")
+        self.transition = QCheckBox("stop at core size")
+        self.transition.setChecked(inflation["transition"])
+        layout.addRow("inflation walls", self.walls)
+        layout.addRow("first height", self.first_height)
+        layout.addRow("layer growth", self.layer_growth)
+        layout.addRow("max layers", self.layers)
+        layout.addRow("total thickness", self.thickness)
+        layout.addRow(self.transition)
         # refine and min angle apply to the Delaunay mesher only.
         self.algorithm.currentTextChanged.connect(self._update_enabled)
         self._update_enabled(self.algorithm.currentText())
@@ -405,6 +438,31 @@ class UnstructuredEditor(QWidget):
             "smoothing": self.smoothing.currentText(),
             "smoothing_iterations": self.smoothing_iterations.value(),
             "edge_swap": self.edge_swap.isChecked(),
+            "inflation": self._inflation(),
+        }
+
+    def _inflation(self):
+        names = [n.strip() for n in self.walls.text().replace(";", ",").split(",") if n.strip()]
+        if not names:
+            return None
+        ids = []
+        for name in names:
+            if self.store is None or name not in self.store:
+                raise ParseError(f"inflation walls: no connector {name!r}")
+            ids.append(self.store.get(name).id)
+        first = parse_optional(self.first_height.text(), "first height")
+        if first is None:
+            raise ParseError("first height: required when inflation walls are given")
+        growth = parse_numbers(self.layer_growth.text(), "layer growth")
+        if len(growth) != 1:
+            raise ParseError("layer growth: expected one number")
+        return {
+            "connectors": tuple(ids),
+            "first_height": first,
+            "growth_rate": growth[0],
+            "layers": self.layers.value(),
+            "total_thickness": parse_optional(self.thickness.text(), "total thickness"),
+            "transition": self.transition.isChecked(),
         }
 
 
@@ -574,7 +632,7 @@ class PropertyPanel(QWidget):
         status = QLabel(self.session.domain_status(entity.name))
         status.setWordWrap(True)
         self._form.addRow("status", status)
-        editor = UnstructuredEditor(entity.params["generator"])
+        editor = UnstructuredEditor(entity.params["generator"], self.session.store)
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 

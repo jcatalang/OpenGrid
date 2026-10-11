@@ -264,7 +264,11 @@ class Session:
         ``{"p0", "p1" (optional; line source), "size", "radius"}``. ``algorithm`` is
         ``"delaunay"`` (constrained Delaunay + refinement) or ``"advancing_front"`` (near
         equilateral triangles that follow the size field closely; ``refine`` and ``min_angle``
-        apply to the Delaunay mesher only).
+        apply to the Delaunay mesher only). Further keys: ``element_type`` ("triangles",
+        "quad_dominant", "quads"), ``smoothing`` ("none", "laplacian", "length_weighted",
+        "angle_based"), ``smoothing_iterations``, ``edge_swap`` and ``inflation``: boundary
+        layers from wall connectors, e.g. ``{"connectors": ["c-wall"], "first_height": 1e-5,
+        "growth_rate": 1.2, "layers": 30, "total_thickness": None, "transition": True}``.
         """
         if loops is None:
             if connectors is None:
@@ -349,6 +353,8 @@ class Session:
             if len(mesh["quads"]):
                 parts.append(f"{len(mesh['quads'])} quads")
             text = f"{', '.join(parts)}, {len(mesh['points'])} points"
+            if mesh["layers"]:
+                text += f", {mesh['layers']} inflation layers"
             if mesh["rejected"]:
                 text += f" ({mesh['rejected']} refinement points rejected near the boundary)"
             return text

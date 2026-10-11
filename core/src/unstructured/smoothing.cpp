@@ -240,24 +240,25 @@ std::int64_t smooth_mesh(std::vector<std::array<double, 2>>& points,
 
 std::int64_t untangle(std::vector<std::array<double, 2>>& points,
                       const std::vector<std::array<std::int64_t, 3>>& triangles,
-                      const std::vector<std::array<std::int64_t, 4>>& quads, std::size_t n_fixed) {
-  // Cheap check first: most meshes have nothing to untangle.
+                      const std::vector<std::array<std::int64_t, 4>>& quads, std::size_t n_fixed,
+                      double threshold) {
+  // Cheap check first: most meshes have nothing to do.
   bool any = false;
   for (const auto& t : triangles) {
-    any = any || cell_quality(points, {t[0], t[1], t[2], -1}, 3) <= 0.0;
+    any = any || cell_quality(points, {t[0], t[1], t[2], -1}, 3) <= threshold;
   }
   for (const auto& q : quads) {
-    any = any || cell_quality(points, q, 4) <= 0.0;
+    any = any || cell_quality(points, q, 4) <= threshold;
   }
   if (!any) {
     return 0;
   }
   const Topology topo(points.size(), triangles, quads);
-  auto count_bad = [&]() {
+  auto count_bad = [&](double limit) {
     std::int64_t bad = 0;
     for (Index c = 0; std::cmp_less(c, topo.cell_count()); ++c) {
       const CellRef& cell = topo.cell(c);
-      if (cell_quality(points, cell.v, cell.n) <= 0.0) {
+      if (cell_quality(points, cell.v, cell.n) <= limit) {
         ++bad;
       }
     }
@@ -273,13 +274,13 @@ std::int64_t untangle(std::vector<std::array<double, 2>>& points,
        {0, -1},
        {0.7071067811865476, -0.7071067811865476}}};
   for (int sweep = 0; sweep < 20; ++sweep) {
-    if (count_bad() == 0) {
+    if (count_bad(threshold) == 0) {
       return 0;
     }
     bool changed = false;
     for (std::size_t v = n_fixed; v < points.size(); ++v) {
       double current = worst_around(points, topo, v);
-      if (current > 0.0) {
+      if (current > threshold) {
         continue;
       }
       // Step: a quarter of the mean edge length around the node.
@@ -334,7 +335,7 @@ std::int64_t untangle(std::vector<std::array<double, 2>>& points,
       break;
     }
   }
-  return count_bad();
+  return count_bad(0.0);
 }
 
 }  // namespace og

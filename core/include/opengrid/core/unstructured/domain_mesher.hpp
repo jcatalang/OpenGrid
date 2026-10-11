@@ -14,8 +14,12 @@
 //                   the input boundary (the "recombine then subdivide" route of Gmsh's full-quad
 //                   option; C. Geuzaine, J.-F. Remacle, Int. J. Numer. Meth. Eng. 79 (2009)). New
 //                   nodes are then smoothed (three guarded Laplacian sweeps).
-// Afterwards the requested smoothing (smoothing.hpp) runs, and any cell that is still inverted or
-// non-convex is untangled; if that fails a warning names the number of such cells.
+// With wall segments (DomainMeshOptions::wall), boundary layers are inflated from them first
+// (inflation.hpp) and the remaining core region is meshed as above; layer cells are kept as they
+// are (quads, with triangles at fans, merges and layer steps).
+// Afterwards the requested smoothing (smoothing.hpp) runs, then the nodes of cells with a scaled
+// Jacobian below 0.3 are optimised (untangling inverted or non-convex cells); if a cell stays
+// inverted a warning names the number of such cells.
 #pragma once
 
 #include <array>
@@ -23,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "opengrid/core/unstructured/inflation.hpp"
 #include "opengrid/core/unstructured/recombine.hpp"
 #include "opengrid/core/unstructured/smoothing.hpp"
 #include "opengrid/core/unstructured/triangulate.hpp"
@@ -38,6 +43,8 @@ struct DomainMeshOptions {
   RefinementOptions refinement;
   RecombineOptions recombine;
   SmoothingOptions smoothing;
+  std::vector<bool> wall;  // per input segment; empty or all false: no inflation
+  InflationOptions inflation;
 };
 
 struct MixedMesh {
@@ -45,6 +52,7 @@ struct MixedMesh {
   std::vector<std::array<std::int64_t, 3>> triangles;  // counter-clockwise
   std::vector<std::array<std::int64_t, 4>> quads;      // counter-clockwise
   std::int64_t rejected = 0;
+  int layers = 0;  // inflation layers (largest column)
   std::vector<std::string> warnings;
 };
 

@@ -475,6 +475,62 @@ segment, so derivative jumps at knots never cost accuracy.
   | Delaunay | all-quad | 0.72 M | 2.3 s | 0.46 |
   | Advancing front | all-quad | 0.57 M | 2.0 s | 0.62 (mean 0.89) |
 
+### 2D inflation layers (Phase 6)
+- **Placement.** Inflation is part of the unstructured domain generator
+  (`generator.inflation`: wall connectors from the domain's loops, `first_height`,
+  `growth_rate`, `layers`, `total_thickness`, `transition`).
+  - `unstructured/inflation.cpp` marches the layers.
+  - `domain_mesher.cpp` meshes the core, bounded by the final fronts and the non-wall
+    boundary, with any Phase 5 generator. Core boundary nodes are the front nodes, so the mesh
+    is conforming.
+  - Boundary nodes are still the connector nodes. Patches, zones, periodicity and all exports
+    work unchanged.
+- **Marching:**
+  - Layer heights are h₀·gᵏ.
+  - Normals are front bisectors, Jacobi-smoothed with a visibility constraint, and scaled by
+    1/min(n·n_seg). On a straight wall layer k is exactly h₀gᵏ (tested to 1e-6); on curved
+    walls the first height is within 0.25% (demo; tested < 2%).
+  - Sharp convex corners (normals turning > 60°) get fans in steps of ≤ 20°.
+  - Converging columns are merged.
+- **Stopping rules:**
+  - The layer limit is reached.
+  - **Transition**: the layer height reaches the column's isotropic size. That size is its
+    width along the front, at least the wall spacing it started from, at most the core size
+    field.
+  - **Slope**: a column may not stand above a stopped neighbour by more than one layer and
+    more than `max_slope` (0.5) times their distance along the front.
+  - **Crossing**: exact intersection tests against the old fronts, the boundary and the other
+    new segments.
+  - **Proximity**: a facing segment ahead closer than the isotropic size; this handles
+    multi-element gaps.
+  - **Cell validity**: inverted cells, or an angle above 165°.
+
+  Checks repeat until no column has to stop, so every committed layer is valid. Open wall
+  chains keep their fixed end nodes, and the layers taper to them.
+- **Lessons from the NACA demo** (each is fixed and covered by a test or the demo):
+  - The slope rule must measure the gap along the front, not between the column tops; that
+    distance already contains the height difference, so the rule never fired.
+  - It must run to a fixpoint after all transition stops; a single pass was order-dependent
+    and left cliffs.
+  - It must allow single-layer steps (with a tolerance), or one stop sweeps the whole front
+    once layers are thicker than the column spacing.
+  - Transition on the live front spacing alone stops fan columns after one layer. Transition
+    on the core size alone lets the layers grow to about a chord when the layer growth rate is
+    close to the size-field growth rate.
+- **All-quad cores.** The coarse boundary keeps sharp corners (turn > 35°, `loop_corners.hpp`)
+  and pairs the nodes between them; inflation makes each stretch even by merging a pair of
+  layer nodes on a smooth part (with fallbacks). This also changed Phase 5c all-quad meshes
+  slightly (NACA demo: 10756 instead of 10760 quads, min SJ 0.665 instead of 0.683).
+- **Optimisation.** After smoothing, nodes of cells with scaled Jacobian < 0.3 are optimised
+  (worst-cell compass search, the untangler with a threshold). Well-shaped meshes (25°
+  triangles score 0.49) are untouched.
+- **Limitations:**
+  - A layer front ending at an open wall end tapers to zero height there, because the
+    neighbouring connector's nodes are fixed.
+  - Layer cells are not smoothed.
+  - `max_slope`, the fan angles and the proximity factor are C++ options, not yet exposed in
+    Python.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

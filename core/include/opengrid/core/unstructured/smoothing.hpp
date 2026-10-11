@@ -15,10 +15,10 @@
 // triangle pairs are flipped to the Delaunay configuration after every sweep (boundary
 // segments are never flipped; quads are left alone).
 //
-// Untangling: nodes of cells with a non-positive scaled Jacobian (inverted or non-convex) are
-// moved by a compass search that maximises the worst signed scaled Jacobian of their cells
-// (optimisation-based untangling, cf. P. M. Knupp, Eng. Comput. 15 (1999) 263-268, with the
-// worst-cell objective instead of a sum).
+// Untangling / optimisation: nodes of cells with a scaled Jacobian at or below a threshold (0:
+// inverted or non-convex) are moved by a compass search that maximises the worst signed scaled
+// Jacobian of their cells (optimisation-based untangling, cf. P. M. Knupp, Eng. Comput. 15 (1999)
+// 263-268, with the worst-cell objective instead of a sum).
 #pragma once
 
 #include <array>
@@ -47,9 +47,12 @@ std::int64_t smooth_mesh(std::vector<std::array<double, 2>>& points,
                          const std::vector<std::array<std::int64_t, 2>>& segments,
                          std::size_t n_fixed, const SmoothingOptions& options);
 
-// Returns the number of cells that are still inverted or non-convex afterwards.
+// Nodes of cells whose signed scaled Jacobian is <= threshold are optimised (threshold 0:
+// untangling; a positive threshold also improves poor cells). Returns the number of cells that
+// are still inverted or non-convex afterwards.
 std::int64_t untangle(std::vector<std::array<double, 2>>& points,
                       const std::vector<std::array<std::int64_t, 3>>& triangles,
-                      const std::vector<std::array<std::int64_t, 4>>& quads, std::size_t n_fixed);
+                      const std::vector<std::array<std::int64_t, 4>>& quads, std::size_t n_fixed,
+                      double threshold = 0.0);
 
 }  // namespace og

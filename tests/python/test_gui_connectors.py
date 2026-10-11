@@ -127,3 +127,12 @@ def test_modifying_curve_redraws_connector(window):
     window.session.modify("b", p1=(1.0, 3.0))
     nodes = window.session.connector_nodes("cb")
     assert np.allclose(nodes.points[-1], [1.0, 3.0, 0.0])
+
+
+def test_snapping_works_with_connectors_present(window):
+    # Regression: snap targets used to ask connectors for a single curve geometry.
+    window.session.create_connector("a", 5, name="ca")
+    window.set_tool("line")
+    window.handle_click((1.02, 0.01, 0.0))  # snaps to the end of line "a"
+    window.handle_click((2.0, 0.0, 0.0))
+    assert window.session.entity("line-1").params["p0"] == (1.0, 0.0, 0.0)

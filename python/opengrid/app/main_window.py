@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
@@ -23,7 +24,9 @@ from opengrid.app.console import PythonConsole
 from opengrid.app.log_panel import LogPanel
 from opengrid.app.model_tree import ModelTree
 from opengrid.app.property_panel import PropertyPanel
+from opengrid.app.quality_dock import METRICS, QualityDock, worst_cell
 from opengrid.app.scene import Scene, pick_entity
+from opengrid.app.smoother_dock import SmootherDock
 from opengrid.app.tools import TOOLS, Tool, snap, snap_targets
 from opengrid.validation import ValidationError
 
@@ -69,6 +72,17 @@ class MainWindow(QMainWindow):
             "Console", self.console, Qt.DockWidgetArea.BottomDockWidgetArea
         )
         log_dock = self._add_dock("Log", self.log_panel, Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.quality_dock = QualityDock()
+        self.smoother_dock = SmootherDock(session)
+        quality_dock = self._add_dock(
+            "Quality", self.quality_dock, Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.smoother_dock_widget = self._add_dock(
+            "Smoother", self.smoother_dock, Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.tabifyDockWidget(quality_dock, self.smoother_dock_widget)
+        quality_dock.raise_()
+        self.quality_dock_widget = quality_dock
         self.tabifyDockWidget(log_dock, console_dock)
         console_dock.raise_()
         self.resizeDocks([model_dock, properties_dock], [320, 480], Qt.Orientation.Vertical)
@@ -80,6 +94,10 @@ class MainWindow(QMainWindow):
 
         self.model_tree.selection_changed.connect(self.set_selection)
         self.property_panel.message.connect(self._on_panel_message)
+        self.property_panel.smooth_requested.connect(self.run_smoother)
+        self.smoother_dock.finished.connect(self._on_smoothing_finished)
+        self.quality_dock.metric_changed.connect(self._on_metric_changed)
+        self.quality_dock.locate_requested.connect(self.show_worst_cell)
         session.commands.add_listener(self._on_model_changed)
 
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
@@ -171,6 +189,16 @@ class MainWindow(QMainWindow):
         self.nodes_action.setChecked(True)
         self.nodes_action.toggled.connect(self.set_show_nodes)
         self.threshold_action = self._action("Stretching ratio threshold…", self.ask_threshold)
+        self.domain_action = self._action(
+            "Structured domain",
+            self.create_domain_on_selection,
+            tip="Structured domain from the selected connectors (edges assembled automatically)",
+        )
+        self.quality_action = QAction("Colour domains by quality", self)
+        self.quality_action.setCheckable(True)
+        self.quality_action.toggled.connect(self.set_quality_colouring)
+        self.export_vtkhdf_action = self._action("Export VTKHDF…", self.export_vtkhdf)
+        self.export_plot3d_action = self._action("Export Plot3D…", self.export_plot3d)
 
         self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
         self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -202,6 +230,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.import_dat_action)
         file_menu.addAction(self.import_csv_action)
         file_menu.addSeparator()
+        file_menu.addAction(self.export_vtkhdf_action)
+        file_menu.addAction(self.export_plot3d_action)
+        file_menu.addSeparator()
         file_menu.addAction(self.save_journal_action)
         file_menu.addSeparator()
         file_menu.addAction(self.quit_action)
@@ -218,6 +249,7 @@ class MainWindow(QMainWindow):
         create_menu.addSeparator()
         create_menu.addAction(self.connectors_action)
         create_menu.addAction(self.chain_action)
+        create_menu.addAction(self.domain_action)
         create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
@@ -228,6 +260,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.color_action)
         view_menu.addAction(self.nodes_action)
         view_menu.addAction(self.threshold_action)
+        view_menu.addAction(self.quality_action)
 
     def _create_toolbars(self) -> None:
         toolbar = QToolBar("Tools", self)
@@ -240,6 +273,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.connectors_action)
         toolbar.addAction(self.chain_action)
+        toolbar.addAction(self.domain_action)
         toolbar.addWidget(QLabel(" dim "))
         self.dimension_box = QSpinBox()
         self.dimension_box.setRange(2, 100000)
@@ -378,6 +412,12 @@ class MainWindow(QMainWindow):
         else:
             self.property_panel.show_entity(None)
         self.delete_action.setEnabled(bool(ids))
+        domains = self._selected_domains()
+        if len(domains) == 1:
+            self.smoother_dock.set_domain(domains[0])
+        else:
+            self.smoother_dock.set_domain(None)
+        self.refresh_quality()
 
     def selected_names(self) -> list[str]:
         return [self.session.store.get(i).name for i in self.selected_ids]
@@ -452,6 +492,152 @@ class MainWindow(QMainWindow):
         else:
             log.info("%s", text)
         self.statusBar().showMessage(text.splitlines()[0], 5000)
+
+    # ---------------------------------------------------------------- domains
+    def _selected_domains(self) -> list[str]:
+        names = []
+        for entity_id in self.selected_ids:
+            if (
+                entity_id in self.session.store
+                and self.session.store.get(entity_id).kind == "domain"
+            ):
+                names.append(self.session.store.get(entity_id).name)
+        return names
+
+    def _quality_scope(self) -> tuple[list[str], str]:
+        names = self._selected_domains()
+        if names:
+            return names, ", ".join(names)
+        return self.session.names("domain"), "all domains"
+
+    def create_domain_on_selection(self) -> str | None:
+        connectors = []
+        for name in self.selected_names():
+            if self.session.store.get(name).kind == "connector":
+                connectors.append(name)
+        if not connectors:
+            self.statusBar().showMessage("Select the connectors of the domain first", 5000)
+            return None
+        name = self._run(lambda: self.session.create_structured_domain(connectors=connectors))
+        if name:
+            ni, nj = self.session.domain_dimensions(name)
+            log.info("created %s (%d x %d)", name, ni, nj)
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def run_smoother(self, name: str) -> bool:
+        self.smoother_dock_widget.raise_()
+        started = self.smoother_dock.start(name)
+        if started:
+            log.info("smoothing %s…", name)
+        return started
+
+    def _on_smoothing_finished(self, name: str, result) -> None:
+        if isinstance(result, Exception):
+            log.error("smoothing %s failed: %s", name, result)
+            return
+        for warning in result.warnings:
+            log.warning("%s: %s", name, warning)
+        if result.cancelled:
+            log.info("%s: smoothing cancelled after %d iterations", name, result.iterations)
+        else:
+            log.info("%s: %s", name, self.session.domain_status(name))
+        if name in self.session.store:
+            self.scene.update_entities([self.session.store.get(name).id])
+        self.model_tree.populate(self.session)
+        self.property_panel.refresh()
+        self.refresh_quality()
+
+    def set_quality_colouring(self, enabled: bool) -> None:
+        if enabled:
+            self.scene.quality_metric = self.quality_dock.metric_key()
+        else:
+            self.scene.quality_metric = None
+        self.scene.rebuild()
+
+    def _on_metric_changed(self, key: str) -> None:
+        if self.scene.quality_metric is not None:
+            self.scene.quality_metric = key
+            self.scene.rebuild()
+        self.refresh_quality()
+
+    def refresh_quality(self) -> None:
+        names, scope = self._quality_scope()
+        if not names:
+            self.quality_dock.show_values(None, scope)
+            return
+        key = self.quality_dock.metric_key()
+        values = []
+        for name in names:
+            grid = self.session.domain_grid(name, compute=False)
+            values.append(self.session_quality(grid)[key].reshape(-1))
+        self.quality_dock.show_values(np.concatenate(values), scope)
+
+    @staticmethod
+    def session_quality(grid):
+        from opengrid import _core
+
+        return _core.quality_2d(grid)
+
+    def show_worst_cell(self) -> tuple[str, int, int] | None:
+        names, _scope = self._quality_scope()
+        if not names:
+            return None
+        key = self.quality_dock.metric_key()
+        larger_is_worse = METRICS[key][1]
+        best = None
+        for name in names:
+            grid = self.session.domain_grid(name, compute=False)
+            values = self.session_quality(grid)[key]
+            j, i = worst_cell(values, larger_is_worse)
+            value = float(values[j, i])
+            better = best is None
+            if not better:
+                if larger_is_worse:
+                    better = value > best[0]
+                else:
+                    better = value < best[0]
+            if better:
+                best = (value, name, j, i, grid)
+        value, name, j, i, grid = best
+        self.scene.show_worst_cell(grid, j, i)
+        log.info("worst %s: %.4g in %s at cell (i=%d, j=%d)", key, value, name, i, j)
+        return name, i, j
+
+    def export_vtkhdf(self, path: str | None = None) -> dict | None:
+        if not self.session.names("domain"):
+            self.statusBar().showMessage("No domains to export", 5000)
+            return None
+        if path is None:
+            path, _filter = QFileDialog.getSaveFileName(
+                self, "Export VTKHDF", "", "VTKHDF (*.vtkhdf *.hdf)"
+            )
+            if not path:
+                return None
+        summary = self._run(lambda: self.session.export_vtkhdf(path))
+        if summary:
+            log.info(
+                "exported %s: %d cells, %d points (%d merged)",
+                path,
+                summary["cells"],
+                summary["points"],
+                summary["points_before_merge"] - summary["points"],
+            )
+        return summary
+
+    def export_plot3d(self, path: str | None = None, binary: bool = True) -> bool:
+        if not self.session.names("domain"):
+            self.statusBar().showMessage("No domains to export", 5000)
+            return False
+        if path is None:
+            path, _filter = QFileDialog.getSaveFileName(
+                self, "Export Plot3D", "", "Plot3D (*.xyz *.x *.p3d)"
+            )
+            if not path:
+                return False
+        self._run(lambda: self.session.export_plot3d(path, binary=binary))
+        log.info("exported %s", path)
+        return True
 
     # -------------------------------------------------------------- connectors
     def _selected_curves(self) -> list[str]:

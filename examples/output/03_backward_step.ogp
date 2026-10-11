@@ -1,0 +1,41 @@
+{
+ "blocks": [],
+ "connectors": [
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.2, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 11, "mode": "arc_length", "name": "c-in-bottom", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.2, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 12, "mode": "arc_length", "name": "c-in-top", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 51, "distribution": {"begin_spacing": 0.001, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 13, "mode": "arc_length", "name": "c-inlet", "propagate_spacing": true, "segments": [{"curve": 3, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 51, "distribution": {"begin_spacing": 0.001, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 14, "mode": "arc_length", "name": "c-interface", "propagate_spacing": true, "segments": [{"curve": 4, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 51, "distribution": {"begin_spacing": 0.001, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 15, "mode": "arc_length", "name": "c-step", "propagate_spacing": true, "segments": [{"curve": 5, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 161, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.5, "growth_ratio": null, "type": "tanh"}, "id": 16, "mode": "arc_length", "name": "c-lo-bottom", "propagate_spacing": true, "segments": [{"curve": 6, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 161, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.5, "growth_ratio": null, "type": "tanh"}, "id": 17, "mode": "arc_length", "name": "c-mid", "propagate_spacing": true, "segments": [{"curve": 7, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 161, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.5, "growth_ratio": null, "type": "tanh"}, "id": 18, "mode": "arc_length", "name": "c-up-top", "propagate_spacing": true, "segments": [{"curve": 8, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 51, "distribution": {"begin_spacing": 0.001, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 19, "mode": "arc_length", "name": "c-out-lo", "propagate_spacing": true, "segments": [{"curve": 9, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 51, "distribution": {"begin_spacing": 0.001, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 20, "mode": "arc_length", "name": "c-out-up", "propagate_spacing": true, "segments": [{"curve": 10, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"id": 1, "name": "in-bottom", "p0": [-5.0, 1.0, 0.0], "p1": [0.0, 1.0, 0.0], "type": "line"},
+  {"id": 2, "name": "in-top", "p0": [-5.0, 2.0, 0.0], "p1": [0.0, 2.0, 0.0], "type": "line"},
+  {"id": 3, "name": "inlet", "p0": [-5.0, 1.0, 0.0], "p1": [-5.0, 2.0, 0.0], "type": "line"},
+  {"id": 4, "name": "interface", "p0": [0.0, 1.0, 0.0], "p1": [0.0, 2.0, 0.0], "type": "line"},
+  {"id": 5, "name": "step", "p0": [0.0, 0.0, 0.0], "p1": [0.0, 1.0, 0.0], "type": "line"},
+  {"id": 6, "name": "lo-bottom", "p0": [0.0, 0.0, 0.0], "p1": [20.0, 0.0, 0.0], "type": "line"},
+  {"id": 7, "name": "mid", "p0": [0.0, 1.0, 0.0], "p1": [20.0, 1.0, 0.0], "type": "line"},
+  {"id": 8, "name": "up-top", "p0": [0.0, 2.0, 0.0], "p1": [20.0, 2.0, 0.0], "type": "line"},
+  {"id": 9, "name": "out-lo", "p0": [20.0, 0.0, 0.0], "p1": [20.0, 1.0, 0.0], "type": "line"},
+  {"id": 10, "name": "out-up", "p0": [20.0, 1.0, 0.0], "p1": [20.0, 2.0, 0.0], "type": "line"}
+ ],
+ "domains": [
+  {"edges": [[{"connector": 11, "reversed": false}], [{"connector": 14, "reversed": false}], [{"connector": 12, "reversed": true}], [{"connector": 13, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 21, "name": "inlet-block", "type": "domain"},
+  {"edges": [[{"connector": 16, "reversed": false}], [{"connector": 19, "reversed": false}], [{"connector": 17, "reversed": true}], [{"connector": 15, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 22, "name": "lower-block", "type": "domain"},
+  {"edges": [[{"connector": 17, "reversed": false}], [{"connector": 20, "reversed": false}], [{"connector": 18, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 23, "name": "upper-block", "type": "domain"}
+ ],
+ "format": "opengrid-project",
+ "name_counters": {},
+ "next_id": 24,
+ "patches": [],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

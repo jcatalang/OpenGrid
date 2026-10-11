@@ -2,6 +2,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -13,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -26,6 +28,9 @@
 #include "opengrid/core/geom/line.hpp"
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
+#include "opengrid/core/quality/quality2d.hpp"
+#include "opengrid/core/structured/elliptic.hpp"
+#include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/topo/connector_nodes.hpp"
 #include "opengrid/core/version.hpp"
 
@@ -66,6 +71,64 @@ PointArray to_numpy(const std::vector<og::Vec3>& points) {
 }
 
 using ScalarArray = nb::ndarray<nb::numpy, double, nb::ndim<1>>;
+using GridIn = nb::ndarray<const double, nb::ndim<3>, nb::c_contig, nb::device::cpu>;
+using GridOut = nb::ndarray<nb::numpy, double, nb::ndim<3>>;
+using CellsOut = nb::ndarray<nb::numpy, double, nb::ndim<2>>;
+using PointsIn = nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>;
+
+std::vector<og::Vec3> points_from(const PointsIn& a) {
+  std::vector<og::Vec3> out;
+  out.reserve(a.shape(0));
+  for (std::size_t k = 0; k < a.shape(0); ++k) {
+    out.emplace_back(a(k, 0), a(k, 1), a(k, 2));
+  }
+  return out;
+}
+
+og::Grid2D grid_from(const GridIn& a) {
+  if (a.shape(2) != 3) {
+    throw std::invalid_argument("grid must have shape (nj, ni, 3)");
+  }
+  og::Grid2D g(static_cast<int>(a.shape(1)), static_cast<int>(a.shape(0)));
+  const double* data = a.data();
+  for (std::size_t k = 0; k < g.x.size(); ++k) {
+    g.x[k] = {data[3 * k], data[3 * k + 1], data[3 * k + 2]};
+  }
+  return g;
+}
+
+GridOut grid_to(const og::Grid2D& g) {
+  auto* data = new double[g.x.size() * 3];
+  for (std::size_t k = 0; k < g.x.size(); ++k) {
+    data[3 * k] = g.x[k].x;
+    data[3 * k + 1] = g.x[k].y;
+    data[3 * k + 2] = g.x[k].z;
+  }
+  const nb::capsule owner(data, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+  return GridOut(data, {static_cast<std::size_t>(g.nj), static_cast<std::size_t>(g.ni), 3}, owner);
+}
+
+CellsOut cells_to(const std::vector<double>& values, int ci, int cj) {
+  auto* data = new double[values.size()];
+  std::copy(values.begin(), values.end(), data);
+  const nb::capsule owner(data, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+  return CellsOut(data, {static_cast<std::size_t>(cj), static_cast<std::size_t>(ci)}, owner);
+}
+
+// (spacing or None, decay, relaxation, max_source)
+using WallTuple = std::tuple<std::optional<double>, double, double, double>;
+
+og::WallControl wall_from(const std::optional<WallTuple>& wall) {
+  og::WallControl control;
+  if (wall) {
+    control.enabled = true;
+    control.spacing = std::get<0>(*wall);
+    control.decay = std::get<1>(*wall);
+    control.relaxation = std::get<2>(*wall);
+    control.max_source = std::get<3>(*wall);
+  }
+  return control;
+}
 
 ScalarArray to_numpy(const std::vector<double>& values) {
   auto* data = new double[values.size()];
@@ -266,6 +329,110 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       },
       nb::arg("chain"), nb::arg("mode"), nb::arg("subs"),
       "Connector nodes: returns (points (n, 3), arc_positions (n,), warnings, max ratio).");
+
+  m.def(
+      "tfi",
+      [](const PointsIn& bottom, const PointsIn& right, const PointsIn& top, const PointsIn& left,
+         const std::string& method, bool hermite_bottom, bool hermite_top, double strength) {
+        og::Boundary2D b{points_from(bottom), points_from(right), points_from(top),
+                         points_from(left)};
+        if (method == "linear") {
+          return grid_to(og::tfi_linear(b));
+        }
+        if (method == "hermite") {
+          og::HermiteOptions options;
+          options.bottom = hermite_bottom;
+          options.top = hermite_top;
+          options.strength = strength;
+          return grid_to(og::tfi_hermite(b, options));
+        }
+        throw std::invalid_argument("unknown TFI method '" + method + "'");
+      },
+      nb::arg("bottom"), nb::arg("right"), nb::arg("top"), nb::arg("left"),
+      nb::arg("method") = "linear", nb::arg("hermite_bottom") = true,
+      nb::arg("hermite_top") = false, nb::arg("strength") = 1.0,
+      "Transfinite interpolation; boundaries ordered by increasing index; returns (nj, ni, 3).");
+
+  nb::class_<og::SmoothingProgress>(m, "SmoothingProgress",
+                                    "Iteration count, residual history and cancel flag.")
+      .def(nb::init<>())
+      .def("cancel", &og::SmoothingProgress::cancel)
+      .def_prop_ro("cancelled", &og::SmoothingProgress::cancelled)
+      .def_prop_ro("iteration", &og::SmoothingProgress::iteration)
+      .def("residuals", [](const og::SmoothingProgress& p) { return to_numpy(p.residuals()); });
+
+  m.def(
+      "smooth_elliptic",
+      [](const GridIn& grid, const std::string& control,
+         const std::vector<std::tuple<bool, double, double, double>>& lines,
+         const std::vector<std::tuple<double, double, double, double>>& points,
+         const std::optional<WallTuple>& bottom_wall, const std::optional<WallTuple>& top_wall,
+         const std::string& solver, double omega, int max_iterations, double tolerance,
+         og::SmoothingProgress* progress) {
+        og::EllipticOptions options;
+        if (control == "laplace") {
+          options.control = og::ControlType::Laplace;
+        } else if (control == "thomas_middlecoff") {
+          options.control = og::ControlType::ThomasMiddlecoff;
+        } else if (control == "ttm") {
+          options.control = og::ControlType::Ttm;
+        } else {
+          throw std::invalid_argument("unknown control '" + control + "'");
+        }
+        for (const auto& [xi_line, position, amplitude, decay] : lines) {
+          options.lines.push_back({xi_line, position, amplitude, decay});
+        }
+        for (const auto& [xi, eta, amplitude, decay] : points) {
+          options.points.push_back({xi, eta, amplitude, decay});
+        }
+        options.bottom = wall_from(bottom_wall);
+        options.top = wall_from(top_wall);
+        if (solver == "point_sor") {
+          options.solver = og::EllipticSolver::PointSor;
+        } else if (solver == "line_sor") {
+          options.solver = og::EllipticSolver::LineSor;
+        } else {
+          throw std::invalid_argument("unknown solver '" + solver + "'");
+        }
+        options.omega = omega;
+        options.max_iterations = max_iterations;
+        options.tolerance = tolerance;
+        const og::Grid2D initial = grid_from(grid);
+        og::EllipticResult result;
+        {
+          const nb::gil_scoped_release release;
+          result = og::smooth_elliptic(initial, options, progress);
+        }
+        return std::make_tuple(grid_to(result.grid), to_numpy(result.residuals), result.iterations,
+                               result.converged, result.cancelled, result.warnings);
+      },
+      nb::arg("grid"), nb::arg("control") = "laplace", nb::arg("lines") = nb::list(),
+      nb::arg("points") = nb::list(), nb::arg("bottom_wall") = nb::none(),
+      nb::arg("top_wall") = nb::none(), nb::arg("solver") = "line_sor", nb::arg("omega") = 1.0,
+      nb::arg("max_iterations") = 1000, nb::arg("tolerance") = 1e-6,
+      nb::arg("progress") = nb::none(),
+      "Elliptic smoothing (GIL released); returns (grid, residuals, iterations, converged, "
+      "cancelled, warnings).");
+
+  m.def(
+      "quality_2d",
+      [](const GridIn& grid) {
+        const og::Grid2D g = grid_from(grid);
+        const og::Quality2D q = og::quality_2d(g);
+        const int ci = g.ni - 1;
+        const int cj = g.nj - 1;
+        std::map<std::string, CellsOut> out;
+        out.emplace("scaled_jacobian", cells_to(q.scaled_jacobian, ci, cj));
+        out.emplace("skewness", cells_to(q.skewness, ci, cj));
+        out.emplace("aspect_ratio", cells_to(q.aspect_ratio, ci, cj));
+        out.emplace("min_angle", cells_to(q.min_angle, ci, cj));
+        out.emplace("max_angle", cells_to(q.max_angle, ci, cj));
+        out.emplace("non_orthogonality", cells_to(q.non_orthogonality, ci, cj));
+        out.emplace("area_ratio", cells_to(q.area_ratio, ci, cj));
+        out.emplace("area", cells_to(q.area, ci, cj));
+        return out;
+      },
+      nb::arg("grid"), "Per-cell quality metrics, each of shape (nj - 1, ni - 1).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

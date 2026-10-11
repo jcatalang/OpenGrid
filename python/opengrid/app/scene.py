@@ -11,6 +11,7 @@ import numpy as np
 import pyvista as pv
 
 from opengrid.api import Session
+from opengrid.model.connectors import CURVE_KINDS
 
 CURVE_COLOR = "#5ad1ff"
 POINT_COLOR = "#f2f2f2"
@@ -21,6 +22,9 @@ ENDPOINT_COLOR = "#8a96a3"
 CONNECTOR_COLOR = "#ff9f43"
 NODE_COLOR = "#e8e8e8"
 STRETCHING_CMAP = "coolwarm"
+DOMAIN_COLOR = "#9fb3c8"
+QUALITY_CMAP = "viridis"
+WORST_COLOR = "#ff3b30"
 TESSELLATION_TOLERANCE = 2e-4
 
 
@@ -32,6 +36,7 @@ class Scene:
         self._actors: dict[int, list[str]] = {}  # entity id -> actor names
         self.color_by_stretching = True
         self.show_nodes = True
+        self.quality_metric: str | None = None  # colour domains by this metric when set
 
     # --------------------------------------------------------------- rendering
     def rebuild(self) -> None:
@@ -48,8 +53,9 @@ class Scene:
         # Connectors depend on curves and (through spacing propagation) on each other:
         # redraw all of them together with the changed entities.
         targets = set(ids)
-        for entity in self.session.store.entities("connector"):
-            targets.add(entity.id)
+        for entity in self.session.store:
+            if entity.kind in ("connector", "domain"):
+                targets.add(entity.id)
         for entity_id in sorted(targets):
             self._remove_entity_actor(entity_id)
             if entity_id in self.session.store:
@@ -151,12 +157,75 @@ class Scene:
             names.append(node_name)
         self._actors[entity.id] = names
 
+    def _add_domain_actor(self, entity) -> None:
+        grid = self.session.domain_grid(entity.name, compute=False)
+        mesh = quad_mesh(grid)
+        name = f"entity-{entity.id}"
+        selected = entity.id in self.selected_ids
+        if self.quality_metric is not None:
+            values = _core_quality(grid)[self.quality_metric]
+            mesh.cell_data[self.quality_metric] = values.reshape(-1)
+            self.plotter.add_mesh(
+                mesh,
+                scalars=self.quality_metric,
+                cmap=QUALITY_CMAP,
+                show_edges=True,
+                edge_color="#30363d",
+                name=name,
+                pickable=False,
+                reset_camera=False,
+                scalar_bar_args={"title": self.quality_metric.replace("_", " ")},
+            )
+        else:
+            color = DOMAIN_COLOR
+            width = 1.0
+            if selected:
+                color = SELECTED_COLOR
+                width = 1.5
+            self.plotter.add_mesh(
+                mesh,
+                style="wireframe",
+                color=color,
+                line_width=width,
+                name=name,
+                pickable=False,
+                reset_camera=False,
+            )
+        self._actors[entity.id] = [name]
+
+    def show_worst_cell(self, grid: np.ndarray | None, j: int = 0, i: int = 0) -> None:
+        if grid is None:
+            self.plotter.remove_actor("worst-cell", render=False)
+            self.plotter.render()
+            return
+        corners = np.array(
+            [grid[j, i], grid[j, i + 1], grid[j + 1, i + 1], grid[j + 1, i], grid[j, i]]
+        )
+        self.plotter.add_mesh(
+            _polyline(corners),
+            color=WORST_COLOR,
+            line_width=5,
+            name="worst-cell",
+            pickable=False,
+            reset_camera=False,
+        )
+        center = corners[:4].mean(axis=0)
+        size = float(np.max(np.ptp(corners, axis=0)))
+        camera = self.plotter.camera
+        camera.focal_point = tuple(center)
+        camera.position = (center[0], center[1], center[2] + 10.0 * max(size, 1e-12))
+        camera.parallel_scale = max(10.0 * size, 1e-9)
+        self.plotter.render()
+
     def _add_entity_actor(self, entity_id: int) -> None:
         entity = self.session.store.get(entity_id)
         actor_name = f"entity-{entity_id}"
         selected = entity_id in self.selected_ids
         if entity.kind == "connector":
             self._add_connector_actor(entity)
+            return
+        if entity.kind == "domain":
+            self._add_domain_actor(entity)
             return
         if entity.kind == "point":
             color = POINT_COLOR
@@ -191,7 +260,7 @@ class Scene:
     def _update_endpoints(self) -> None:
         ends = []
         for entity in self.session.store:
-            if entity.kind not in ("point", "connector"):
+            if entity.kind in CURVE_KINDS:
                 curve = self.session.geometry(entity.name)
                 ends.append(curve.eval(0.0))
                 ends.append(curve.eval(1.0))
@@ -249,13 +318,39 @@ def pick_entity(session: Session, xyz, tolerance: float) -> str | None:
                 np.asarray(xyz, dtype=float), session.connector_nodes(entity.name).points
             )
             score = 0.75 * distance
-        else:
+        elif entity.kind == "domain":
+            # Inside a domain counts as a hit, at the lowest priority.
+            grid = session.domain_grid(entity.name, compute=False)
+            if not _inside_loop(np.asarray(xyz, dtype=float), grid):
+                continue
+            distance = 0.0
+            score = tolerance
+        elif entity.kind in CURVE_KINDS:
             _t, _point, distance = session.geometry(entity.name).project(tuple(xyz))
             score = distance
+        else:
+            continue
         if distance <= tolerance and score < best_score:
             best_name = entity.name
             best_score = score
     return best_name
+
+
+def quad_mesh(grid: np.ndarray) -> pv.PolyData:
+    """Quads of a structured grid (nj, ni, 3) as PolyData (cell order: i fastest)."""
+    nj, ni, _ = grid.shape
+    index = np.arange(ni * nj).reshape(nj, ni)
+    quads = np.stack(
+        [index[:-1, :-1], index[:-1, 1:], index[1:, 1:], index[1:, :-1]], axis=-1
+    ).reshape(-1, 4)
+    faces = np.hstack([np.full((len(quads), 1), 4), quads]).ravel()
+    return pv.PolyData(grid.reshape(-1, 3), faces=faces)
+
+
+def _core_quality(grid):
+    from opengrid import _core
+
+    return _core.quality_2d(grid)
 
 
 def _distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:
@@ -270,6 +365,19 @@ def _distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:
     )
     closest = a + t[:, None] * ab
     return float(np.min(np.linalg.norm(closest - point, axis=1)))
+
+
+def _inside_loop(point: np.ndarray, grid: np.ndarray) -> bool:
+    """Even-odd test against the boundary loop of a structured grid (xy plane)."""
+    loop = np.concatenate([grid[0, :-1], grid[:-1, -1], grid[-1, :0:-1], grid[:0:-1, 0]])
+    x = loop[:, 0]
+    y = loop[:, 1]
+    xn = np.roll(x, -1)
+    yn = np.roll(y, -1)
+    crosses = (y > point[1]) != (yn > point[1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        at = x + (point[1] - y) * (xn - x) / (yn - y)
+    return bool(np.count_nonzero(crosses & (point[0] < at)) % 2)
 
 
 def _segment_cells(n: int) -> np.ndarray:

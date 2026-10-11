@@ -14,7 +14,9 @@ replayable Python script::
 import math
 from pathlib import Path
 
-from opengrid import project
+import numpy as np
+
+from opengrid import _core, project
 from opengrid.commands import (
     CommandStack,
     CreateEntities,
@@ -24,8 +26,9 @@ from opengrid.commands import (
     RenameEntity,
 )
 from opengrid.commands.base import JOURNAL_HEADER
-from opengrid.io import read_airfoil_dat, read_points_csv
+from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d, write_vtkhdf
 from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
+from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.store import Entity, Store
 from opengrid.validation import Issue, ValidationError
 
@@ -37,6 +40,7 @@ class Session:
         self.store = Store()
         self.commands = CommandStack(self.store)
         self.connectors = ConnectorEvaluator(self.store)
+        self.domains = DomainEvaluator(self.store, self.connectors)
         self.commands.add_listener(self._invalidate_derived)
         self.project_path: Path | None = None
         # GUI/report threshold for the stretching-ratio warning (not stored in projects).
@@ -208,6 +212,112 @@ class Session:
             lines.append(f"  WARNING: {warning}")
         return "\n".join(lines)
 
+    # -------------------------------------------------------------- domains
+    def create_structured_domain(
+        self, connectors=None, edges=None, generator=None, name: str | None = None
+    ) -> str:
+        """Structured 2D domain.
+
+        Either ``edges``: four lists (counter-clockwise loop: j = 0 with i increasing, i = imax,
+        j = jmax with i decreasing, i = 0) of connector names or ``(name, reversed)`` /
+        ``{"connector": name, "reversed": bool}`` items; or ``connectors``: a set of connector
+        names assembled automatically (one closed loop, or two closed loops joined by a cut).
+        ``generator``: ``{"method": "tfi" | "hermite_tfi", "hermite_walls": (0,),
+        "hermite_strength": 1.0, "elliptic": None | {...}}`` (see opengrid.model.domains).
+        """
+        if edges is None:
+            if connectors is None:
+                raise ValueError("give either edges or connectors")
+            if isinstance(connectors, str):
+                connectors = [connectors]
+            assembled = assemble_edges(self.store, self.connectors, list(connectors))
+            edges = []
+            for edge in assembled:
+                edges.append(
+                    [
+                        {
+                            "connector": self.store.get(i["connector"]).name,
+                            "reversed": i["reversed"],
+                        }
+                        for i in edge
+                    ]
+                )
+        return self.create_domain(edges, generator, name=name)
+
+    def create_domain(self, edges, generator=None, name: str | None = None) -> str:
+        """Structured domain from explicit edges (the form recorded in journals)."""
+        params = {"edges": edges, "generator": generator}
+        return self._create("domain", params, name)
+
+    def set_domain_generator(self, name: str, **changes) -> str:
+        """Update generator settings, e.g. ``set_domain_generator("d", method="hermite_tfi")`` or
+        ``elliptic={"walls": [{"edge": 0, "spacing": 1e-5}]}`` (merged into the current elliptic
+        settings; ``elliptic=None`` switches smoothing off)."""
+        current = self.entity(name).params["generator"]
+        generator = dict(current)
+        for key, value in changes.items():
+            if key == "elliptic" and isinstance(value, dict) and current["elliptic"] is not None:
+                merged = dict(current["elliptic"])
+                merged.update(value)
+                generator["elliptic"] = merged
+            else:
+                generator[key] = value
+        return self.modify(name, generator=generator)
+
+    def rotate_domain(self, name: str, steps: int = 1) -> str:
+        """Cycle the edges (edge ``steps`` becomes edge 0); orientation is preserved."""
+        edges = list(self.entity(name).params["edges"])
+        steps = steps % 4
+        return self.modify(name, edges=tuple(edges[steps:] + edges[:steps]))
+
+    def _domain_id(self, name: str) -> int:
+        entity = self.store.get(name)
+        if entity.kind != "domain":
+            raise ValueError(f"{name!r} is a {entity.kind}, not a domain")
+        return entity.id
+
+    def domain_dimensions(self, name: str) -> tuple[int, int]:
+        """(ni, nj) of a structured domain."""
+        return self.domains.dimensions(self._domain_id(name))
+
+    def domain_grid(self, name: str, compute: bool = True) -> np.ndarray:
+        """Grid points (nj, ni, 3); runs the elliptic smoother if configured and not cached
+        (``compute=False`` returns the TFI grid instead while smoothing is pending)."""
+        return self.domains.grid(self._domain_id(name), compute)
+
+    def smooth_domain(self, name: str, progress=None) -> SmoothingResult:
+        """Run the domain's elliptic smoother (cached); ``progress`` is an optional
+        ``opengrid._core.SmoothingProgress`` for monitoring and cancelling from another thread."""
+        return self.domains.smooth(self._domain_id(name), progress)
+
+    def domain_status(self, name: str) -> str:
+        return self.domains.status(self._domain_id(name))
+
+    def domain_quality(self, name: str) -> dict:
+        """Per-cell quality metrics of the final grid, arrays of shape (nj - 1, ni - 1)."""
+        return _core.quality_2d(self.domain_grid(name))
+
+    def _export_names(self, domains) -> list[str]:
+        if domains is None:
+            return self.names("domain")
+        if isinstance(domains, str):
+            return [domains]
+        return list(domains)
+
+    def export_vtkhdf(self, path, domains=None) -> dict:
+        """Write domains to a VTKHDF UnstructuredGrid (quads, shared points merged) with
+        ``block_id``, cell indices and all quality metrics as cell data."""
+        blocks = []
+        for name in self._export_names(domains):
+            grid = self.domain_grid(name)
+            blocks.append({"name": name, "grid": grid, "cell_data": _core.quality_2d(grid)})
+        return write_vtkhdf(path, blocks)
+
+    def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:
+        """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1)."""
+        grids = [self.domain_grid(name) for name in self._export_names(domains)]
+        write_plot3d(path, grids, binary=binary, three_d=three_d)
+
     # -------------------------------------------------------------- editing
     def modify(self, name: str, **params) -> str:
         """Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))``."""
@@ -354,11 +464,13 @@ class Session:
 
     def _invalidate_derived(self, _change) -> None:
         self.connectors.invalidate()
+        self.domains.invalidate()
 
     def _replace_store(self, store: Store) -> None:
         listeners = list(self.commands._listeners)
         self.store = store
         self.connectors = ConnectorEvaluator(store)
+        self.domains = DomainEvaluator(store, self.connectors)
         self.commands = CommandStack(store)
         for listener in listeners:
             self.commands.add_listener(listener)

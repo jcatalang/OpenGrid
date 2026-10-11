@@ -12,7 +12,10 @@ add_library(og_core STATIC
   src/geom/cubic_spline.cpp
   src/geom/nurbs.cpp
   src/geom/curve_chain.cpp
-  src/topo/connector_nodes.cpp)
+  src/topo/connector_nodes.cpp
+  src/structured/tfi.cpp
+  src/structured/elliptic.cpp
+  src/quality/quality2d.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 
 target_include_directories(og_core PUBLIC

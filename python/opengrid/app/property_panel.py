@@ -22,6 +22,14 @@ from PySide6.QtWidgets import (
 
 from opengrid.api import Session
 from opengrid.model.connectors import DISTRIBUTION_TYPES, SPACING_MODES
+from opengrid.model.domains import (
+    CONTROLS,
+    DEFAULT_ELLIPTIC,
+    DEFAULT_WALL,
+    EDGE_NAMES,
+    METHODS,
+    SOLVERS,
+)
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.validation import ValidationError
 
@@ -122,6 +130,169 @@ def parse_breakpoints(text: str) -> tuple:
     return tuple(result)
 
 
+def format_attractions(attractions) -> str:
+    """One per line: 'xi_line xi amplitude decay', 'eta_line eta amplitude decay' or
+    'point xi eta amplitude decay'."""
+    lines = []
+    for item in attractions:
+        if item["kind"] == "xi_line":
+            values = [item["xi"], item["amplitude"], item["decay"]]
+        elif item["kind"] == "eta_line":
+            values = [item["eta"], item["amplitude"], item["decay"]]
+        else:
+            values = [item["xi"], item["eta"], item["amplitude"], item["decay"]]
+        lines.append(" ".join([item["kind"], *(format_number(v) for v in values)]))
+    return "\n".join(lines)
+
+
+def parse_attractions(text: str) -> tuple:
+    result = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        fields = line.split()
+        if not fields:
+            continue
+        where = f"attractions line {number}"
+        kind = fields[0]
+        values = parse_numbers(" ".join(fields[1:]), where)
+        if kind in ("xi_line", "eta_line") and len(values) == 3:
+            item = {
+                "kind": kind,
+                "xi": None,
+                "eta": None,
+                "amplitude": values[1],
+                "decay": values[2],
+            }
+            if kind == "xi_line":
+                item["xi"] = values[0]
+            else:
+                item["eta"] = values[0]
+        elif kind == "point" and len(values) == 4:
+            item = {
+                "kind": kind,
+                "xi": values[0],
+                "eta": values[1],
+                "amplitude": values[2],
+                "decay": values[3],
+            }
+        else:
+            raise ParseError(
+                f"{where}: expected 'xi_line|eta_line pos amp decay' or 'point xi eta amp decay'"
+            )
+        result.append(item)
+    return tuple(result)
+
+
+class GeneratorEditor(QWidget):
+    """Structured-domain generator: TFI type, Hermite walls and elliptic smoothing."""
+
+    def __init__(self, value: dict, parent=None):
+        super().__init__(parent)
+        self.original = value
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.method = QComboBox()
+        self.method.addItems(list(METHODS))
+        self.method.setCurrentText(value["method"])
+        self.hermite_bottom = QCheckBox("j = 0")
+        self.hermite_top = QCheckBox("j = jmax")
+        self.hermite_bottom.setChecked(0 in value["hermite_walls"])
+        self.hermite_top.setChecked(2 in value["hermite_walls"])
+        walls_row = QWidget()
+        walls_layout = QHBoxLayout(walls_row)
+        walls_layout.setContentsMargins(0, 0, 0, 0)
+        walls_layout.addWidget(self.hermite_bottom)
+        walls_layout.addWidget(self.hermite_top)
+        self.strength = QLineEdit(format_number(value["hermite_strength"]))
+        layout.addRow("method", self.method)
+        layout.addRow("hermite walls", walls_row)
+        layout.addRow("hermite strength", self.strength)
+
+        elliptic = value["elliptic"]
+        self.elliptic_enabled = QCheckBox("elliptic smoothing")
+        self.elliptic_enabled.setChecked(elliptic is not None)
+        if elliptic is None:
+            elliptic = DEFAULT_ELLIPTIC
+        self.elliptic_original = elliptic
+        self.control = QComboBox()
+        self.control.addItems(list(CONTROLS))
+        self.control.setCurrentText(elliptic["control"])
+        self.solver = QComboBox()
+        self.solver.addItems(list(SOLVERS))
+        self.solver.setCurrentText(elliptic["solver"])
+        self.omega = QLineEdit(format_number(elliptic["omega"]))
+        self.iterations = QSpinBox()
+        self.iterations.setRange(1, 10_000_000)
+        self.iterations.setValue(elliptic["max_iterations"])
+        self.tolerance = QLineEdit(format_number(elliptic["tolerance"]))
+        walls = {wall["edge"]: wall for wall in elliptic["walls"]}
+        self.wall_boxes = {}
+        self.wall_spacing = {}
+        for edge, label in ((0, "wall control j = 0"), (2, "wall control j = jmax")):
+            box = QCheckBox(label)
+            box.setChecked(edge in walls)
+            spacing = QLineEdit()
+            spacing.setPlaceholderText("from side boundaries")
+            if edge in walls:
+                spacing.setText(format_optional(walls[edge]["spacing"]))
+            self.wall_boxes[edge] = box
+            self.wall_spacing[edge] = spacing
+            layout.addRow(box, spacing)
+        self.walls_original = walls
+        self.attractions = QPlainTextEdit(format_attractions(elliptic["attractions"]))
+        self.attractions.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.attractions.setPlaceholderText(
+            "ttm control: 'xi_line 20 1.0 0.5' / 'point 10 5 1.0 0.5'"
+        )
+        self.attractions.setMaximumHeight(60)
+        layout.insertRow(3, self.elliptic_enabled)
+        layout.insertRow(4, "control", self.control)
+        layout.insertRow(5, "solver", self.solver)
+        layout.insertRow(6, "omega", self.omega)
+        layout.insertRow(7, "max iterations", self.iterations)
+        layout.insertRow(8, "tolerance", self.tolerance)
+        layout.addRow("attractions", self.attractions)
+
+    def value(self) -> dict:
+        walls = []
+        if self.hermite_bottom.isChecked():
+            walls.append(0)
+        if self.hermite_top.isChecked():
+            walls.append(2)
+        strength = parse_numbers(self.strength.text(), "hermite strength")
+        if len(strength) != 1:
+            raise ParseError("hermite strength: expected one number")
+        result = {
+            "method": self.method.currentText(),
+            "hermite_walls": tuple(walls),
+            "hermite_strength": strength[0],
+            "elliptic": None,
+        }
+        if not self.elliptic_enabled.isChecked():
+            return result
+        omega = parse_numbers(self.omega.text(), "omega")
+        tolerance = parse_numbers(self.tolerance.text(), "tolerance")
+        if len(omega) != 1 or len(tolerance) != 1:
+            raise ParseError("omega and tolerance: expected one number each")
+        wall_items = []
+        for edge in (0, 2):
+            if not self.wall_boxes[edge].isChecked():
+                continue
+            wall = dict(self.walls_original.get(edge, DEFAULT_WALL))
+            wall["edge"] = edge
+            wall["spacing"] = parse_optional(self.wall_spacing[edge].text(), "wall spacing")
+            wall_items.append(wall)
+        result["elliptic"] = {
+            "control": self.control.currentText(),
+            "attractions": parse_attractions(self.attractions.toPlainText()),
+            "walls": tuple(wall_items),
+            "solver": self.solver.currentText(),
+            "omega": omega[0],
+            "max_iterations": self.iterations.value(),
+            "tolerance": tolerance[0],
+        }
+        return result
+
+
 class DistributionEditor(QWidget):
     """Type + begin/end spacing + growth ratio (empty fields mean 'not specified')."""
 
@@ -190,6 +361,7 @@ class PropertyPanel(QWidget):
     """Editor for one entity. Emits ``message(text, is_error)`` after apply attempts."""
 
     message = Signal(str, bool)
+    smooth_requested = Signal(str)
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -243,6 +415,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "domain":
+            self._domain_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         for field, kind in FIELDS[entity.kind]:
             editor = self._make_editor(kind, entity.params[field])
             self._form.addRow(field, editor)
@@ -252,6 +429,46 @@ class PropertyPanel(QWidget):
             self._form.addRow("length", QLabel(f"{length:.10g}"))
         self.apply_button.setEnabled(True)
         self.revert_button.setEnabled(True)
+
+    def _domain_rows(self, entity) -> None:
+        lines = []
+        for k, edge in enumerate(entity.params["edges"]):
+            names = []
+            for item in edge:
+                name = self.session.store.get(item["connector"]).name
+                if item["reversed"]:
+                    name += " (rev)"
+                names.append(name)
+            lines.append(f"{EDGE_NAMES[k]}: {', '.join(names)}")
+        edges = QLabel("\n".join(lines))
+        edges.setWordWrap(True)
+        self._form.addRow("edges", edges)
+        ni, nj = self.session.domain_dimensions(entity.name)
+        self._form.addRow("dimensions", QLabel(f"{ni} x {nj}"))
+        status = QLabel(self.session.domain_status(entity.name))
+        status.setWordWrap(True)
+        self._form.addRow("status", status)
+        editor = GeneratorEditor(entity.params["generator"])
+        self._form.addRow("generator", editor)
+        self._editors["generator"] = ("generator", editor)
+        buttons = QWidget()
+        row = QHBoxLayout(buttons)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.rotate_button = QPushButton("Rotate edges")
+        self.rotate_button.clicked.connect(self._rotate)
+        self.smooth_button = QPushButton("Run smoother")
+        self.smooth_button.clicked.connect(lambda: self.smooth_requested.emit(entity.name))
+        self.smooth_button.setEnabled(entity.params["generator"]["elliptic"] is not None)
+        row.addWidget(self.rotate_button)
+        row.addWidget(self.smooth_button)
+        self._form.addRow("", buttons)
+
+    def _rotate(self) -> None:
+        name = self.session.store.get(self.entity_id).name
+        try:
+            self.session.rotate_domain(name)
+        except ValidationError as error:
+            self._show_error(str(error))
 
     def _connector_rows(self, entity) -> None:
         params = entity.params
@@ -352,6 +569,8 @@ class PropertyPanel(QWidget):
         return new_name, changes
 
     def _read_editor(self, field: str, kind: str, editor: QWidget):
+        if kind == "generator":
+            return editor.value()
         if kind == "dimension":
             return editor.value()
         if kind == "mode":

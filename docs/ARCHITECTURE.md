@@ -43,8 +43,12 @@ gauss/                         repository root (product name: OpenGrid)
 
 Rule: the dependency direction is strictly `app → api/commands → model → _core → og_core`.
 `og_core` never includes Python, Qt or VTK headers. VTK is used in Python only for rendering
-and picking, and in tests for read-back validation. File writers live in C++ (HDF5/CGNS C
-APIs) so that headless scripted runs need no VTK.
+and picking, and in tests for read-back validation.
+
+*Revised in Phase 3:* the VTKHDF and Plot3D writers are written in Python (h5py + NumPy, in
+`opengrid.io`), not in C++. They are pure array I/O, so speed isn't a concern, and headless
+scripted runs still need no VTK. CGNS (Phase 4) still needs the CGNS C library; where it goes
+will be decided then.
 
 ## 2. Dependencies and licenses
 
@@ -249,6 +253,54 @@ segment, so derivative jumps at knots never cost accuracy.
   carrying round-off noise. That case was real: the Phase 1 spline derivative cancelled on
   short segments, and building a finely spaced spline's length table took 7.5 s. Splines are
   now evaluated in difference form.
+
+### Structured 2D domains (Phase 3)
+- **Edges.** A domain is four connector chains listed as a counter-clockwise loop (edge 0 =
+  j=0 with i increasing, then i=imax, then j=jmax with i decreasing, then i=0).
+- **Validation.** The validator checks chain continuity, loop closure, equal point counts on
+  opposite edges (naming the connectors and counts), a CCW orientation, and that the domain is
+  planar (z = const).
+- **Automatic assembly** handles two cases. The first is a single loop: corners are chosen
+  among the junctions so that opposite counts match, preferring the sharpest turns. The second
+  is the O-type: two closed loops joined by one cut connector, with the inner loop placed at
+  j = 0. C-grids, which use a connector on both sides of the cut, are built from explicit edges.
+- **Shared nodes are bitwise identical.** Coincident connector ends are snapped to one
+  canonical coordinate (the lowest-id connector's), so domains sharing connectors or cuts have
+  identical points. VTKHDF export then merges points exactly (np.unique), which is
+  deterministic.
+- **TFI.** Linear TFI uses Soni's arc-length blending parameters, which makes it exact on an
+  annular sector. Hermite TFI uses wall-normal derivatives scaled by |top − bottom|; near the
+  end columns the direction blends into the side boundaries'. *Limitation:* on C-grids
+  (|T − B| ≫ wall size, cusp at the TE) Hermite TFI can fold. Use plain TFI plus elliptic wall
+  control there.
+- **Elliptic smoothing** (C++, see the header of `structured/elliptic.hpp` for references):
+  - Controls are written in the α/γ-scaled (Thomas–Middlecoff) form, so P and Q stay O(1) even
+    at a 1e-5 wall spacing.
+  - The Thomas–Middlecoff control preserves boundary clustering.
+  - TTM attractions are applied in the same scaled form.
+  - **Wall control** uses Steger–Sorenson exponential-decay sources, with p and q set by
+    *direct feedback* on the achieved spacing and angle (Hilgenstock). The classic GRAPE
+    update left about 6% spacing and 4° angle errors. Defaults: decay 0.1/line, gain 0.1,
+    clamp 100. When a source stays at the clamp, the run is reported as a warning, because the
+    iteration can still "converge" without meeting the targets. That case was found on the
+    C-grid with an earlier clamp of 4.
+  - **Solvers.** `line_sor` is alternating-direction line relaxation (η-lines then ξ-lines),
+    with source terms implicit along the lines. With explicit sources, line SOR diverged on the
+    C-grid; alternating directions sped up convergence by about 500× there. `point_sor` is
+    also available.
+  - **Convergence** is relative (tolerance × first residual), with an absolute floor at
+    1e-13·L for grids that already solve the equations.
+  - **Threading.** The solver releases the GIL and reports to a `SmoothingProgress` (atomics
+    plus a mutex-protected residual history, and a cancel flag). The GUI runs it on a Python
+    thread and stores the result on the GUI thread.
+- **Derived data.** Smoothed grids are cached by a key over the generator settings and the
+  boundary node bytes. Unrelated edits keep a smoothing result valid, and undo brings a cached
+  result back.
+- **VTKHDF.** The layout was checked against files written by the installed VTK 9.7
+  `vtkHDFWriter` (format 2.8). We declare version 1.0, because only 1.0 features are used.
+  String field data must be variable-length *ASCII*; VTK fails to read UTF-8 there. **meshio
+  5.3.5 has no VTKHDF (or Plot3D) reader**, so read-back is validated with VTK's
+  `vtkHDFReader` plus h5py layout checks rather than with meshio as the spec asks.
 
 ## 7. 3D tet backend decision
 

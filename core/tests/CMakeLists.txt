@@ -8,6 +8,7 @@ add_executable(og_core_tests
   test_arclength.cpp
   test_projection.cpp
   test_distribution.cpp
-  test_connector.cpp)
+  test_connector.cpp
+  test_structured.cpp)
 target_link_libraries(og_core_tests PRIVATE og_core og_options GTest::gtest_main)
 gtest_discover_tests(og_core_tests)

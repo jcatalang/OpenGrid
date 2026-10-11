@@ -15,8 +15,8 @@ FORMAT = "opengrid-project"
 VERSION = 1
 
 # Sections reserved for later phases; written empty so the schema is stable.
-_FUTURE_SECTIONS = ("blocks", "domains", "patches", "zones")
-_SECTIONS = {"database": DATABASE_KINDS, "connectors": ("connector",)}
+_FUTURE_SECTIONS = ("blocks", "patches", "zones")
+_SECTIONS = {"database": DATABASE_KINDS, "connectors": ("connector",), "domains": ("domain",)}
 _RECORD_KEYS = ("id", "name", "type")
 
 

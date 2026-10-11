@@ -358,10 +358,36 @@ class ConnectorEvaluator:
         self.store = store
         self._chains: dict[int, object] = {}
         self._nodes: dict[int, ConnectorNodes] = {}
+        self._canonical: list[np.ndarray] | None = None
 
     def invalidate(self) -> None:
         self._chains.clear()
         self._nodes.clear()
+        self._canonical = None
+
+    def canonical_point(self, point) -> np.ndarray:
+        """Shared coordinate of a connector end: coincident ends of different connectors are
+        represented by one bitwise-identical point (the first in id order), so that domains
+        sharing a node get identical coordinates."""
+        if self._canonical is None:
+            self._canonical = []
+            for entity in self.store.entities("connector"):
+                chain = self.chain(entity.id)
+                for end in (chain.start(), chain.end()):
+                    self._register(np.asarray(end, dtype=float))
+        point = np.asarray(point, dtype=float)
+        tolerance = CHAIN_TOLERANCE * max(1.0, float(np.max(np.abs(point))))
+        for known in self._canonical:
+            if np.linalg.norm(known - point) <= tolerance:
+                return known
+        return point
+
+    def _register(self, point: np.ndarray) -> None:
+        tolerance = CHAIN_TOLERANCE * max(1.0, float(np.max(np.abs(point))))
+        for known in self._canonical:
+            if np.linalg.norm(known - point) <= tolerance:
+                return
+        self._canonical.append(point)
 
     def chain(self, entity_id: int):
         if entity_id not in self._chains:
@@ -426,4 +452,7 @@ class ConnectorEvaluator:
                 )
             )
         points, arc_positions, warnings, ratio = _core.connector_nodes(chain, params["mode"], specs)
+        points[0] = self.canonical_point(points[0])
+        points[-1] = self.canonical_point(points[-1])
+        points.setflags(write=False)
         return ConnectorNodes(points, arc_positions, list(warnings), ratio, propagated)

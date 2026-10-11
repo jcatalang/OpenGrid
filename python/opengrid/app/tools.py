@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 
 from opengrid.api import Session
+from opengrid.model.connectors import CURVE_KINDS
 
 
 @dataclass(frozen=True)
@@ -17,11 +18,14 @@ class SnapTarget:
 
 
 def snap_targets(session: Session) -> list[SnapTarget]:
-    """Point entities and the end points of every curve, in id order."""
+    """Point entities and the end points of every curve, in id order (connector ends lie on
+    curve ends, so they need no separate targets)."""
     targets = []
     for entity in session.store:
         if entity.kind == "point":
             targets.append(SnapTarget(tuple(entity.params["xyz"]), entity.name))
+            continue
+        if entity.kind not in CURVE_KINDS:
             continue
         curve = session.geometry(entity.name)
         targets.append(SnapTarget(tuple(curve.eval(0.0)), f"{entity.name} start"))

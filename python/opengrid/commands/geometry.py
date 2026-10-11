@@ -5,7 +5,7 @@ their names at that moment, so a journal stays valid across later renames).
 """
 
 from opengrid.commands.base import Command
-from opengrid.model.connectors import CURVE_KINDS, build_chain, script_params
+from opengrid.model.connectors import script_params
 from opengrid.model.entities import normalize_params
 from opengrid.model.store import Store
 from opengrid.validation import Issue, ValidationError
@@ -26,6 +26,18 @@ def format_kwargs(params: dict) -> str:
 def _for_script(kind: str, params: dict, store: Store) -> dict:
     if kind == "connector":
         return script_params(params, store)
+    if kind == "domain":
+        result = dict(params)
+        edges = []
+        for edge in params["edges"]:
+            items = []
+            for item in edge:
+                items.append(
+                    {"connector": store.get(item["connector"]).name, "reversed": item["reversed"]}
+                )
+            edges.append(tuple(items))
+        result["edges"] = tuple(edges)
+        return result
     return params
 
 
@@ -34,13 +46,24 @@ def create_call(kind: str, params: dict, name: str, store: Store) -> str:
 
 
 def _check_dependents_still_valid(store: Store, entity_id: int) -> None:
-    """After a curve changed, every connector using it must still form a valid chain."""
+    """After an entity changed, everything that depends on it (transitively) must still be
+    valid: connectors must form continuous chains, domains closed loops with matching counts."""
     issues = []
-    for connector in store.dependents(entity_id):
-        try:
-            build_chain(connector.params, store)
-        except ValueError as error:
-            issues.append(Issue(connector.name, f"would become invalid: {error}"))
+    pending = [entity_id]
+    seen = set()
+    while pending:
+        current = pending.pop(0)
+        for dependent in store.dependents(current):
+            if dependent.id in seen:
+                continue
+            seen.add(dependent.id)
+            try:
+                normalize_params(dependent.kind, dict(dependent.params), dependent.name, store)
+            except ValidationError as error:
+                details = "; ".join(issue.message for issue in error.issues)
+                issues.append(Issue(dependent.name, f"would become invalid: {details}"))
+                continue
+            pending.append(dependent.id)
     if issues:
         raise ValidationError(issues)
 
@@ -116,8 +139,7 @@ class ModifyEntity(Command):
         merged.update(self.changes)
         params = normalize_params(entity.kind, merged, entity.name, store)
         store.update(entity.id, params=params)
-        if entity.kind in CURVE_KINDS:
-            _check_dependents_still_valid(store, entity.id)
+        _check_dependents_still_valid(store, entity.id)
         recorded = {}
         shown = _for_script(entity.kind, params, store)
         for key in self.changes:
@@ -164,7 +186,7 @@ class DeleteEntities(Command):
         for name in self.names:
             for dependent in store.dependents(name):
                 if dependent.name not in seen:
-                    issues.append(Issue(name, f"is used by connector {dependent.name!r}"))
+                    issues.append(Issue(name, f"is used by {dependent.kind} {dependent.name!r}"))
         if issues:
             raise ValidationError(issues)
         for name in self.names:

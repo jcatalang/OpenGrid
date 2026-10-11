@@ -19,3 +19,4 @@ __pycache__/
 examples/output/*.vtkhdf
 examples/output/*.cgns
 examples/output/*.msh
+examples/output/*.xyz

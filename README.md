@@ -3,7 +3,8 @@
 Interactive block-structured / unstructured / hybrid mesh generator for CFD (2D and 3D). C++20 core, Python bindings (nanobind),
 PySide6 + VTK GUI, and a Python scripting API.
 
-Status: Phase 2 (geometry kernel, connectors with distributions, scripting API, project files, GUI).
+Status: Phase 3 (geometry, connectors, structured 2D domains with TFI/elliptic smoothing,
+quality metrics, VTKHDF and Plot3D export, scripting API and GUI).
 See `docs/ROADMAP.md` and `docs/PROGRESS.md`.
 
 ```python

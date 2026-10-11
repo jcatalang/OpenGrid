@@ -17,6 +17,17 @@ def connector_info(session, entity) -> str:
     return text
 
 
+def domain_info(session, entity) -> str:
+    """'ni x nj', with a warning sign while smoothing is pending, not converged, or cells are
+    inverted."""
+    ni, nj = session.domain_dimensions(entity.name)
+    text = f"{ni} x {nj}"
+    status = session.domain_status(entity.name)
+    if "pending" in status or "NOT" in status:
+        text += "  ⚠"
+    return text
+
+
 class ModelTree(QTreeWidget):
     """Tree of model entities grouped by category; emits the selected entity ids."""
 
@@ -51,17 +62,20 @@ class ModelTree(QTreeWidget):
         self._entity_items.clear()
         database = self._category_items["Database"]
         connectors = self._category_items["Connectors"]
-        database.takeChildren()
-        connectors.takeChildren()
+        domains = self._category_items["Domains"]
+        for category in (database, connectors, domains):
+            category.takeChildren()
         for entity in session.store:
             if entity.kind == "connector":
                 item = QTreeWidgetItem(connectors, [entity.name, connector_info(session, entity)])
+            elif entity.kind == "domain":
+                item = QTreeWidgetItem(domains, [entity.name, domain_info(session, entity)])
             else:
                 item = QTreeWidgetItem(database, [entity.name, entity.kind])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
-        database.setText(1, f"{database.childCount()}")
-        connectors.setText(1, f"{connectors.childCount()}")
+        for category in (database, connectors, domains):
+            category.setText(1, f"{category.childCount()}")
         self.resizeColumnToContents(0)
         self.blockSignals(False)
 

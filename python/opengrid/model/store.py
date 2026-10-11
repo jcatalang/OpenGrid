@@ -25,6 +25,15 @@ class Entity:
     params: dict
 
 
+def references(entity: Entity) -> set[int]:
+    """Ids of the entities this entity refers to."""
+    if entity.kind == "connector":
+        return {segment["curve"] for segment in entity.params["segments"]}
+    if entity.kind == "domain":
+        return {item["connector"] for edge in entity.params["edges"] for item in edge}
+    return set()
+
+
 @dataclass
 class Change:
     """Before/after state of the entities touched by one transaction (None = absent)."""
@@ -86,16 +95,9 @@ class Store:
         return self._geometry[entity.id]
 
     def dependents(self, key: str | int) -> list[Entity]:
-        """Connectors whose segments reference the given entity."""
+        """Entities that reference the given one (connectors -> curves, domains -> connectors)."""
         entity_id = self.get(key).id
-        result = []
-        for entity in self:
-            if entity.kind == "connector":
-                for segment in entity.params["segments"]:
-                    if segment["curve"] == entity_id:
-                        result.append(entity)
-                        break
-        return result
+        return [entity for entity in self if entity_id in references(entity)]
 
     def snapshot(self) -> dict[int, Entity]:
         return dict(self._entities)

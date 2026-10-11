@@ -97,6 +97,12 @@ class ExtrusionEditor(QWidget):
         self.dimension.setRange(2, 100000)
         self.dimension.setValue(value["dimension"])
         self.distribution = DistributionEditor(value["distribution"])
+        self.edges = QLineEdit(", ".join(value["edges"]))
+        self.edges.setToolTip(
+            "hyperbolic: conditions of the base edges imin, imax, jmin, jmax "
+            "(free, constant_x, constant_y, constant_z, periodic)"
+        )
+        self.dissipation = QLineEdit(format_number(value["dissipation"]))
         layout.addRow("mode", self.mode)
         layout.addRow("vector / axis", self.vector)
         layout.addRow("axis point", self.axis_point)
@@ -104,6 +110,8 @@ class ExtrusionEditor(QWidget):
         layout.addRow("distance", self.distance)
         layout.addRow("points", self.dimension)
         layout.addRow("distribution", self.distribution)
+        layout.addRow("edges", self.edges)
+        layout.addRow("dissipation", self.dissipation)
 
     def value(self) -> dict:
         def vec(edit, label):
@@ -131,7 +139,70 @@ class ExtrusionEditor(QWidget):
             "distance": one(self.distance, "distance"),
             "dimension": self.dimension.value(),
             "distribution": distribution,
+            "edges": tuple(e.strip() for e in self.edges.text().split(",") if e.strip()),
+            "dissipation": one(self.dissipation, "dissipation"),
         }
+
+
+class BlockSmoothingEditor(QWidget):
+    """3D elliptic smoothing of a block: control (none = off), wall faces with a first spacing,
+    maximum iterations."""
+
+    def __init__(self, value: dict | None, parent=None):
+        super().__init__(parent)
+        self.original = value
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.control = QComboBox()
+        self.control.addItems(["none", "laplace", "thomas_middlecoff"])
+        walls = ""
+        spacing = ""
+        iterations = 500
+        if value is not None:
+            self.control.setCurrentText(value["control"])
+            walls = ", ".join(w["face"] for w in value["walls"])
+            if value["walls"] and value["walls"][0]["spacing"] is not None:
+                spacing = format_number(value["walls"][0]["spacing"])
+            iterations = value["max_iterations"]
+        self.walls = QLineEdit(walls)
+        self.walls.setPlaceholderText("wall faces, e.g. kmin")
+        self.spacing = QLineEdit(spacing)
+        self.spacing.setPlaceholderText("from the block edges")
+        self.iterations = QSpinBox()
+        self.iterations.setRange(1, 1_000_000)
+        self.iterations.setValue(iterations)
+        layout.addRow("control", self.control)
+        layout.addRow("wall faces", self.walls)
+        layout.addRow("wall spacing", self.spacing)
+        layout.addRow("iterations", self.iterations)
+
+    def value(self) -> dict | None:
+        if self.control.currentText() == "none":
+            return None
+        spacing = parse_optional(self.spacing.text(), "wall spacing")
+        faces = [f.strip() for f in self.walls.text().split(",") if f.strip()]
+        previous = {}
+        if self.original is not None:
+            previous = {w["face"]: w for w in self.original["walls"]}
+        walls = []
+        for face in faces:
+            wall = dict(
+                previous.get(
+                    face, {"face": face, "decay": 0.1, "relaxation": 0.1, "max_source": 100.0}
+                )
+            )
+            wall["spacing"] = spacing
+            walls.append(wall)
+        result = {
+            "control": self.control.currentText(),
+            "walls": tuple(walls),
+            "max_iterations": self.iterations.value(),
+        }
+        if self.original is not None:
+            result = {**self.original, **result}
+        else:
+            result.update({"omega": 1.0, "tolerance": 1e-6})
+        return result
 
 
 CONNECTOR_FIELDS = (
@@ -720,6 +791,9 @@ class PropertyPanel(QWidget):
         status = QLabel(text)
         status.setWordWrap(True)
         self._form.addRow("status", status)
+        smoothing = BlockSmoothingEditor(params["smoothing"])
+        self._form.addRow("smoothing", smoothing)
+        self._editors["smoothing"] = ("smoothing", smoothing)
         if params["faces"] is not None:
             faces = QLabel(", ".join(self.session.store.get(f).name for f in params["faces"]))
             faces.setWordWrap(True)
@@ -909,7 +983,7 @@ class PropertyPanel(QWidget):
                     continue
                 raise ParseError(f"members: no entity {name!r}")
             return tuple(members)
-        if kind in ("generator", "extrusion"):
+        if kind in ("generator", "extrusion", "smoothing"):
             return editor.value()
         if kind == "dimension":
             return editor.value()

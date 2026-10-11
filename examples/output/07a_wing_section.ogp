@@ -1,6 +1,6 @@
 {
  "blocks": [
-  {"extrusion": {"angle": 0.0, "axis_point": [0.0, 0.0, 0.0], "dimension": 21, "distance": 0.0, "distribution": {"begin_spacing": 0.02, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "domain": 11, "mode": "translate", "vector": [0.0, 0.0, 2.0]}, "faces": null, "id": 16, "name": "wing", "type": "block"}
+  {"extrusion": {"angle": 0.0, "axis_point": [0.0, 0.0, 0.0], "dimension": 21, "dissipation": 0.2, "distance": 0.0, "distribution": {"begin_spacing": 0.02, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "domain": 11, "edges": ["free", "free", "free", "free"], "mode": "translate", "vector": [0.0, 0.0, 2.0]}, "faces": null, "id": 16, "name": "wing", "smoothing": null, "type": "block"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 101, "distribution": {"begin_spacing": 0.002, "end_spacing": 0.001, "growth_ratio": null, "type": "tanh"}, "id": 3, "mode": "arc_length", "name": "c-upper", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},

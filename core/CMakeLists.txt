@@ -31,6 +31,9 @@ add_library(og_core STATIC
   src/structured/tfi3d.cpp
   src/structured/extrude.cpp
   src/structured/surface_tfi.cpp
+  src/structured/elliptic3d.cpp
+  src/structured/surface_elliptic.cpp
+  src/structured/hyperbolic.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 

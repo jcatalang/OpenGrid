@@ -339,14 +339,26 @@ def check_domain(params: dict, store, connectors: ConnectorEvaluator, where: str
     loop = np.concatenate([a[:-1] for a in arrays])
     if np.ptp(loop[:, 2]) > tolerance or params.get("surface") is not None:
         # Face of a 3D block: linear TFI in space or on a surface; no orientation requirement.
+        # Surface domains may be smoothed (Laplace / Thomas-Middlecoff, nodes kept on it).
         generator = params["generator"]
-        if generator["method"] != "tfi" or generator["elliptic"] is not None:
+        elliptic = generator["elliptic"]
+        if (
+            params.get("surface") is not None
+            and generator["method"] == "tfi"
+            and elliptic is not None
+            and elliptic["control"] in ("laplace", "thomas_middlecoff")
+            and not elliptic["walls"]
+            and not elliptic["attractions"]
+        ):
+            return
+        if generator["method"] != "tfi" or elliptic is not None:
             raise ValidationError(
                 [
                     Issue(
                         where,
                         "Hermite TFI and elliptic smoothing need a planar domain in a plane "
-                        "z = const; domains in 3D or on surfaces use method 'tfi'",
+                        "z = const; domains in 3D use method 'tfi' (on a surface, elliptic "
+                        "smoothing with Laplace or Thomas-Middlecoff control and no walls)",
                     )
                 ]
             )
@@ -729,7 +741,23 @@ class DomainEvaluator:
         key = self.key(entity_id)
         if key in self._smoothed:
             return self._smoothed[key]
-        result = run_smoother(self.initial_grid(entity_id), generator["elliptic"], progress)
+        surface = self.store.get(entity_id).params.get("surface")
+        if surface is not None:
+            e = generator["elliptic"]
+            grid, residuals, iterations, converged, cancelled, warnings = _core.smooth_on_surface(
+                self.store.geometry(surface),
+                np.ascontiguousarray(self.initial_grid(entity_id)),
+                e["control"],
+                e["omega"],
+                e["max_iterations"],
+                e["tolerance"],
+                progress,
+            )
+            result = SmoothingResult(
+                grid, np.asarray(residuals), iterations, converged, cancelled, list(warnings)
+            )
+        else:
+            result = run_smoother(self.initial_grid(entity_id), generator["elliptic"], progress)
         if not result.cancelled:
             self.store_result(key, result)
         return result

@@ -110,6 +110,8 @@ Phase 5 generators (triangles, quad-dominant or all-quad).
 - Export VTKHDF (hexes), CGNS 3D structured, Plot3D 3D.
 - Demos: annular sector duct; extruded wing section; 3D cylinder O-grid.
 
+Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consistency and all exports verified (7a); smoothing and hyperbolic extrusion (7b).
+
 ## Phase 8 — 3D unstructured and hybrid *(proposed split: 8a surface mesh + shell + backend, 8b inflation, 8c optimisation + mixed blocks)*
 - Surface meshing on parametric surfaces, a watertight shell check (each edge shared by exactly 2 faces, consistent orientation).
 - `TetBackend` with Netgen first and mmg for optimisation.

@@ -543,3 +543,45 @@
 - **Block faces:** periodic 3D faces and collapsed faces are not supported.
 - **Domain quality in 3D:** non-planar face domains use planar 2D metrics.
 - **Cut plane:** fixed normal (x).
+
+## Phase 7b — 3D elliptic smoothing, surface smoothing, hyperbolic extrusion (2026-10-11) — approved
+- **C++:** `elliptic3d.cpp`, `surface_elliptic.cpp`, `hyperbolic.cpp`, with bindings
+  `smooth_elliptic_3d`, `smooth_on_surface`, `extrude_hyperbolic`.
+- **Python / GUI:**
+  - Block `smoothing` setting (`set_block_smoothing`) and extrusion mode `hyperbolic` (edge
+    conditions, dissipation).
+  - Elliptic generator allowed on surface domains.
+  - Block status reports smoothing convergence and warnings.
+  - GUI editors for block smoothing and the new extrusion fields.
+- **Demo** `examples/07b_smoothing.py`:
+  - **3D cylinder O-grid** (hyperbolic, 129 × 21 × 61, 153 600 cells in 0.08 s):
+    - first cell 1.000e-3, outer radius exactly 10.5;
+    - min scaled Jacobian 0.9997, max non-orthogonality 1.41°;
+    - seam detected as a 1-to-1 interface.
+  - **Bump channel**: 3D elliptic smoothing with wall control brings the first-spacing error
+    from 0.150 to 0.000 and the wall angle from 19.5° to 0.00°.
+  - cgnscheck clean. Outputs: `07b_smoothing.png`, `phase7b_main_window.png`, CGNS / VTKHDF /
+    msh, projects, journals.
+
+### Verified
+- `ctest`: 107/107 (`-Werror`); clang-tidy: 0 findings. Covered:
+  - Laplace keeps a uniform cube (1e-12);
+  - Thomas–Middlecoff converges to the same grid from an exact and a perturbed start (1e-8);
+  - wall control: spacing within 2%, wall angle < 1°, faces untouched;
+  - surface smoothing stays on the cylinder (1e-11) and recovers a perturbed patch;
+    walls rejected;
+  - hyperbolic: flat-plate heights exact (1e-12); cylinder O-grid radial (1e-9); mirroring;
+    open periodic edges rejected.
+- `pytest`: 232/232 (+4). Covered:
+  - hyperbolic O-grid through the API (radii, first cell, interface, cgnscheck, replay);
+  - block smoothing with wall control (spacing < 2%, angle < 1.5°, faces unchanged, undo,
+    validation);
+  - surface domain smoothing on a cylinder; 3D validation; save/load.
+- All Phase 1–7a demos still run.
+
+### Not verified / known limitations
+- **Hyperbolic extrusion** is an explicit variant, not the implicit Chan–Steger scheme.
+  Concave regions rely on dissipation; inverted layers are reported, not repaired.
+- **3D elliptic smoothing** uses point SOR only (no line relaxation): about 850 iterations for
+  18 000 cells.
+- **Surface smoothing** supports no wall control.

@@ -5,6 +5,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -13,6 +14,7 @@
 #include <array>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -21,7 +23,10 @@
 #include "opengrid/core/geom/surface.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality3d.hpp"
+#include "opengrid/core/structured/elliptic3d.hpp"
 #include "opengrid/core/structured/extrude.hpp"
+#include "opengrid/core/structured/hyperbolic.hpp"
+#include "opengrid/core/structured/surface_elliptic.hpp"
 #include "opengrid/core/structured/surface_tfi.hpp"
 #include "opengrid/core/structured/tfi3d.hpp"
 
@@ -251,6 +256,120 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("distance") = 0.0, nb::arg("fractions") = std::vector<double>{0.0, 1.0},
       "Extrude a surface grid (nj, ni, 3): mode 'translate' (vector), 'rotate' (axis_point, "
       "vector = axis, angle in radians) or 'normal' (distance); returns (block, mirrored).");
+
+  m.def(
+      "smooth_elliptic_3d",
+      [](const Block& grid, const std::string& control,
+         const std::vector<std::tuple<int, std::optional<double>, double, double, double>>& walls,
+         double omega, int max_iterations, double tolerance, og::SmoothingProgress* progress) {
+        og::Elliptic3DOptions options;
+        if (control == "laplace") {
+          options.control = og::ControlType::Laplace;
+        } else if (control == "thomas_middlecoff") {
+          options.control = og::ControlType::ThomasMiddlecoff;
+        } else {
+          throw std::invalid_argument("control must be 'laplace' or 'thomas_middlecoff'");
+        }
+        for (const auto& [face, spacing, decay, relaxation, max_source] : walls) {
+          og::WallControl3D w;
+          w.face = face;
+          w.control.enabled = true;
+          w.control.spacing = spacing;
+          w.control.decay = decay;
+          w.control.relaxation = relaxation;
+          w.control.max_source = max_source;
+          options.walls.push_back(w);
+        }
+        options.omega = omega;
+        options.max_iterations = max_iterations;
+        options.tolerance = tolerance;
+        const og::Grid3D g = block_from(grid);
+        og::Elliptic3DResult r;
+        {
+          const nb::gil_scoped_release release;
+          r = og::smooth_elliptic_3d(g, options, progress);
+        }
+        return std::make_tuple(block_to(r.grid), r.residuals, r.iterations, r.converged,
+                               r.cancelled, r.warnings);
+      },
+      nb::arg("grid"), nb::arg("control") = "laplace",
+      nb::arg("walls") =
+          std::vector<std::tuple<int, std::optional<double>, double, double, double>>{},
+      nb::arg("omega") = 1.0, nb::arg("max_iterations") = 500, nb::arg("tolerance") = 1e-6,
+      nb::arg("progress") = nb::none(),
+      "3D elliptic smoothing; walls: (face 0..5 = imin..kmax, spacing or None, decay, "
+      "relaxation, max_source). Returns (grid, residuals, iterations, converged, cancelled, "
+      "warnings).");
+
+  m.def(
+      "smooth_on_surface",
+      [](const og::Surface& surface, const Face& grid, const std::string& control, double omega,
+         int max_iterations, double tolerance, og::SmoothingProgress* progress) {
+        og::EllipticOptions options;
+        if (control == "laplace") {
+          options.control = og::ControlType::Laplace;
+        } else if (control == "thomas_middlecoff") {
+          options.control = og::ControlType::ThomasMiddlecoff;
+        } else {
+          throw std::invalid_argument("control must be 'laplace' or 'thomas_middlecoff'");
+        }
+        options.omega = omega;
+        options.max_iterations = max_iterations;
+        options.tolerance = tolerance;
+        const og::Grid2D g = face_from(grid);
+        og::EllipticResult r;
+        {
+          const nb::gil_scoped_release release;
+          r = og::smooth_on_surface(surface, g, options, progress);
+        }
+        return std::make_tuple(face_to(r.grid), r.residuals, r.iterations, r.converged, r.cancelled,
+                               r.warnings);
+      },
+      nb::arg("surface"), nb::arg("grid"), nb::arg("control") = "laplace", nb::arg("omega") = 1.0,
+      nb::arg("max_iterations") = 1000, nb::arg("tolerance") = 1e-6,
+      nb::arg("progress") = nb::none(),
+      "Elliptic smoothing of a grid (nj, ni, 3) on a surface (nodes projected back each update).");
+
+  m.def(
+      "extrude_hyperbolic",
+      [](const Face& base, double distance, const std::vector<double>& fractions,
+         const std::vector<std::string>& edges, double dissipation, int normal_smoothing) {
+        og::HyperbolicOptions options;
+        if (edges.size() != 4) {
+          throw std::invalid_argument("edges: four conditions (imin, imax, jmin, jmax)");
+        }
+        for (std::size_t k = 0; k < 4; ++k) {
+          const std::string& e = edges[k];
+          if (e == "free") {
+            options.edges[k] = og::HyperbolicEdge::Free;
+          } else if (e == "constant_x") {
+            options.edges[k] = og::HyperbolicEdge::ConstantX;
+          } else if (e == "constant_y") {
+            options.edges[k] = og::HyperbolicEdge::ConstantY;
+          } else if (e == "constant_z") {
+            options.edges[k] = og::HyperbolicEdge::ConstantZ;
+          } else if (e == "periodic") {
+            options.edges[k] = og::HyperbolicEdge::Periodic;
+          } else {
+            throw std::invalid_argument(
+                "edge conditions: free, constant_x, constant_y, constant_z or periodic");
+          }
+        }
+        options.dissipation = dissipation;
+        options.normal_smoothing = normal_smoothing;
+        const og::Grid2D b = face_from(base);
+        og::HyperbolicResult r;
+        {
+          const nb::gil_scoped_release release;
+          r = og::extrude_hyperbolic(b, distance, fractions, options);
+        }
+        return std::make_tuple(block_to(r.grid), r.mirrored, r.inverted_layers, r.warnings);
+      },
+      nb::arg("base"), nb::arg("distance"), nb::arg("fractions"),
+      nb::arg("edges") = std::vector<std::string>{"free", "free", "free", "free"},
+      nb::arg("dissipation") = 0.2, nb::arg("normal_smoothing") = 4,
+      "Hyperbolic extrusion of a surface grid (nj, ni, 3); returns (block, mirrored, "
+      "inverted_layers, warnings).");
 
   m.def(
       "quality_3d",

@@ -443,19 +443,37 @@ class Session:
 
     # ------------------------------------------------------ patches and zones
     # ---------------------------------------------------------------- blocks
-    def create_block(self, faces=None, extrusion=None, name: str | None = None) -> str:
+    def create_block(
+        self, faces=None, extrusion=None, name: str | None = None, smoothing=None
+    ) -> str:
         """Structured block from six structured domains (``faces``, any order and orientation)
         or from an ``extrusion`` of a domain: ``{"domain", "mode": "translate" | "rotate" |
         "normal", "vector" (translation or rotation axis), "axis_point", "angle" (radians),
         "distance" (normal), "dimension" (points along the extrusion), "distribution":
-        {"type", "begin_spacing", "end_spacing", "growth_ratio"}}``."""
-        return self._create("block", {"faces": faces, "extrusion": extrusion}, name)
+        {"type", "begin_spacing", "end_spacing", "growth_ratio"}, "edges": (imin, imax, jmin,
+        jmax) conditions of hyperbolic extrusion ("free", "constant_x", "constant_y",
+        "constant_z", "periodic"), "dissipation"}``. ``smoothing``: 3D elliptic smoothing
+        ``{"control": "laplace" | "thomas_middlecoff", "walls": [{"face": "kmin", "spacing",
+        "decay", "relaxation", "max_source"}], "omega", "max_iterations", "tolerance"}``."""
+        params = {"faces": faces, "extrusion": extrusion, "smoothing": smoothing}
+        return self._create("block", params, name)
+
+    def set_block_smoothing(self, name: str, smoothing) -> str:
+        """Set (or remove with None) the 3D elliptic smoothing of a block."""
+        return self.modify(name, smoothing=smoothing)
 
     def create_extruded_block(
-        self, domain, mode: str = "translate", name: str | None = None, **settings
+        self,
+        domain,
+        mode: str = "translate",
+        name: str | None = None,
+        smoothing=None,
+        **settings,
     ) -> str:
         """Shorthand for create_block(extrusion={"domain": domain, "mode": mode, **settings})."""
-        return self.create_block(extrusion={"domain": domain, "mode": mode, **settings}, name=name)
+        return self.create_block(
+            extrusion={"domain": domain, "mode": mode, **settings}, name=name, smoothing=smoothing
+        )
 
     def block_grid(self, name: str) -> np.ndarray:
         """Block grid, shape (nk, nj, ni, 3)."""
@@ -471,7 +489,18 @@ class Session:
         source = "6 faces, TFI"
         if params["extrusion"] is not None:
             source = f"{params['extrusion']['mode']} extrusion"
-        return f"{ni} x {nj} x {nk} points ({(ni - 1) * (nj - 1) * (nk - 1)} cells), {source}"
+        result = self.blocks.evaluate(self.store.get(name).id)
+        text = f"{ni} x {nj} x {nk} points ({(ni - 1) * (nj - 1) * (nk - 1)} cells), {source}"
+        if result["smoothing"] is not None:
+            state = "converged"
+            if not result["smoothing"]["converged"]:
+                state = "not converged"
+            text += (
+                f", elliptic smoothing {state} in {result['smoothing']['iterations']} iterations"
+            )
+        if result["warnings"]:
+            text += "; " + "; ".join(result["warnings"])
+        return text
 
     def create_patch(
         self, name: str | None = None, patch_type: str = "wall", members=(), periodic=None

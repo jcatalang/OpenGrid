@@ -591,6 +591,32 @@ segment, so derivative jumps at knots never cost accuracy.
   - 2D quality of non-planar face domains uses the planar formula.
   - The cut plane is fixed at x = model centre.
 
+### 3D smoothing and hyperbolic extrusion (Phase 7b)
+- **3D elliptic smoothing** (`structured/elliptic3d.cpp`):
+  - Poisson system with cofactor metric coefficients, point SOR, faces fixed.
+  - Control: Laplace, or Thomas–Middlecoff with P_m from the four faces containing the m-lines,
+    blended by transfinite interpolation in index space.
+  - Wall control on any face: decaying sources with Hilgenstock feedback, using the same signs
+    as the 2D smoother. The normal source comes from the first-cell height error, the two
+    tangential sources from the lean of the first grid line.
+  - Bump-channel demo: first-spacing error 15% → 0.0%, wall angle 19.5° → 0.00° (852
+    iterations, 0.4 s).
+  - Blocks get it through the optional `smoothing` setting (faces or extrusion blocks alike).
+- **Surface smoothing** (`structured/surface_elliptic.cpp`):
+  - The 2D Poisson system written with 3D tangent vectors, Laplace or Thomas–Middlecoff; every
+    updated node is projected back onto the surface (Newton from its previous parameters).
+  - Used by structured domains with a `surface` and an elliptic generator; walls and
+    attractions are rejected.
+- **Hyperbolic extrusion** (`structured/hyperbolic.cpp`, extrusion mode `hyperbolic`):
+  - An explicit marching variant of the hyperbolic conditions: layer normals smoothed with a
+    visibility guard, steps divided by the cosine to the raw normal (corners keep the height),
+    and tangential dissipation.
+  - Edge conditions: free, constant x/y/z, periodic.
+  - This is not Chan–Steger's implicit block-tridiagonal solver; it is cheaper and adequate for
+    smooth convex surfaces. Strongly concave regions may need more dissipation, and inverted
+    layers are reported as warnings.
+  - Cylinder demo: radii exact to 1e-9, first cell exactly 1e-3, worst SJ 0.9997.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

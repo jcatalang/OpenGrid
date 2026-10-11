@@ -1,0 +1,31 @@
+{
+ "blocks": [
+  {"extrusion": {"angle": 0.0, "axis_point": [0.0, 0.0, 0.0], "dimension": 61, "dissipation": 0.2, "distance": 10.0, "distribution": {"begin_spacing": 0.0001, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "domain": 7, "edges": ["periodic", "periodic", "constant_z", "constant_z"], "mode": "hyperbolic", "vector": [0.0, 0.0, 1.0]}, "faces": null, "id": 8, "name": "ogrid", "smoothing": null, "type": "block"}
+ ],
+ "connectors": [
+  {"breakpoints": [], "dimension": 129, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 4, "mode": "arc_length", "name": "c-circle0", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 129, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 5, "mode": "arc_length", "name": "c-circle1", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 6, "mode": "arc_length", "name": "c-seam", "propagate_spacing": true, "segments": [{"curve": 3, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"center": [0.0, 0.0, 0.0], "end_angle": 6.283185307179586, "id": 1, "name": "circle0", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 1.0], "end_angle": 6.283185307179586, "id": 2, "name": "circle1", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 3, "name": "seam", "p0": [0.5, 0.0, 0.0], "p1": [0.5, 0.0, 1.0], "type": "line"}
+ ],
+ "domains": [
+  {"edges": [[{"connector": 4, "reversed": false}], [{"connector": 6, "reversed": false}], [{"connector": 5, "reversed": true}], [{"connector": 6, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 7, "name": "wall", "surface": null, "type": "domain"}
+ ],
+ "format": "opengrid-project",
+ "name_counters": {},
+ "next_id": 12,
+ "patches": [
+  {"id": 9, "members": [{"domain": 7}], "name": "cylinder", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 10, "members": [{"block": 8, "face": "kmax"}], "name": "farfield", "patch_type": "farfield", "periodic": null, "type": "patch"},
+  {"id": 11, "members": [{"block": 8, "face": "jmin"}, {"block": 8, "face": "jmax"}], "name": "ends", "patch_type": "symmetry", "periodic": null, "type": "patch"}
+ ],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

@@ -6,9 +6,14 @@ A block is either
     connector nodes), a right-handed (i, j, k) frame is chosen at the first face's first corner,
     and every face grid is transposed / flipped onto its block face; the interior is 3D TFI
     (opengrid._core.tfi_block). Or
-  * ``extrusion``: a structured domain extruded (translate / rotate / normal) with a connector
-    style distribution of ``dimension`` layers (opengrid._core.extrude). The domain is the block's
-    kmin face (mirrored in i when needed for a right-handed block).
+  * ``extrusion``: a structured domain extruded (translate / rotate / normal / hyperbolic) with a
+    connector style distribution of ``dimension`` layers (opengrid._core.extrude,
+    opengrid._core.extrude_hyperbolic). The domain is the block's kmin face (mirrored in i when
+    needed for a right-handed block). Hyperbolic extrusion marches ``distance`` along smoothed
+    layer normals with edge conditions per base edge (imin, imax, jmin, jmax: free, constant_x /
+    _y / _z, periodic) and tangential ``dissipation``.
+Either kind can be smoothed afterwards (``smoothing``: 3D elliptic, Laplace or Thomas-Middlecoff,
+with wall control on chosen faces; opengrid._core.smooth_elliptic_3d); faces stay fixed.
 Grids are arrays (nk, nj, ni, 3). Block faces are named imin, imax, jmin, jmax, kmin, kmax; their
 arrays are (nk, nj, 3), (nk, ni, 3) and (nj, ni, 3) respectively.
 
@@ -28,7 +33,23 @@ from opengrid import _core
 from opengrid.validation import Issue, ValidationError
 
 FACE_NAMES = ("imin", "imax", "jmin", "jmax", "kmin", "kmax")
-EXTRUSION_MODES = ("translate", "rotate", "normal")
+EXTRUSION_MODES = ("translate", "rotate", "normal", "hyperbolic")
+EDGE_CONDITIONS = ("free", "constant_x", "constant_y", "constant_z", "periodic")
+SMOOTHING_CONTROLS = ("laplace", "thomas_middlecoff")
+DEFAULT_WALL = {
+    "face": "kmin",
+    "spacing": None,
+    "decay": 0.1,
+    "relaxation": 0.1,
+    "max_source": 100.0,
+}
+DEFAULT_SMOOTHING = {
+    "control": "laplace",
+    "walls": (),
+    "omega": 1.0,
+    "max_iterations": 500,
+    "tolerance": 1e-6,
+}
 DEFAULT_DISTRIBUTION = {
     "type": "uniform",
     "begin_spacing": None,
@@ -44,6 +65,8 @@ DEFAULT_EXTRUSION = {
     "distance": 0.0,
     "dimension": 11,
     "distribution": DEFAULT_DISTRIBUTION,
+    "edges": ("free", "free", "free", "free"),
+    "dissipation": 0.2,
 }
 # Block faces: (corner at the face origin, along the first face index, along the second), in
 # terms of block corners (a, b, c) = (i, j, k) in {0, 1}.
@@ -108,8 +131,9 @@ def _domain_ref(ref, label, store, issues):
 
 def normalize_block(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
-    for key in sorted(set(raw) - {"faces", "extrusion"}):
+    for key in sorted(set(raw) - {"faces", "extrusion", "smoothing"}):
         issues.append(Issue(f"{where}: {key}", "unexpected parameter for a block"))
+    smoothing = _normalize_smoothing(raw.get("smoothing"), f"{where}: smoothing", issues)
     faces_raw = raw.get("faces")
     extrusion_raw = raw.get("extrusion")
     if (faces_raw is None) == (extrusion_raw is None):
@@ -132,7 +156,52 @@ def normalize_block(raw: dict, store, where: str) -> dict:
         extrusion = _normalize_extrusion(extrusion_raw, f"{where}: extrusion", store, issues)
     if issues:
         raise ValidationError(issues)
-    return {"faces": faces, "extrusion": extrusion}
+    return {"faces": faces, "extrusion": extrusion, "smoothing": smoothing}
+
+
+def _normalize_smoothing(raw, label, issues) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        issues.append(Issue(label, f"expected a dict or None, got {raw!r}"))
+        return None
+    for key in sorted(set(raw) - set(DEFAULT_SMOOTHING)):
+        issues.append(Issue(f"{label}.{key}", "unexpected key"))
+    merged = dict(DEFAULT_SMOOTHING)
+    merged.update(raw)
+    if merged["control"] not in SMOOTHING_CONTROLS:
+        issues.append(Issue(f"{label}.control", f"must be one of {', '.join(SMOOTHING_CONTROLS)}"))
+    walls = []
+    raw_walls = merged["walls"]
+    if isinstance(raw_walls, dict):
+        raw_walls = [raw_walls]
+    for k, w in enumerate(raw_walls):
+        wl = f"{label}.walls[{k}]"
+        if isinstance(w, str):
+            w = {"face": w}
+        if not isinstance(w, dict):
+            issues.append(Issue(wl, "expected a dict or a face name"))
+            continue
+        for key in sorted(set(w) - set(DEFAULT_WALL)):
+            issues.append(Issue(f"{wl}.{key}", "unexpected key"))
+        wall = dict(DEFAULT_WALL)
+        wall.update(w)
+        if wall["face"] not in FACE_NAMES:
+            issues.append(Issue(f"{wl}.face", f"must be one of {', '.join(FACE_NAMES)}"))
+        out = {"face": wall["face"]}
+        for key in ("spacing", "decay", "relaxation", "max_source"):
+            out[key] = _number(wall[key], f"{wl}.{key}", issues, optional=key == "spacing")
+        walls.append(out)
+    iterations = merged["max_iterations"]
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+        issues.append(Issue(f"{label}.max_iterations", "must be an integer >= 1"))
+    return {
+        "control": merged["control"],
+        "walls": tuple(walls),
+        "omega": _number(merged["omega"], f"{label}.omega", issues),
+        "max_iterations": iterations,
+        "tolerance": _number(merged["tolerance"], f"{label}.tolerance", issues),
+    }
 
 
 def _normalize_extrusion(raw, label, store, issues) -> dict | None:
@@ -172,14 +241,30 @@ def _normalize_extrusion(raw, label, store, issues) -> dict | None:
         "distance": _number(merged["distance"], f"{label}.distance", issues),
         "dimension": dimension,
         "distribution": distribution,
+        "edges": _edges(merged["edges"], label, issues),
+        "dissipation": _number(merged["dissipation"], f"{label}.dissipation", issues),
     }
     if mode == "translate" and out["vector"] is not None and not any(out["vector"]):
         issues.append(Issue(f"{label}.vector", "must not be zero for a translation"))
     if mode == "rotate" and out["angle"] == 0.0:
         issues.append(Issue(f"{label}.angle", "must not be zero for a rotation (radians)"))
-    if mode == "normal" and out["distance"] == 0.0:
+    if mode in ("normal", "hyperbolic") and out["distance"] == 0.0:
         issues.append(Issue(f"{label}.distance", "must not be zero for a normal extrusion"))
     return out
+
+
+def _edges(raw, label, issues) -> tuple:
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        issues.append(Issue(f"{label}.edges", "four conditions (imin, imax, jmin, jmax)"))
+        return ("free", "free", "free", "free")
+    for value in raw:
+        if value not in EDGE_CONDITIONS:
+            issues.append(
+                Issue(
+                    f"{label}.edges", f"conditions are {', '.join(EDGE_CONDITIONS)}, got {value!r}"
+                )
+            )
+    return tuple(raw)
 
 
 def block_references(params: dict) -> set[int]:
@@ -315,6 +400,7 @@ class BlockEvaluator:
             return self._cache[key]
         entity = self.store.get(entity_id)
         params = entity.params
+        warnings: list[str] = []
         if params["faces"] is not None:
             names = [self.store.get(f).name for f in params["faces"]]
             oriented = orient_faces(grids, names, entity.name)
@@ -332,20 +418,64 @@ class BlockEvaluator:
             )
             vector = e["vector"]
             try:
-                grid, mirrored = _core.extrude(
-                    grids[0],
-                    e["mode"],
-                    vector=vector,
-                    axis_point=e["axis_point"],
-                    angle=e["angle"],
-                    distance=e["distance"],
-                    fractions=list(fractions),
-                )
+                if e["mode"] == "hyperbolic":
+                    grid, mirrored, _inverted, messages = _core.extrude_hyperbolic(
+                        grids[0],
+                        e["distance"],
+                        list(fractions),
+                        edges=list(e["edges"]),
+                        dissipation=e["dissipation"],
+                    )
+                    warnings.extend(messages)
+                else:
+                    grid, mirrored = _core.extrude(
+                        grids[0],
+                        e["mode"],
+                        vector=vector,
+                        axis_point=e["axis_point"],
+                        angle=e["angle"],
+                        distance=e["distance"],
+                        fractions=list(fractions),
+                    )
             except ValueError as error:
                 raise ValidationError([Issue(entity.name, str(error))]) from None
             faces = {f: None for f in FACE_NAMES}
             faces["kmin"] = e["domain"]
-        result = {"grid": grid, "faces": faces, "mirrored": bool(mirrored)}
+        smoothing = None
+        if params["smoothing"] is not None:
+            sm = params["smoothing"]
+            walls = [
+                (
+                    FACE_NAMES.index(w["face"]),
+                    w["spacing"],
+                    w["decay"],
+                    w["relaxation"],
+                    w["max_source"],
+                )
+                for w in sm["walls"]
+            ]
+            try:
+                grid, residuals, iterations, converged, _cancelled, messages = (
+                    _core.smooth_elliptic_3d(
+                        np.ascontiguousarray(grid),
+                        sm["control"],
+                        walls,
+                        sm["omega"],
+                        sm["max_iterations"],
+                        sm["tolerance"],
+                    )
+                )
+            except ValueError as error:
+                raise ValidationError([Issue(entity.name, str(error))]) from None
+            warnings.extend(messages)
+            smoothing = {"iterations": iterations, "converged": converged, "residuals": residuals}
+        result = {
+            "grid": grid,
+            "faces": faces,
+            "mirrored": bool(mirrored),
+            "warnings": warnings,
+            "smoothing": smoothing,
+        }
         self._cache[key] = result
         while len(self._cache) > self.CACHE_SIZE:
             self._cache.popitem(last=False)

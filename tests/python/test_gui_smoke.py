@@ -27,12 +27,14 @@ def test_console_evaluates(window):
     assert window.console.run_line("print(x * 2)").strip() == "42"
 
 
-def test_console_has_opengrid(window):
+def test_console_has_opengrid_and_session(window):
     assert "opengrid" in window.console.namespace
     assert window.console.run_line("print(opengrid.core_version())").strip() == "0.0.1"
+    window.console.run_line("og.create_line((0, 0), (1, 0))")
+    assert window.model_tree.entity_names() == ["line-1"]
 
 
-def test_window_renders(window, tmp_path):
+def test_window_renders(window):
     window.viewport.render()
     image = window.grab()
     assert not image.isNull()

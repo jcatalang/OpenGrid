@@ -1,5 +1,12 @@
 add_library(og_core STATIC
-  src/version.cpp)
+  src/version.cpp
+  src/util/gauss_kronrod.cpp
+  src/geom/curve.cpp
+  src/geom/line.cpp
+  src/geom/arc.cpp
+  src/geom/polyline.cpp
+  src/geom/cubic_spline.cpp
+  src/geom/nurbs.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 
 target_include_directories(og_core PUBLIC

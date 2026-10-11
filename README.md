@@ -3,7 +3,17 @@
 Interactive block-structured / unstructured / hybrid mesh generator for CFD (2D and 3D). C++20 core, Python bindings (nanobind),
 PySide6 + VTK GUI, and a Python scripting API.
 
-Status: Phase 0 (scaffold). See `docs/ROADMAP.md`.
+Status: Phase 1 (2D geometry kernel, scripting API, project files, geometry GUI).
+See `docs/ROADMAP.md` and `docs/PROGRESS.md`.
+
+```python
+import opengrid
+og = opengrid.Session()
+og.create_spline([(0, 0), (0.5, 0.06), (1, 0)], method="natural", name="upper")
+og.create_circle((0.5, 0), 20.0, name="farfield")
+og.save("geometry.ogp")
+print(og.journal_text())   # replayable script of everything done
+```
 
 ## Setup (conda-forge, primary)
 ```bash

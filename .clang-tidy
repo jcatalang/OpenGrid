@@ -5,7 +5,10 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   modernize-*,
   -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
+  -modernize-use-ranges,
   performance-*,
+  -performance-enum-size,
   readability-braces-around-statements,
   readability-implicit-bool-conversion,
   readability-else-after-return,
@@ -23,4 +26,10 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.VariableCase
     value: lower_case
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: CamelCase
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: k
+  - key: misc-const-correctness.AnalyzeValues
+    value: false
 ...

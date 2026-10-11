@@ -100,9 +100,17 @@ must keep Qt and backend libraries as separate replaceable shared libraries).
 
 ## 4. C++ / Python boundary
 
-- **Ownership:** the authoritative model (an `EntityStore`) lives in C++. Entities have stable
-  64-bit IDs that are assigned monotonically and never reused within a session, plus unique
-  user-visible names. Python holds lightweight handles (ID + store reference).
+- **Ownership (revised in Phase 1):** the authoritative entity store lives in **Python**
+  (`opengrid.model.Store`). It holds small immutable parameter records, with stable integer IDs
+  that are assigned monotonically and never reused, plus unique user-visible names. It also
+  caches the C++ objects built from them (`_core.Line`, `_core.CubicSpline`, ...). The algorithms
+  stay in C++ and take explicit inputs (curves, distributions, and later meshes) instead of a
+  store reference.
+  *Why the change:* the store is not a hot path, keeping it in Python avoids a C++ JSON
+  dependency and a large binding surface, and it makes `.ogp` determinism trivial (Python's
+  `repr` floats round-trip exactly). Heavy data (point arrays, meshes) still lives in C++/NumPy.
+  If later phases need topology queries on the C++ side, a C++ topology view will be built from
+  the store per operation.
 - **Data exchange:** point/cell arrays cross the boundary as NumPy arrays via
   `nb::ndarray` (zero-copy views of core buffers where lifetimes allow, copies otherwise).
 - **Long operations** (smoothing, triangulation, inflation, export) are C++ functions that
@@ -145,13 +153,15 @@ UTF-8 JSON, describing intent, not meshes. Keys are sorted and floats written wi
   "units": "m",
   "tolerance": 1e-9,
   "next_id": 42,
+  "name_counters": {"line": 3, "spline": 1},
   "database": [
     {"id": 1, "name": "le", "type": "point", "xyz": [0.0, 0.0, 0.0]},
     {"id": 2, "name": "chord", "type": "line", "p0": [0.0, 0.0, 0.0], "p1": [1.0, 0.0, 0.0]},
     {"id": 3, "name": "arc-1", "type": "arc", "center": [0, 0, 0], "radius": 10.0,
      "normal": [0, 0, 1], "start_angle": 0.0, "end_angle": 3.14159},
-    {"id": 4, "name": "upper", "type": "spline", "kind": "catmull_rom|natural|clamped",
-     "points": [[0, 0, 0], [0.5, 0.06, 0], [1, 0, 0]], "end_tangents": null},
+    {"id": 4, "name": "upper", "type": "spline", "method": "natural|clamped|catmull_rom",
+     "points": [[0, 0, 0], [0.5, 0.06, 0], [1, 0, 0]],
+     "start_tangent": [0, 1, 0], "end_tangent": null},
     {"id": 5, "name": "n1", "type": "nurbs", "degree": 3, "knots": [], "control_points": [],
      "weights": []}
   ],
@@ -180,8 +190,20 @@ UTF-8 JSON, describing intent, not meshes. Keys are sorted and floats written wi
 }
 ```
 
+As implemented in Phase 1: one entity record per line, keys sorted, and floats written with
+`repr` (exact). Explicit names of the form `<kind>-<n>` advance the automatic-name counter, so
+replaying a journal (which always passes explicit names) reproduces `name_counters` too.
+
 Fields are added per phase; every format change bumps `version` and adds a migration function
 `migrate_v{n}_to_v{n+1}` in `opengrid.project`, with a test loading a stored v{n} file.
+
+### Curve parametrisation (Phase 1)
+All curves are parametrised on t ∈ [0, 1]. Polylines and splines use normalised cumulative chord
+length, arcs use the angle and NURBS use their knot domain mapped linearly. Each curve
+reports *breakpoints* (knots) that bound its smooth segments. Arc length (adaptive
+Gauss–Kronrod 7/15 with a round-off floor), arc-length inversion (safeguarded Newton,
+1e-14·L) and projection (sampling, then golden-section search, then Newton on (x−p)·x′) all work segment by
+segment, so derivative jumps at knots never cost accuracy.
 
 ## 7. 3D tet backend decision
 

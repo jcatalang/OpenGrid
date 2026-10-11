@@ -531,6 +531,66 @@ segment, so derivative jumps at knots never cost accuracy.
   - `max_slope`, the fan angles and the proximity factor are C++ options, not yet exposed in
     Python.
 
+### 3D structured foundation (Phase 7a)
+- **Surfaces** (`geom/surface.cpp`): plane, ruled, extruded, revolved and NURBS
+  (Piegl–Tiller basis), with analytic first derivatives.
+  - Projection: sample grid, then Newton on the stationarity conditions with a
+    finite-difference Hessian (Gauss–Newton where it is not convex), damped and clamped.
+  - Accuracy: on-surface points are recovered within 1e-10·size (tested for all five types).
+  - Model entities are database kinds (`plane`, `ruled_surface`, `extruded_surface`,
+    `revolved_surface`, `nurbs_surface`). Curve references are entity ids. Cached C++ surfaces
+    are dropped when a referenced curve changes.
+- **Structured domains** take an optional `surface`:
+  - Parametric TFI on it (`structured/surface_tfi.cpp`): project the boundary nodes, linear TFI
+    of (u, v), evaluate. The domain must not cross a parameter seam.
+  - Without a surface, domains outside a plane z = const use linear TFI in space.
+  - Hermite TFI and elliptic smoothing stay restricted to z = const planes.
+- **Blocks** (`model/blocks.py`, entity `block`):
+  - From six domains in any order and orientation: the 8 corners are identified by exact
+    coordinates, a right-handed frame is chosen at the first face's first corner, and each face
+    is transposed/flipped onto its block face. Then 3D TFI (`structured/tfi3d.cpp`: Boolean sum
+    of three linear projectors; parameters are face arc-length fractions blended in index
+    space; an annular sector is reproduced exactly).
+  - Or by extrusion of a domain (`structured/extrude.cpp`): translate, rotate (Rodrigues) or
+    along node normals, with a connector-style distribution. The base is mirrored in i if
+    needed for a right-handed block.
+  - Grids are (nk, nj, ni, 3). The block evaluator caches by a hash of the parameters and the
+    face grids.
+- **3D topology:**
+  - Block faces with identical nodes (8 orientations checked) are 1-to-1 interfaces, including
+    a block-internal cut such as an extruded O-grid wake. Other faces are boundaries.
+  - CGNS 1-to-1 data: begin/end donor indices by coordinate lookup. Transform of the normal
+    axis: `−side·donor_side`; in-face axes from a unit step.
+  - Patch members are connectors (2D), structured domains (faces of six-face blocks, the base
+    of extrusions) or block faces `{"block", "face"}`.
+  - `boundary_report()` switches to the 3D rules when the model has blocks: every boundary face
+    in exactly one patch; connector members and periodic patches are reported.
+- **Exports** with blocks:
+  - VTKHDF: hexahedra plus boundary quads (outward) per patch, quality as cell data.
+  - Gmsh: hexahedra and quads, physical volumes and surfaces.
+  - CGNS 3D structured (`write_cgns_structured_3d`): zone families, BC point ranges, 1-to-1
+    connectivity.
+  - Plot3D 3D multi-block.
+  - Projects gain the `blocks` section. Entities load one by one in id order, so references
+    within a section resolve.
+- **Quality** (`quality/quality3d.cpp`):
+  - scaled Jacobian (8 corners), face equiangle skewness, edge-family aspect ratio, face
+    angles, FV non-orthogonality, volume ratio;
+  - exact trilinear volume (2×2×2 Gauss).
+
+  In the GUI's quality views, area and area ratio stand for volume and volume ratio for blocks.
+- **GUI:**
+  - Blocks in the tree and viewport (boundary wireframe; cells when cut or shrunk);
+    translucent surfaces.
+  - "Block from 6 faces", "Extrude domain", block property panel with an extrusion editor.
+  - View → cut plane (x = model centre, whole cells kept) and shrink.
+  - Quality colouring and the worst-cell locator for blocks.
+- **Limitations:**
+  - Periodic pairing of 3D faces is not supported.
+  - Degenerate (collapsed) block faces are not supported.
+  - 2D quality of non-planar face domains uses the planar formula.
+  - The cut plane is fixed at x = model centre.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

@@ -483,3 +483,63 @@
 - **First-layer fan triangles** at sharp trailing edges are the worst cells (SJ ≈ 0.36).
 - **Python options:** `max_slope`, the fan angles and the proximity factor are not exposed.
 - **3D:** no inflation yet (Phase 8).
+
+## Phase 7a — 3D structured foundation (2026-10-11) — approved
+- **C++:**
+  - `geom/surface.cpp` (5 surface types, projection);
+  - `structured/tfi3d.cpp`, `extrude.cpp`, `surface_tfi.cpp`;
+  - `quality/quality3d.cpp`;
+  - `write_cgns_structured_3d`;
+  - bindings in `bindings/og_3d.cpp`.
+- **Python:**
+  - Surface entities and API (`create_plane`, `create_ruled_surface`,
+    `create_extruded_surface`, `create_revolved_surface`, `create_nurbs_surface`,
+    `project_to_surface`).
+  - Domains with `surface` or in 3D.
+  - `block` entity (`create_block(faces=...)`, `create_extruded_block`, `block_grid`,
+    `block_quality`, `block_status`) and the 3D topology.
+  - Face/block-face patch members; zones with blocks.
+  - 3D exports (CGNS, VTKHDF, Gmsh, Plot3D); `blocks` project section.
+- **GUI:** blocks and surfaces in the viewport, block actions, extrusion editor, cut plane,
+  shrink, 3D quality and worst cell.
+- **Demo** `examples/07a_blocks.py`:
+  - Annular sector duct of two six-face blocks (21 × 41 × 21 each):
+    - min scaled Jacobian 1.000;
+    - interface `duct-a.jmax | duct-b.jmin`;
+    - volume −2.9e-5 relative to analytic (chord error at 41 points per 30°).
+  - Extruded wing section (O-ring around a NACA 0012, 201 × 41 × 21, 160 000 hexahedra):
+    - wake cut detected as a block-internal interface;
+    - min scaled Jacobian 0.144 (2D ring's trailing edge).
+  - cgnscheck clean, Gmsh 4.12 reads clean, journals replay.
+  - Outputs: `07a_blocks.png`, `phase7a_main_window.png`, CGNS / VTKHDF / msh / xyz, projects,
+    journals.
+
+### Verified
+- `ctest`: 101/101 (`-Werror`); clang-tidy: 0 findings. Covered:
+  - projection of on-surface points within 1e-10·size for all five surfaces; exact
+    off-surface distances; analytic vs finite-difference derivatives; NURBS exact cylinder;
+  - block TFI reproduces an annular sector to 1e-13, volume within 1e-6 (1201 θ points);
+    mismatched faces rejected;
+  - unit-cube quality; translate/rotate/normal volumes, mirroring;
+  - surface TFI stays on the cylinder.
+- `pytest`: 228/228 (+8). Covered:
+  - surfaces (projection, dependency, rebuild after a curve change, replay);
+  - six-face block (volume within 1e-6 at 601 θ points, any face order, radii exact);
+  - validation (not six faces, both or neither of faces/extrusion, duplicates, faces not
+    forming a box, Hermite on a 3D face);
+  - two-block interface: every CGNS 1-to-1 point mapped through the transform onto the donor
+    point, cgnscheck;
+  - extrusions (exact volumes, rotate volume, base interface between up and down extrusions,
+    replay);
+  - 3D patches and exports (Gmsh element counts, Gmsh reads clean, VTKHDF hexahedra,
+    Plot3D 3D round trip, unassigned and connector members reported);
+  - project round trip; GUI (block from selection, extrusion editing, cut, shrink, quality,
+    worst cell).
+- All earlier demos still run.
+
+### Not verified / known limitations
+- **Not in 7a (moving to 7b):** surface and 3D elliptic smoothing, hyperbolic extrusion, the
+  3D cylinder O-grid demo.
+- **Block faces:** periodic 3D faces and collapsed faces are not supported.
+- **Domain quality in 3D:** non-planar face domains use planar 2D metrics.
+- **Cut plane:** fixed normal (x).

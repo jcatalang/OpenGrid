@@ -68,6 +68,8 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
     scale = 1.0
     for patch in (source, target):
         for item in patch.params["members"]:
+            if "connector" not in item:
+                continue
             points = session.connectors.nodes(item["connector"]).points
             nodes[item["connector"]] = points
             scale = max(scale, float(np.max(np.abs(points))))
@@ -76,11 +78,15 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
     issues = []
     used = set()
     for item in source.params["members"]:
+        if "connector" not in item:
+            continue
         a = item["connector"]
         image = apply(nodes[a], periodic)
         best = math.inf
         found = None
         for candidate in target.params["members"]:
+            if "connector" not in candidate:
+                continue
             b = candidate["connector"]
             if b in used or len(nodes[b]) != len(image):
                 continue
@@ -108,6 +114,8 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
         used.add(found.target)
         pairs.append(found)
     for item in target.params["members"]:
+        if "connector" not in item:
+            continue
         if item["connector"] not in used and not issues:
             name = session.store.get(item["connector"]).name
             issues.append(
@@ -124,7 +132,11 @@ def automatic_translation(session, source, target) -> tuple[float, float, float]
 
     def centroid(patch):
         points = np.concatenate(
-            [session.connectors.nodes(i["connector"]).points for i in patch.params["members"]]
+            [
+                session.connectors.nodes(i["connector"]).points
+                for i in patch.params["members"]
+                if "connector" in i
+            ]
         )
         return points.mean(axis=0)
 

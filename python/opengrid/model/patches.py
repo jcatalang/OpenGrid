@@ -102,6 +102,80 @@ def _periodic(raw, store, where: str, issues: list[Issue]) -> dict | None:
     }
 
 
+BLOCK_FACES = ("imin", "imax", "jmin", "jmax", "kmin", "kmax")
+
+
+def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
+    """Patch members: connectors (2D boundaries), structured domains (faces of 3D blocks) or
+    block faces ({"block": name or id, "face": "imin" ...}, or a (block, face) pair)."""
+    if isinstance(raw, (str, int, dict)):
+        raw = [raw]
+    result = []
+    seen = set()
+    for index, item in enumerate(raw):
+        label = f"{where}: members[{index}]"
+        block_face = None
+        ref = item
+        if isinstance(item, dict) and "block" in item:
+            block_face = (item.get("block"), item.get("face"))
+        elif isinstance(item, (list, tuple)) and len(item) == 2:
+            block_face = tuple(item)
+        elif isinstance(item, dict):
+            ref = item.get("connector", item.get("domain"))
+        if block_face is not None:
+            block, face = block_face
+            if isinstance(block, bool) or not isinstance(block, (str, int)) or block not in store:
+                issues.append(Issue(label, f"no block {block!r}"))
+                continue
+            entity = store.get(block)
+            if entity.kind != "block":
+                issues.append(Issue(label, f"{entity.name!r} is a {entity.kind}, not a block"))
+                continue
+            if face not in BLOCK_FACES:
+                issues.append(Issue(label, f"face must be one of {', '.join(BLOCK_FACES)}"))
+                continue
+            member = {"block": entity.id, "face": face}
+            key = (entity.id, face)
+        else:
+            if isinstance(ref, bool) or not isinstance(ref, (str, int)) or ref not in store:
+                issues.append(Issue(label, f"no entity {ref!r}"))
+                continue
+            entity = store.get(ref)
+            if entity.kind == "connector":
+                member = {"connector": entity.id}
+            elif entity.kind == "domain":
+                member = {"domain": entity.id}
+            else:
+                issues.append(
+                    Issue(
+                        label,
+                        f"{entity.name!r} is a {entity.kind}; patch members are connectors, "
+                        "structured domains or block faces",
+                    )
+                )
+                continue
+            key = entity.id
+        if key in seen:
+            issues.append(Issue(label, "listed twice"))
+            continue
+        seen.add(key)
+        result.append(member)
+    return tuple(result)
+
+
+def member_label(item: dict, store) -> str:
+    if "block" in item:
+        return f"{store.get(item['block']).name}.{item['face']}"
+    ref = item.get("connector", item.get("domain"))
+    return store.get(ref).name
+
+
+def member_script(item: dict, store):
+    if "block" in item:
+        return {"block": store.get(item["block"]).name, "face": item["face"]}
+    return member_label(item, store)
+
+
 def normalize_patch(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
     for key in sorted(set(raw) - {"patch_type", "members", "periodic"}):
@@ -111,7 +185,7 @@ def normalize_patch(raw: dict, store, where: str) -> dict:
         issues.append(
             Issue(f"{where}: patch_type", f"must be one of {', '.join(PATCH_TYPES)}, got {kind!r}")
         )
-    members = _members(raw.get("members", ()), "connector", "connector", store, where, issues)
+    members = _patch_members(raw.get("members", ()), store, where, issues)
     periodic = _periodic(raw.get("periodic"), store, where, issues)
     if periodic is not None and kind != "periodic":
         issues.append(
@@ -127,7 +201,12 @@ def normalize_zone(raw: dict, store, where: str) -> dict:
     for key in sorted(set(raw) - {"members"}):
         issues.append(Issue(f"{where}: {key}", "unexpected parameter for a zone"))
     members = _members(
-        raw.get("members", ()), "domain", ("domain", "unstructured_domain"), store, where, issues
+        raw.get("members", ()),
+        "domain",
+        ("domain", "unstructured_domain", "block"),
+        store,
+        where,
+        issues,
     )
     if issues:
         raise ValidationError(issues)
@@ -135,4 +214,4 @@ def normalize_zone(raw: dict, store, where: str) -> dict:
 
 
 def member_names(params: dict, key: str, store) -> tuple:
-    return tuple(store.get(item[key]).name for item in params["members"])
+    return tuple(member_label(item, store) for item in params["members"])

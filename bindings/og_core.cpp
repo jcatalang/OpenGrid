@@ -186,6 +186,8 @@ std::vector<og::Vec3> eval_params(const og::Curve& curve, const double* ts, std:
 
 }  // namespace
 
+void bind_3d(nb::module_& m);
+
 NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind macro
   m.doc() = "OpenGrid C++ core";
   // Qt/VTK keep Python callbacks (and through them curve objects) alive until after the
@@ -833,4 +835,6 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
             new (self) og::Nurbs(degree, knots, to_vec3(control_points), weights);
           },
           nb::arg("degree"), nb::arg("knots"), nb::arg("control_points"), nb::arg("weights"));
+
+  bind_3d(m);
 }

@@ -26,6 +26,17 @@ def format_kwargs(params: dict) -> str:
 def _for_script(kind: str, params: dict, store: Store) -> dict:
     if kind == "connector":
         return script_params(params, store)
+    from opengrid.model.entities import SURFACE_CURVES
+
+    if kind in SURFACE_CURVES:
+        result = dict(params)
+        for key in SURFACE_CURVES[kind]:
+            result[key] = store.get(params[key]).name
+        return result
+    if kind == "block":
+        from opengrid.model.blocks import block_script_params
+
+        return block_script_params(params, store)
     if kind in ("domain", "unstructured_domain"):
         key = "edges"
         if kind == "unstructured_domain":
@@ -40,6 +51,8 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
                 )
             edges.append(tuple(items))
         result[key] = tuple(edges)
+        if kind == "domain" and params.get("surface") is not None:
+            result["surface"] = store.get(params["surface"]).name
         if kind == "unstructured_domain" and params["generator"]["inflation"] is not None:
             generator = dict(params["generator"])
             inflation = dict(generator["inflation"])
@@ -52,7 +65,12 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
         if kind == "zone":
             key = "domain"
         result = dict(params)
-        result["members"] = tuple(store.get(item[key]).name for item in params["members"])
+        if kind == "patch":
+            from opengrid.model.patches import member_script
+
+            result["members"] = tuple(member_script(item, store) for item in params["members"])
+        else:
+            result["members"] = tuple(store.get(item[key]).name for item in params["members"])
         if kind == "patch" and params.get("periodic") is not None:
             periodic = dict(params["periodic"])
             periodic["partner"] = store.get(periodic["partner"]).name

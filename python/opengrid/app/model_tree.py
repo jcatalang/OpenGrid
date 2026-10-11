@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 # Top-level categories, in display order (hierarchy, see docs/SPEC.md).
+from opengrid.validation import ValidationError
+
 CATEGORIES = ("Database", "Connectors", "Domains", "Blocks", "Patches", "Zones")
 ENTITY_ID_ROLE = Qt.ItemDataRole.UserRole
 
@@ -63,9 +65,10 @@ class ModelTree(QTreeWidget):
         database = self._category_items["Database"]
         connectors = self._category_items["Connectors"]
         domains = self._category_items["Domains"]
+        blocks = self._category_items["Blocks"]
         patches = self._category_items["Patches"]
         zones = self._category_items["Zones"]
-        for category in (database, connectors, domains, patches, zones):
+        for category in (database, connectors, domains, blocks, patches, zones):
             category.takeChildren()
         for entity in session.store:
             if entity.kind == "connector":
@@ -80,6 +83,14 @@ class ModelTree(QTreeWidget):
                 if len(mesh["quads"]):
                     parts.append(f"{len(mesh['quads'])} quads")
                 item = QTreeWidgetItem(domains, [entity.name, ", ".join(parts)])
+            elif entity.kind == "block":
+                info = "invalid"
+                try:
+                    nk, nj, ni, _ = session.block_grid(entity.name).shape
+                    info = f"{ni} x {nj} x {nk}"
+                except ValidationError:
+                    pass
+                item = QTreeWidgetItem(blocks, [entity.name, info])
             elif entity.kind == "patch":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(
@@ -92,7 +103,7 @@ class ModelTree(QTreeWidget):
                 item = QTreeWidgetItem(database, [entity.name, entity.kind])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
-        for category in (database, connectors, domains, patches, zones):
+        for category in (database, connectors, domains, blocks, patches, zones):
             category.setText(1, f"{category.childCount()}")
         self.resizeColumnToContents(0)
         self.blockSignals(False)

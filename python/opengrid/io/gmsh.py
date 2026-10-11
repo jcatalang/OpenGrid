@@ -1,4 +1,5 @@
-"""Gmsh MSH 4.1 (ASCII) export of a 2D mesh assembly with physical groups.
+"""Gmsh MSH 4.1 (ASCII) export of a mesh assembly with physical groups (2D: surfaces and boundary
+curves; 3D blocks: volumes of hexahedra and boundary surfaces of quads).
 
 Physical groups: one 2D group per zone (quads and triangles), one 1D group per patch
 (boundary lines). Each
@@ -16,18 +17,23 @@ import numpy as np
 GMSH_LINE = 1
 GMSH_TRIANGLE = 2
 GMSH_QUAD = 3
-VTK_TO_GMSH = {5: GMSH_TRIANGLE, 9: GMSH_QUAD}
+GMSH_HEXAHEDRON = 5
+VTK_TO_GMSH = {5: GMSH_TRIANGLE, 9: GMSH_QUAD, 12: GMSH_HEXAHEDRON}
 
 
 def write_gmsh(path, assembly) -> dict:
     lines = ["$MeshFormat", "4.1 0 8", "$EndMeshFormat", "$PhysicalNames"]
     zones = [z for z in range(len(assembly.zone_names)) if np.any(assembly.cell_zone == z)]
     patches = [p for p in range(len(assembly.patch_names)) if np.any(assembly.line_patch == p)]
+    dim = assembly.dimension
+    boundary_kind = GMSH_LINE
+    if dim == 3:
+        boundary_kind = GMSH_QUAD
     lines.append(str(len(zones) + len(patches)))
     for p in patches:
-        lines.append(f'1 {p + 1} "{assembly.patch_names[p]}"')
+        lines.append(f'{dim - 1} {p + 1} "{assembly.patch_names[p]}"')
     for z in zones:
-        lines.append(f'2 {z + 1} "{assembly.zone_names[z]}"')
+        lines.append(f'{dim} {z + 1} "{assembly.zone_names[z]}"')
     lines.append("$EndPhysicalNames")
 
     def bbox(ids):
@@ -37,7 +43,10 @@ def write_gmsh(path, assembly) -> dict:
         return " ".join(repr(float(v)) for v in (*low, *high))
 
     lines.append("$Entities")
-    lines.append(f"0 {len(patches)} {len(zones)} 0")
+    if dim == 3:
+        lines.append(f"0 0 {len(patches)} {len(zones)}")
+    else:
+        lines.append(f"0 {len(patches)} {len(zones)} 0")
     for p in patches:
         ids = assembly.lines[assembly.line_patch == p]
         lines.append(f"{p + 1} {bbox(ids)} 1 {p + 1} 0")
@@ -49,7 +58,7 @@ def write_gmsh(path, assembly) -> dict:
     n = len(assembly.points)
     lines.append("$Nodes")
     lines.append(f"1 {n} 1 {n}")
-    lines.append(f"2 {zones[0] + 1} 0 {n}")
+    lines.append(f"{dim} {zones[0] + 1} 0 {n}")
     lines.extend(str(k + 1) for k in range(n))
     lines.extend(" ".join(repr(float(c)) for c in point) for point in assembly.points)
     lines.append("$EndNodes")
@@ -58,12 +67,12 @@ def write_gmsh(path, assembly) -> dict:
     tag = 1
     for p in patches:
         cells = assembly.lines[assembly.line_patch == p]
-        blocks.append((1, p + 1, GMSH_LINE, cells))
+        blocks.append((dim - 1, p + 1, boundary_kind, cells))
     for z in zones:
         for vtk_type, gmsh_type in sorted(VTK_TO_GMSH.items()):
             mask = (assembly.cell_zone == z) & (assembly.cell_type == vtk_type)
             if np.any(mask):
-                blocks.append((2, z + 1, gmsh_type, np.array(assembly.cells(mask))))
+                blocks.append((dim, z + 1, gmsh_type, np.array(assembly.cells(mask))))
     total = sum(len(b[3]) for b in blocks)
     lines.append("$Elements")
     lines.append(f"{len(blocks)} {total} 1 {total}")

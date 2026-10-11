@@ -85,6 +85,35 @@ struct CgnsVertexConnection {
   std::array<double, 2> translation{};
 };
 
+// 3D structured blocks (base with cell and physical dimension 3): ranges are
+// {imin, jmin, kmin, imax, jmax, kmax}, 1-based; the 1-to-1 transform has three signed entries.
+struct CgnsBlock {
+  std::string name;
+  int ni = 0;
+  int nj = 0;
+  int nk = 0;
+  std::vector<double> x;  // ni * nj * nk, i fastest, then j
+  std::vector<double> y;
+  std::vector<double> z;
+  std::string family;
+};
+
+struct CgnsBoundary3D {
+  int zone = 0;
+  std::string name;
+  std::string family;
+  std::array<int, 6> range{};
+};
+
+struct CgnsConnection3D {
+  int zone = 0;
+  std::string name;
+  int donor_zone = 0;
+  std::array<int, 6> range{};
+  std::array<int, 6> donor_range{};
+  std::array<int, 3> transform{};
+};
+
 // True when OpenGrid was built with the CGNS library.
 bool cgns_available();
 
@@ -104,5 +133,11 @@ void write_cgns_2d(const std::string& path, const std::string& base_name,
                    const std::vector<CgnsEdgeBoundary>& edge_boundaries,
                    const std::vector<CgnsConnection>& connections,
                    const std::vector<CgnsVertexConnection>& vertex_connections);
+
+void write_cgns_structured_3d(const std::string& path, const std::string& base_name,
+                              const std::vector<CgnsBlock>& blocks,
+                              const std::vector<CgnsFamily>& families,
+                              const std::vector<CgnsBoundary3D>& boundaries,
+                              const std::vector<CgnsConnection3D>& connections);
 
 }  // namespace og

@@ -1,0 +1,83 @@
+{
+ "blocks": [
+  {"extrusion": null, "faces": [29, 30, 31, 32, 17, 26], "id": 33, "name": "duct-a", "type": "block"},
+  {"extrusion": null, "faces": [53, 54, 55, 56, 26, 50], "id": 57, "name": "duct-b", "type": "block"}
+ ],
+ "connectors": [
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 3, "mode": "arc_length", "name": "c-inner0-a", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 4, "mode": "arc_length", "name": "c-outer0-a", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 7, "mode": "arc_length", "name": "c-inner1-a", "propagate_spacing": true, "segments": [{"curve": 5, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 8, "mode": "arc_length", "name": "c-outer1-a", "propagate_spacing": true, "segments": [{"curve": 6, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 10, "mode": "arc_length", "name": "c-radial0-0", "propagate_spacing": true, "segments": [{"curve": 9, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 12, "mode": "arc_length", "name": "c-radial1-0", "propagate_spacing": true, "segments": [{"curve": 11, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 14, "mode": "arc_length", "name": "c-axiali-0", "propagate_spacing": true, "segments": [{"curve": 13, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 16, "mode": "arc_length", "name": "c-axialo-0", "propagate_spacing": true, "segments": [{"curve": 15, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 19, "mode": "arc_length", "name": "c-radial0-30", "propagate_spacing": true, "segments": [{"curve": 18, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 21, "mode": "arc_length", "name": "c-radial1-30", "propagate_spacing": true, "segments": [{"curve": 20, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 23, "mode": "arc_length", "name": "c-axiali-30", "propagate_spacing": true, "segments": [{"curve": 22, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 25, "mode": "arc_length", "name": "c-axialo-30", "propagate_spacing": true, "segments": [{"curve": 24, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 36, "mode": "arc_length", "name": "c-inner0-b", "propagate_spacing": true, "segments": [{"curve": 34, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 37, "mode": "arc_length", "name": "c-outer0-b", "propagate_spacing": true, "segments": [{"curve": 35, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 40, "mode": "arc_length", "name": "c-inner1-b", "propagate_spacing": true, "segments": [{"curve": 38, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 41, "mode": "arc_length", "name": "c-outer1-b", "propagate_spacing": true, "segments": [{"curve": 39, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 43, "mode": "arc_length", "name": "c-radial0-60", "propagate_spacing": true, "segments": [{"curve": 42, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.01, "growth_ratio": null, "type": "tanh"}, "id": 45, "mode": "arc_length", "name": "c-radial1-60", "propagate_spacing": true, "segments": [{"curve": 44, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 47, "mode": "arc_length", "name": "c-axiali-60", "propagate_spacing": true, "segments": [{"curve": 46, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": 0.02, "end_spacing": 0.02, "growth_ratio": null, "type": "tanh"}, "id": 49, "mode": "arc_length", "name": "c-axialo-60", "propagate_spacing": true, "segments": [{"curve": 48, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"center": [0.0, 0.0, 0.0], "end_angle": 0.5235987755982988, "id": 1, "name": "inner0-a", "normal": [0.0, 0.0, 1.0], "radius": 1.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 0.5235987755982988, "id": 2, "name": "outer0-a", "normal": [0.0, 0.0, 1.0], "radius": 2.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 1.0], "end_angle": 0.5235987755982988, "id": 5, "name": "inner1-a", "normal": [0.0, 0.0, 1.0], "radius": 1.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 1.0], "end_angle": 0.5235987755982988, "id": 6, "name": "outer1-a", "normal": [0.0, 0.0, 1.0], "radius": 2.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 9, "name": "radial0-0", "p0": [1.0, 0.0, 0.0], "p1": [2.0, 0.0, 0.0], "type": "line"},
+  {"id": 11, "name": "radial1-0", "p0": [1.0, 0.0, 1.0], "p1": [2.0, 0.0, 1.0], "type": "line"},
+  {"id": 13, "name": "axiali-0", "p0": [1.0, 0.0, 0.0], "p1": [1.0, 0.0, 1.0], "type": "line"},
+  {"id": 15, "name": "axialo-0", "p0": [2.0, 0.0, 0.0], "p1": [2.0, 0.0, 1.0], "type": "line"},
+  {"id": 18, "name": "radial0-30", "p0": [0.8660254037844387, 0.49999999999999994, 0.0], "p1": [1.7320508075688774, 0.9999999999999999, 0.0], "type": "line"},
+  {"id": 20, "name": "radial1-30", "p0": [0.8660254037844387, 0.49999999999999994, 1.0], "p1": [1.7320508075688774, 0.9999999999999999, 1.0], "type": "line"},
+  {"id": 22, "name": "axiali-30", "p0": [0.8660254037844387, 0.49999999999999994, 0.0], "p1": [0.8660254037844387, 0.49999999999999994, 1.0], "type": "line"},
+  {"id": 24, "name": "axialo-30", "p0": [1.7320508075688774, 0.9999999999999999, 0.0], "p1": [1.7320508075688774, 0.9999999999999999, 1.0], "type": "line"},
+  {"curve": 1, "direction": [0.0, 0.0, 1.0], "id": 27, "name": "cyl-inner-a", "type": "extruded_surface"},
+  {"curve": 2, "direction": [0.0, 0.0, 1.0], "id": 28, "name": "cyl-outer-a", "type": "extruded_surface"},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 1.0471975511965976, "id": 34, "name": "inner0-b", "normal": [0.0, 0.0, 1.0], "radius": 1.0, "start_angle": 0.5235987755982988, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 1.0471975511965976, "id": 35, "name": "outer0-b", "normal": [0.0, 0.0, 1.0], "radius": 2.0, "start_angle": 0.5235987755982988, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 1.0], "end_angle": 1.0471975511965976, "id": 38, "name": "inner1-b", "normal": [0.0, 0.0, 1.0], "radius": 1.0, "start_angle": 0.5235987755982988, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 1.0], "end_angle": 1.0471975511965976, "id": 39, "name": "outer1-b", "normal": [0.0, 0.0, 1.0], "radius": 2.0, "start_angle": 0.5235987755982988, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 42, "name": "radial0-60", "p0": [0.5000000000000001, 0.8660254037844386, 0.0], "p1": [1.0000000000000002, 1.7320508075688772, 0.0], "type": "line"},
+  {"id": 44, "name": "radial1-60", "p0": [0.5000000000000001, 0.8660254037844386, 1.0], "p1": [1.0000000000000002, 1.7320508075688772, 1.0], "type": "line"},
+  {"id": 46, "name": "axiali-60", "p0": [0.5000000000000001, 0.8660254037844386, 0.0], "p1": [0.5000000000000001, 0.8660254037844386, 1.0], "type": "line"},
+  {"id": 48, "name": "axialo-60", "p0": [1.0000000000000002, 1.7320508075688772, 0.0], "p1": [1.0000000000000002, 1.7320508075688772, 1.0], "type": "line"},
+  {"curve": 34, "direction": [0.0, 0.0, 1.0], "id": 51, "name": "cyl-inner-b", "type": "extruded_surface"},
+  {"curve": 35, "direction": [0.0, 0.0, 1.0], "id": 52, "name": "cyl-outer-b", "type": "extruded_surface"}
+ ],
+ "domains": [
+  {"edges": [[{"connector": 10, "reversed": false}], [{"connector": 16, "reversed": false}], [{"connector": 12, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 17, "name": "side-0", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 19, "reversed": false}], [{"connector": 25, "reversed": false}], [{"connector": 21, "reversed": true}], [{"connector": 23, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 26, "name": "side-30", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 10, "reversed": false}], [{"connector": 4, "reversed": false}], [{"connector": 19, "reversed": true}], [{"connector": 3, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 29, "name": "bottom-a", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 12, "reversed": false}], [{"connector": 8, "reversed": false}], [{"connector": 21, "reversed": true}], [{"connector": 7, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 30, "name": "top-a", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 3, "reversed": false}], [{"connector": 23, "reversed": false}], [{"connector": 7, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 31, "name": "wall-inner-a", "surface": 27, "type": "domain"},
+  {"edges": [[{"connector": 4, "reversed": false}], [{"connector": 25, "reversed": false}], [{"connector": 8, "reversed": true}], [{"connector": 16, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 32, "name": "wall-outer-a", "surface": 28, "type": "domain"},
+  {"edges": [[{"connector": 43, "reversed": false}], [{"connector": 49, "reversed": false}], [{"connector": 45, "reversed": true}], [{"connector": 47, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 50, "name": "side-60", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 19, "reversed": false}], [{"connector": 37, "reversed": false}], [{"connector": 43, "reversed": true}], [{"connector": 36, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 53, "name": "bottom-b", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 21, "reversed": false}], [{"connector": 41, "reversed": false}], [{"connector": 45, "reversed": true}], [{"connector": 40, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 54, "name": "top-b", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 36, "reversed": false}], [{"connector": 47, "reversed": false}], [{"connector": 40, "reversed": true}], [{"connector": 23, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 55, "name": "wall-inner-b", "surface": 51, "type": "domain"},
+  {"edges": [[{"connector": 37, "reversed": false}], [{"connector": 49, "reversed": false}], [{"connector": 41, "reversed": true}], [{"connector": 25, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 56, "name": "wall-outer-b", "surface": 52, "type": "domain"}
+ ],
+ "format": "opengrid-project",
+ "name_counters": {},
+ "next_id": 63,
+ "patches": [
+  {"id": 58, "members": [{"domain": 31}, {"domain": 32}, {"domain": 55}, {"domain": 56}], "name": "walls", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 59, "members": [{"domain": 29}, {"domain": 53}], "name": "inlet", "patch_type": "inlet", "periodic": null, "type": "patch"},
+  {"id": 60, "members": [{"domain": 30}, {"domain": 54}], "name": "outlet", "patch_type": "outlet", "periodic": null, "type": "patch"},
+  {"id": 61, "members": [{"domain": 17}, {"domain": 50}], "name": "sides", "patch_type": "symmetry", "periodic": null, "type": "patch"}
+ ],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": [
+  {"id": 62, "members": [{"domain": 33}, {"domain": 57}], "name": "duct", "type": "zone"}
+ ]
+}

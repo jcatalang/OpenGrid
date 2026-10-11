@@ -1,5 +1,9 @@
-"""Structured 2D domains: edge loops of connectors, validation, automatic edge assembly and
+"""Structured domains: edge loops of connectors, validation, automatic edge assembly and
 grid generation (TFI / Hermite TFI, optional elliptic smoothing).
+
+Planar domains in a plane z = const support every generator. Other domains (faces of 3D
+blocks) use linear TFI in space, or, with ``surface`` set, parametric TFI on that surface (the
+boundary nodes are projected onto it and the interior lies on it).
 
 Edges are listed as a counter-clockwise loop: edge 0 runs along j = 0 with i increasing,
 edge 1 along i = imax with j increasing, edge 2 along j = jmax with i *decreasing* and edge 3
@@ -212,7 +216,20 @@ def _edge_item(raw, where: str, store, issues: list[Issue]) -> dict | None:
 
 def normalize_domain(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
-    _unknown_keys(raw, ("edges", "generator"), where, issues)
+    _unknown_keys(raw, ("edges", "generator", "surface"), where, issues)
+    surface = raw.get("surface")
+    if surface is not None:
+        from opengrid.model.entities import SURFACE_KINDS
+
+        if isinstance(surface, bool) or not isinstance(surface, (str, int)) or surface not in store:
+            issues.append(Issue(f"{where}: surface", f"no surface {surface!r}"))
+            surface = None
+        elif store.get(surface).kind not in SURFACE_KINDS:
+            entity = store.get(surface)
+            issues.append(Issue(f"{where}: surface", f"{entity.name!r} is a {entity.kind}"))
+            surface = None
+        else:
+            surface = store.get(surface).id
     edges_raw = raw.get("edges")
     if not isinstance(edges_raw, (list, tuple)) or len(edges_raw) != 4:
         raise ValidationError([*issues, Issue(f"{where}: edges", "exactly 4 edges are required")])
@@ -235,7 +252,7 @@ def normalize_domain(raw: dict, store, where: str) -> dict:
         generator = None
     if issues:
         raise ValidationError(issues)
-    params = {"edges": tuple(edges), "generator": generator}
+    params = {"edges": tuple(edges), "generator": generator, "surface": surface}
     check_domain(params, store, ConnectorEvaluator(store), where)
     return params
 
@@ -320,10 +337,20 @@ def check_domain(params: dict, store, connectors: ConnectorEvaluator, where: str
     if issues:
         raise ValidationError(issues)
     loop = np.concatenate([a[:-1] for a in arrays])
-    if np.ptp(loop[:, 2]) > tolerance:
-        raise ValidationError(
-            [Issue(where, "structured domains must lie in a plane z = const (2D)")]
-        )
+    if np.ptp(loop[:, 2]) > tolerance or params.get("surface") is not None:
+        # Face of a 3D block: linear TFI in space or on a surface; no orientation requirement.
+        generator = params["generator"]
+        if generator["method"] != "tfi" or generator["elliptic"] is not None:
+            raise ValidationError(
+                [
+                    Issue(
+                        where,
+                        "Hermite TFI and elliptic smoothing need a planar domain in a plane "
+                        "z = const; domains in 3D or on surfaces use method 'tfi'",
+                    )
+                ]
+            )
+        return
     area = 0.5 * float(
         np.sum(loop[:, 0] * np.roll(loop[:, 1], -1) - np.roll(loop[:, 0], -1) * loop[:, 1])
     )
@@ -608,6 +635,18 @@ def elliptic_arguments(elliptic: dict) -> dict:
     }
 
 
+def surface_signature(store, surface_id: int) -> tuple:
+    """Parameters of a surface and of the curves it references (for cache keys)."""
+    from opengrid.model.entities import SURFACE_CURVES
+
+    entity = store.get(surface_id)
+    parts = [entity.kind, repr(entity.params)]
+    for key in SURFACE_CURVES.get(entity.kind, ()):
+        curve = store.get(entity.params[key])
+        parts.append(repr(curve.params))
+    return tuple(parts)
+
+
 class DomainEvaluator:
     """Grids of structured domains. TFI grids are recomputed on demand; smoothed grids are
     cached by a key over the generator settings and the boundary nodes, so a smoothing run
@@ -636,14 +675,28 @@ class DomainEvaluator:
         return len(bottom), len(right)
 
     def key(self, entity_id: int) -> str:
-        digest = hashlib.sha256(repr(self.store.get(entity_id).params["generator"]).encode())
+        params = self.store.get(entity_id).params
+        digest = hashlib.sha256(repr(params["generator"]).encode())
+        if params.get("surface") is not None:
+            digest.update(repr(surface_signature(self.store, params["surface"])).encode())
         for array in self.boundary(entity_id):
             digest.update(np.ascontiguousarray(array).tobytes())
         return digest.hexdigest()
 
     def initial_grid(self, entity_id: int) -> np.ndarray:
-        generator = self.store.get(entity_id).params["generator"]
+        params = self.store.get(entity_id).params
+        generator = params["generator"]
         bottom, right, top, left = self.boundary(entity_id)
+        if params.get("surface") is not None:
+            surface = self.store.geometry(params["surface"])
+            grid, _distance = _core.tfi_on_surface(
+                surface,
+                np.ascontiguousarray(bottom),
+                np.ascontiguousarray(right),
+                np.ascontiguousarray(top),
+                np.ascontiguousarray(left),
+            )
+            return grid
         if generator["method"] == "hermite_tfi":
             return _core.tfi(
                 bottom,

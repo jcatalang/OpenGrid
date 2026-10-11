@@ -25,9 +25,9 @@
   {"id": 10, "name": "out-up", "p0": [20.0, 1.0, 0.0], "p1": [20.0, 2.0, 0.0], "type": "line"}
  ],
  "domains": [
-  {"edges": [[{"connector": 11, "reversed": false}], [{"connector": 14, "reversed": false}], [{"connector": 12, "reversed": true}], [{"connector": 13, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 21, "name": "inlet-block", "type": "domain"},
-  {"edges": [[{"connector": 16, "reversed": false}], [{"connector": 19, "reversed": false}], [{"connector": 17, "reversed": true}], [{"connector": 15, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 22, "name": "lower-block", "type": "domain"},
-  {"edges": [[{"connector": 17, "reversed": false}], [{"connector": 20, "reversed": false}], [{"connector": 18, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 23, "name": "upper-block", "type": "domain"}
+  {"edges": [[{"connector": 11, "reversed": false}], [{"connector": 14, "reversed": false}], [{"connector": 12, "reversed": true}], [{"connector": 13, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 21, "name": "inlet-block", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 16, "reversed": false}], [{"connector": 19, "reversed": false}], [{"connector": 17, "reversed": true}], [{"connector": 15, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 22, "name": "lower-block", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 17, "reversed": false}], [{"connector": 20, "reversed": false}], [{"connector": 18, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 23, "name": "upper-block", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
  "name_counters": {},

@@ -9,7 +9,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from opengrid.model.entities import build_geometry
+from opengrid.model.entities import SURFACE_CURVES, SURFACE_KINDS, build_geometry, build_surface
 from opengrid.validation import Issue, ValidationError
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
@@ -29,12 +29,24 @@ def references(entity: Entity) -> set[int]:
     """Ids of the entities this entity refers to."""
     if entity.kind == "connector":
         return {segment["curve"] for segment in entity.params["segments"]}
+    if entity.kind in SURFACE_CURVES:
+        return {entity.params[key] for key in SURFACE_CURVES[entity.kind]}
     if entity.kind == "domain":
-        return {item["connector"] for edge in entity.params["edges"] for item in edge}
+        refs = {item["connector"] for edge in entity.params["edges"] for item in edge}
+        if entity.params.get("surface") is not None:
+            refs.add(entity.params["surface"])
+        return refs
+    if entity.kind == "block":
+        from opengrid.model.blocks import block_references
+
+        return block_references(entity.params)
     if entity.kind == "unstructured_domain":
         return {item["connector"] for loop in entity.params["loops"] for item in loop}
     if entity.kind == "patch":
-        refs = {item["connector"] for item in entity.params["members"]}
+        refs = {
+            item.get("connector", item.get("domain", item.get("block")))
+            for item in entity.params["members"]
+        }
         if entity.params.get("periodic") is not None:
             refs.add(entity.params["periodic"]["partner"])
         return refs
@@ -97,10 +109,13 @@ class Store:
         return result
 
     def geometry(self, key: str | int):
-        """C++ curve of an entity (cached), or None for points."""
+        """C++ curve or surface of an entity (cached), or None for points."""
         entity = self.get(key)
         if entity.id not in self._geometry:
-            self._geometry[entity.id] = build_geometry(entity.kind, entity.params)
+            if entity.kind in SURFACE_KINDS:
+                self._geometry[entity.id] = build_surface(entity.kind, entity.params, self.geometry)
+            else:
+                self._geometry[entity.id] = build_geometry(entity.kind, entity.params)
         return self._geometry[entity.id]
 
     def dependents(self, key: str | int) -> list[Entity]:
@@ -238,3 +253,7 @@ class Store:
         if entity is not None:
             del self._names[entity.name]
         self._geometry.pop(entity_id, None)
+        # Surfaces hold the C++ curves they were built from: rebuild them too.
+        for other in self._entities.values():
+            if other.kind in SURFACE_CURVES and entity_id in references(other):
+                self._geometry.pop(other.id, None)

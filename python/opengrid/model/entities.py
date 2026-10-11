@@ -13,9 +13,16 @@ from typing import Any
 from opengrid import _core
 from opengrid.validation import Issue, ValidationError
 
-DATABASE_KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs")
+SURFACE_KINDS = ("plane", "ruled_surface", "extruded_surface", "revolved_surface", "nurbs_surface")
+DATABASE_KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs", *SURFACE_KINDS)
 DOMAIN_KINDS = ("domain", "unstructured_domain")
-KINDS = (*DATABASE_KINDS, "connector", *DOMAIN_KINDS, "patch", "zone")
+KINDS = (*DATABASE_KINDS, "connector", *DOMAIN_KINDS, "block", "patch", "zone")
+# Surface parameters that reference curves (entity ids once canonical).
+SURFACE_CURVES = {
+    "ruled_surface": ("curve0", "curve1"),
+    "extruded_surface": ("curve",),
+    "revolved_surface": ("curve",),
+}
 SPLINE_METHODS = ("natural", "clamped", "catmull_rom")
 
 _SPLINE_ENUM = {
@@ -162,6 +169,88 @@ def _nurbs(c: _Checker, raw: dict) -> dict:
     }
 
 
+def _plane(c: _Checker, raw: dict) -> dict:
+    return {
+        "origin": c.vec3(raw["origin"], "origin"),
+        "u_vector": c.vec3(raw["u_vector"], "u_vector"),
+        "v_vector": c.vec3(raw["v_vector"], "v_vector"),
+    }
+
+
+def _nurbs_surface(c: _Checker, raw: dict) -> dict:
+    rows = raw["control_points"]
+    control = None
+    if not isinstance(rows, (list, tuple)) or not rows:
+        c.fail("control_points", "expected a list of rows (one per u index) of points")
+    else:
+        control = []
+        for k, row in enumerate(rows):
+            converted = c.points(row, f"control_points[{k}]", 2)
+            control.append(converted)
+        if any(r is not None and len(r) != len(control[0] or ()) for r in control):
+            c.fail("control_points", "all rows must have the same number of points")
+        control = tuple(control)
+    weights = raw.get("weights")
+    if weights is None and control is not None:
+        weights = [[1.0] * len(row or ()) for row in control]
+    weight_rows = None
+    if weights is not None:
+        weight_rows = tuple(c.numbers(row, "weights") for row in weights)
+    return {
+        "degree_u": c.integer(raw["degree_u"], "degree_u"),
+        "degree_v": c.integer(raw["degree_v"], "degree_v"),
+        "knots_u": c.numbers(raw["knots_u"], "knots_u"),
+        "knots_v": c.numbers(raw["knots_v"], "knots_v"),
+        "control_points": control,
+        "weights": weight_rows,
+    }
+
+
+def _curve_ref(c: _Checker, raw, field: str, store) -> int | None:
+    from opengrid.model.connectors import CURVE_KINDS
+
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)) or raw not in store:
+        c.fail(field, f"no curve {raw!r}")
+        return None
+    entity = store.get(raw)
+    if entity.kind not in CURVE_KINDS:
+        c.fail(field, f"{entity.name!r} is a {entity.kind}, not a curve")
+        return None
+    return entity.id
+
+
+def _ruled(c: _Checker, raw: dict, store) -> dict:
+    return {
+        "curve0": _curve_ref(c, raw["curve0"], "curve0", store),
+        "curve1": _curve_ref(c, raw["curve1"], "curve1", store),
+    }
+
+
+def _extruded(c: _Checker, raw: dict, store) -> dict:
+    return {
+        "curve": _curve_ref(c, raw["curve"], "curve", store),
+        "direction": c.vec3(raw["direction"], "direction"),
+    }
+
+
+def _revolved(c: _Checker, raw: dict, store) -> dict:
+    return {
+        "curve": _curve_ref(c, raw["curve"], "curve", store),
+        "axis_point": c.vec3(raw.get("axis_point", (0.0, 0.0, 0.0)), "axis_point"),
+        "axis": c.vec3(raw.get("axis", (0.0, 0.0, 1.0)), "axis"),
+        "start_angle": c.number(_as_python_number(raw.get("start_angle", 0.0)), "start_angle"),
+        "end_angle": c.number(_as_python_number(raw["end_angle"]), "end_angle"),
+    }
+
+
+# kind: (required, optional, converter taking the store)
+_SURFACE_SCHEMAS = {
+    "ruled_surface": (("curve0", "curve1"), (), _ruled),
+    "extruded_surface": (("curve", "direction"), (), _extruded),
+    "revolved_surface": (("curve", "end_angle"), ("axis_point", "axis", "start_angle"), _revolved),
+}
+
+
 _SCHEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...], Callable[[_Checker, dict], dict]]] = {
     # kind: (required keys, optional keys, converter)
     "point": (("xyz",), (), _point),
@@ -170,6 +259,12 @@ _SCHEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...], Callable[[_Checker, 
     "polyline": (("points",), (), _polyline),
     "spline": (("points",), ("method", "start_tangent", "end_tangent"), _spline),
     "nurbs": (("degree", "knots", "control_points"), ("weights",), _nurbs),
+    "plane": (("origin", "u_vector", "v_vector"), (), _plane),
+    "nurbs_surface": (
+        ("degree_u", "degree_v", "knots_u", "knots_v", "control_points"),
+        ("weights",),
+        _nurbs_surface,
+    ),
 }
 
 
@@ -200,6 +295,33 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
         if store is None:
             raise ValueError("unstructured domain parameters need the store")
         return normalize_unstructured(raw, store, where)
+    if kind == "block":
+        from opengrid.model.blocks import normalize_block
+
+        if store is None:
+            raise ValueError("block parameters need the store")
+        return normalize_block(raw, store, where)
+    if kind in _SURFACE_SCHEMAS:
+        if store is None:
+            raise ValueError(f"{kind} parameters need the store to resolve curves")
+        required, optional, converter = _SURFACE_SCHEMAS[kind]
+        checker = _Checker(where)
+        for key in required:
+            if key not in raw:
+                checker.fail(key, "missing")
+        for key in raw:
+            if key not in required and key not in optional:
+                checker.fail(key, f"unexpected parameter for a {kind}")
+        if checker.issues:
+            raise ValidationError(checker.issues)
+        params = converter(checker, raw, store)
+        if checker.issues:
+            raise ValidationError(checker.issues)
+        try:
+            build_surface(kind, params, store.geometry)
+        except ValueError as error:
+            raise ValidationError([Issue(where, str(error))]) from None
+        return params
     if kind == "domain":
         from opengrid.model.domains import normalize_domain
 
@@ -237,6 +359,12 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
     params = converter(checker, raw)
     if checker.issues:
         raise ValidationError(checker.issues)
+    if kind in SURFACE_KINDS:
+        try:
+            build_surface(kind, params, None)
+        except (ValueError, TypeError, IndexError) as error:
+            raise ValidationError([Issue(where, str(error))]) from None
+        return params
     if kind != "point":
         try:
             build_geometry(kind, params)
@@ -245,12 +373,49 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
     return params
 
 
+def build_surface(kind: str, params: dict, curve_of):
+    """C++ surface for canonical parameters; ``curve_of(id)`` returns a referenced curve."""
+    if kind == "plane":
+        return _core.PlaneSurface(params["origin"], params["u_vector"], params["v_vector"])
+    if kind == "ruled_surface":
+        return _core.RuledSurface(curve_of(params["curve0"]), curve_of(params["curve1"]))
+    if kind == "extruded_surface":
+        return _core.ExtrudedSurface(curve_of(params["curve"]), params["direction"])
+    if kind == "revolved_surface":
+        return _core.RevolvedSurface(
+            curve_of(params["curve"]),
+            params["axis_point"],
+            params["axis"],
+            params["start_angle"],
+            params["end_angle"],
+        )
+    if kind == "nurbs_surface":
+        rows = params["control_points"]
+        nu = len(rows)
+        nv = len(rows[0])
+        control = [p for row in rows for p in row]
+        weights = [w for row in params["weights"] for w in row]
+        return _core.NurbsSurface(
+            params["degree_u"],
+            params["degree_v"],
+            list(params["knots_u"]),
+            list(params["knots_v"]),
+            nu,
+            nv,
+            control,
+            weights,
+        )
+    raise ValueError(f"{kind} is not a surface")
+
+
 def build_geometry(kind: str, params: dict):
     """Construct the C++ curve for canonical parameters (None for a point)."""
     if kind == "point":
         return None
-    if kind in ("connector", "domain", "unstructured_domain", "patch", "zone"):
+    if kind in ("connector", "domain", "unstructured_domain", "block", "patch", "zone"):
         raise ValueError(f"{kind}s have no single curve")
+    if kind in SURFACE_KINDS:
+        raise ValueError(f"{kind}: use build_surface (surfaces reference curves)")
     if kind == "line":
         return _core.Line(params["p0"], params["p1"])
     if kind == "arc":

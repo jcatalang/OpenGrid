@@ -27,6 +27,7 @@ from opengrid.commands import (
 )
 from opengrid.commands.base import JOURNAL_HEADER
 from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d
+from opengrid.model.blocks import BlockEvaluator
 from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.store import Entity, Store
@@ -43,6 +44,7 @@ class Session:
         self.connectors = ConnectorEvaluator(self.store)
         self.domains = DomainEvaluator(self.store, self.connectors)
         self.unstructured = UnstructuredEvaluator(self.store, self.connectors)
+        self.blocks = BlockEvaluator(self.store, self.domains)
         self.commands.add_listener(self._invalidate_derived)
         self.project_path: Path | None = None
         # GUI/report threshold for the stretching-ratio warning (not stored in projects).
@@ -123,6 +125,66 @@ class Session:
         return self._create("nurbs", params, name)
 
     # ----------------------------------------------------------- connectors
+    # -------------------------------------------------------------- surfaces
+    def create_plane(self, origin, u_vector, v_vector, name: str | None = None) -> str:
+        """Plane patch x = origin + u u_vector + v v_vector, (u, v) in [0, 1]^2."""
+        return self._create(
+            "plane", {"origin": origin, "u_vector": u_vector, "v_vector": v_vector}, name
+        )
+
+    def create_ruled_surface(self, curve0, curve1, name: str | None = None) -> str:
+        """x = (1 - v) curve0(u) + v curve1(u)."""
+        return self._create("ruled_surface", {"curve0": curve0, "curve1": curve1}, name)
+
+    def create_extruded_surface(self, curve, direction, name: str | None = None) -> str:
+        """x = curve(u) + v direction."""
+        return self._create("extruded_surface", {"curve": curve, "direction": direction}, name)
+
+    def create_revolved_surface(
+        self,
+        curve,
+        end_angle: float,
+        axis_point=(0.0, 0.0, 0.0),
+        axis=(0.0, 0.0, 1.0),
+        start_angle: float = 0.0,
+        name: str | None = None,
+    ) -> str:
+        """``curve`` rotated about the axis from start_angle to end_angle (radians)."""
+        params = {
+            "curve": curve,
+            "axis_point": axis_point,
+            "axis": axis,
+            "start_angle": start_angle,
+            "end_angle": end_angle,
+        }
+        return self._create("revolved_surface", params, name)
+
+    def create_nurbs_surface(
+        self,
+        degree_u: int,
+        degree_v: int,
+        knots_u,
+        knots_v,
+        control_points,
+        weights=None,
+        name: str | None = None,
+    ) -> str:
+        """Tensor-product NURBS; ``control_points`` is a list of rows (one per u index)."""
+        params = {
+            "degree_u": degree_u,
+            "degree_v": degree_v,
+            "knots_u": knots_u,
+            "knots_v": knots_v,
+            "control_points": control_points,
+            "weights": weights,
+        }
+        return self._create("nurbs_surface", params, name)
+
+    def project_to_surface(self, name: str, point) -> tuple[float, float, tuple, float]:
+        """Closest point on a surface: (u, v, point, distance)."""
+        u, v, p, d = self.store.geometry(name).project(tuple(float(c) for c in _as3(point)))
+        return u, v, tuple(p), d
+
     def create_connector(
         self,
         segments,
@@ -216,7 +278,7 @@ class Session:
 
     # -------------------------------------------------------------- domains
     def create_structured_domain(
-        self, connectors=None, edges=None, generator=None, name: str | None = None
+        self, connectors=None, edges=None, generator=None, name: str | None = None, surface=None
     ) -> str:
         """Structured 2D domain.
 
@@ -244,11 +306,12 @@ class Session:
                         for i in edge
                     ]
                 )
-        return self.create_domain(edges, generator, name=name)
+        return self.create_domain(edges, generator, name=name, surface=surface)
 
-    def create_domain(self, edges, generator=None, name: str | None = None) -> str:
-        """Structured domain from explicit edges (the form recorded in journals)."""
-        params = {"edges": edges, "generator": generator}
+    def create_domain(self, edges, generator=None, name: str | None = None, surface=None) -> str:
+        """Structured domain from explicit edges (the form recorded in journals). With
+        ``surface`` (a surface entity), the grid is the parametric TFI on that surface."""
+        params = {"edges": edges, "generator": generator, "surface": surface}
         return self._create("domain", params, name)
 
     def create_unstructured_domain(
@@ -379,6 +442,37 @@ class Session:
         return list(domains)
 
     # ------------------------------------------------------ patches and zones
+    # ---------------------------------------------------------------- blocks
+    def create_block(self, faces=None, extrusion=None, name: str | None = None) -> str:
+        """Structured block from six structured domains (``faces``, any order and orientation)
+        or from an ``extrusion`` of a domain: ``{"domain", "mode": "translate" | "rotate" |
+        "normal", "vector" (translation or rotation axis), "axis_point", "angle" (radians),
+        "distance" (normal), "dimension" (points along the extrusion), "distribution":
+        {"type", "begin_spacing", "end_spacing", "growth_ratio"}}``."""
+        return self._create("block", {"faces": faces, "extrusion": extrusion}, name)
+
+    def create_extruded_block(
+        self, domain, mode: str = "translate", name: str | None = None, **settings
+    ) -> str:
+        """Shorthand for create_block(extrusion={"domain": domain, "mode": mode, **settings})."""
+        return self.create_block(extrusion={"domain": domain, "mode": mode, **settings}, name=name)
+
+    def block_grid(self, name: str) -> np.ndarray:
+        """Block grid, shape (nk, nj, ni, 3)."""
+        return self.blocks.grid(self.store.get(name).id)
+
+    def block_quality(self, name: str) -> dict:
+        """Per-cell quality metrics of a block, arrays of shape (nk - 1, nj - 1, ni - 1)."""
+        return _core.quality_3d(np.ascontiguousarray(self.block_grid(name)))
+
+    def block_status(self, name: str) -> str:
+        nk, nj, ni, _ = self.block_grid(name).shape
+        params = self.store.get(name).params
+        source = "6 faces, TFI"
+        if params["extrusion"] is not None:
+            source = f"{params['extrusion']['mode']} extrusion"
+        return f"{ni} x {nj} x {nk} points ({(ni - 1) * (nj - 1) * (nk - 1)} cells), {source}"
+
     def create_patch(
         self, name: str | None = None, patch_type: str = "wall", members=(), periodic=None
     ) -> str:
@@ -439,25 +533,85 @@ class Session:
     def _change_members(self, name: str, key: str, refs, add: bool) -> str:
         if isinstance(refs, (str, int)):
             refs = [refs]
-        current = [self.store.get(item[key]).name for item in self.entity(name).params["members"]]
-        names = [self.store.get(ref).name for ref in refs]
+        from opengrid.model.patches import member_label, member_script
+
+        entity = self.entity(name)
+        current = [member_script(item, self.store) for item in entity.params["members"]]
+        labels = [member_label(item, self.store) for item in entity.params["members"]]
+        given = []
+        for ref in refs:
+            if isinstance(ref, dict) or (isinstance(ref, (list, tuple)) and len(ref) == 2):
+                if isinstance(ref, dict):
+                    block, face = ref["block"], ref["face"]
+                else:
+                    block, face = ref
+                given.append(
+                    (
+                        {"block": self.store.get(block).name, "face": face},
+                        f"{self.store.get(block).name}.{face}",
+                    )
+                )
+            else:
+                given.append((self.store.get(ref).name, self.store.get(ref).name))
         if add:
-            members = current + [n for n in names if n not in current]
+            members = current + [m for m, label in given if label not in labels]
         else:
-            missing = [n for n in names if n not in current]
+            missing = [label for _m, label in given if label not in labels]
             if missing:
                 raise ValidationError([Issue(name, f"does not contain {', '.join(missing)}")])
-            members = [n for n in current if n not in names]
+            drop = {label for _m, label in given}
+            members = [m for m, label in zip(current, labels, strict=True) if label not in drop]
         return self.modify(name, members=members)
 
+    def is_3d(self) -> bool:
+        """True when the model has blocks (exports and boundary checks are then 3D)."""
+        return bool(self.store.entities("block"))
+
     def topology(self):
+        """2D: connector uses of domains. 3D models: block faces (boundary / interfaces)."""
+        if self.is_3d():
+            from opengrid.model.blocks import analyze_blocks
+
+            return analyze_blocks(self.store, self.blocks)
         from opengrid.model.topology import analyze
 
         return analyze(self.store, self)
 
     def boundary_report(self):
-        """Boundary connectors, interfaces (detected automatically), unused connectors, boundary
-        connectors without a patch and all problems (opengrid.model.topology.BoundaryReport)."""
+        """Boundary connectors (2D) or block faces (3D), interfaces (detected automatically),
+        boundary entities without a patch and all problems
+        (opengrid.model.topology.BoundaryReport)."""
+        if self.is_3d():
+            from opengrid.model.blocks import patch_faces
+            from opengrid.model.topology import BoundaryReport
+
+            topo = self.topology()
+            _assigned, issues = patch_faces(self.store, topo)
+            issues = list(topo.problems) + issues
+            for patch in self.store.entities("patch"):
+                for item in patch.params["members"]:
+                    if "connector" in item:
+                        issues.append(
+                            Issue(
+                                self.store.get(item["connector"]).name,
+                                f"is a connector in patch {patch.name}; 3D patches contain "
+                                "domains or block faces",
+                            )
+                        )
+                if patch.params["periodic"] is not None:
+                    issues.append(
+                        Issue(patch.name, "periodic pairing of 3D faces is not supported yet")
+                    )
+
+            def label(f):
+                return f"{self.store.get(f.block).name}.{f.face}"
+
+            boundary = [label(f) for f in topo.boundary]
+            interfaces = [f"{label(a)} | {label(b)}" for a, b in topo.interfaces]
+            unassigned = [
+                str(i.where) for i in issues if "is a boundary face in no patch" in i.message
+            ]
+            return BoundaryReport(boundary, interfaces, [], unassigned, issues, [])
         from opengrid.model.topology import validate_patches
 
         return validate_patches(self.store, self.topology(), self)
@@ -483,6 +637,13 @@ class Session:
         from opengrid.io.assembly import assemble
         from opengrid.io.vtkhdf import write_vtkhdf_collection, write_vtkhdf_grid
 
+        if self.is_3d():
+            from opengrid.io.assembly3d import assemble_blocks
+
+            if not self.store.entities("patch") and not self.store.entities("zone"):
+                return write_vtkhdf_grid(path, assemble_blocks(self))
+            self._require_valid_boundary()
+            return write_vtkhdf_collection(path, assemble_blocks(self, self.topology()))
         if not self.store.entities("patch") and not self.store.entities("zone"):
             names = None
             if domains is not None:
@@ -502,6 +663,10 @@ class Session:
         from opengrid.io.gmsh import write_gmsh
 
         report = self._require_valid_boundary()
+        if self.is_3d():
+            from opengrid.io.assembly3d import assemble_blocks
+
+            return write_gmsh(path, assemble_blocks(self, self.topology(), quality=False))
         return write_gmsh(
             path, assemble(self, self.topology(), quality=False, periodic=report.periodic)
         )
@@ -509,13 +674,20 @@ class Session:
     def export_cgns(self, path, base_name: str = "OpenGrid") -> dict:
         """Structured CGNS: zones, families, BCs per patch and 1-to-1 connectivity; the boundary
         must validate."""
-        from opengrid.io.cgns import write_cgns
+        from opengrid.io.cgns import write_cgns, write_cgns_blocks
 
         report = self._require_valid_boundary()
+        if self.is_3d():
+            return write_cgns_blocks(path, self, self.topology(), base_name)
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
     def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:
-        """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1)."""
+        """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1); in a model with
+        blocks, the blocks (3D)."""
+        if self.is_3d() and domains is None:
+            grids = [self.block_grid(b.name) for b in self.store.entities("block")]
+            write_plot3d(path, grids, binary=binary, three_d=True)
+            return
         names = self._export_names(domains)
         unstructured = [n for n in names if self.store.get(n).kind == "unstructured_domain"]
         if unstructured:
@@ -686,6 +858,7 @@ class Session:
         self.connectors = ConnectorEvaluator(store)
         self.domains = DomainEvaluator(store, self.connectors)
         self.unstructured = UnstructuredEvaluator(store, self.connectors)
+        self.blocks = BlockEvaluator(store, self.domains)
         self.commands = CommandStack(store)
         for listener in listeners:
             self.commands.add_listener(listener)

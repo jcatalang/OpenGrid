@@ -103,8 +103,12 @@ def test_patch_and_zone_entities():
     og = step_session()
     with pytest.raises(opengrid.ValidationError, match="used by patch 'walls'"):
         og.delete("c-step")
-    with pytest.raises(opengrid.ValidationError, match="is a domain, not a connector"):
-        og.create_patch("bad", "wall", ["lower-block"])
+    # Domains are face members (3D models); in a 2D model the boundary report rejects them.
+    og.create_patch("bad", "wall", ["lower-block"])
+    assert any("but the model has no blocks" in str(i) for i in og.boundary_report().issues)
+    og.undo()
+    with pytest.raises(opengrid.ValidationError, match="patch members are connectors"):
+        og.create_patch("bad", "wall", ["step"])
     with pytest.raises(opengrid.ValidationError, match="type"):
         og.create_patch("bad", "slip", ["c-step"])
     with pytest.raises(opengrid.ValidationError, match="does not contain"):

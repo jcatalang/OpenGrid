@@ -215,6 +215,22 @@ class MainWindow(QMainWindow):
             self.create_domain_on_selection,
             tip="Structured domain from the selected connectors (edges assembled automatically)",
         )
+        self.block_action = self._action(
+            "Block from 6 faces",
+            self.create_block_on_selection,
+            tip="Structured block (3D TFI) from six selected structured domains",
+        )
+        self.extrude_action = self._action(
+            "Extrude domain",
+            self.extrude_selection,
+            tip="Block by extruding the selected structured domain (edit the extrusion afterwards)",
+        )
+        self.cut_action = QAction("Cut blocks (plane x)", self)
+        self.cut_action.setCheckable(True)
+        self.cut_action.toggled.connect(self.set_cut_plane)
+        self.shrink_action = QAction("Shrink block cells", self)
+        self.shrink_action.setCheckable(True)
+        self.shrink_action.toggled.connect(self.set_shrink)
         self.quality_action = QAction("Colour domains by quality", self)
         self.quality_action.setCheckable(True)
         self.quality_action.toggled.connect(self.set_quality_colouring)
@@ -279,6 +295,8 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.chain_action)
         create_menu.addAction(self.domain_action)
         create_menu.addAction(self.unstructured_action)
+        create_menu.addAction(self.block_action)
+        create_menu.addAction(self.extrude_action)
         create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
@@ -291,6 +309,9 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.threshold_action)
         view_menu.addAction(self.quality_action)
         view_menu.addAction(self.patch_color_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.cut_action)
+        view_menu.addAction(self.shrink_action)
 
     def _create_toolbars(self) -> None:
         toolbar = QToolBar("Tools", self)
@@ -305,6 +326,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.chain_action)
         toolbar.addAction(self.domain_action)
         toolbar.addAction(self.unstructured_action)
+        toolbar.addAction(self.block_action)
+        toolbar.addAction(self.extrude_action)
         toolbar.addWidget(QLabel(" dim "))
         self.dimension_box = QSpinBox()
         self.dimension_box.setRange(2, 100000)
@@ -534,14 +557,63 @@ class MainWindow(QMainWindow):
             if entity_id not in self.session.store:
                 continue
             entity = self.session.store.get(entity_id)
-            if entity.kind in ("domain", "unstructured_domain"):
+            if entity.kind in ("domain", "unstructured_domain", "block"):
                 names.append(entity.name)
         return names
+
+    def create_block_on_selection(self) -> str | None:
+        faces = self._selected_of_kind("domain")
+        if len(faces) != 6:
+            self.statusBar().showMessage("Select the six structured domains of the block", 5000)
+            return None
+        name = self._run(lambda: self.session.create_block(faces=faces))
+        if name:
+            log.info("created %s: %s", name, self.session.block_status(name))
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def extrude_selection(self) -> str | None:
+        domains = self._selected_of_kind("domain")
+        if len(domains) != 1:
+            self.statusBar().showMessage("Select one structured domain to extrude", 5000)
+            return None
+        grid = self.session.domain_grid(domains[0])
+        size = float(np.linalg.norm(np.ptp(grid.reshape(-1, 3), axis=0)))
+        normal = np.cross(grid[0, -1] - grid[0, 0], grid[-1, 0] - grid[0, 0])
+        if np.linalg.norm(normal) == 0:
+            normal = np.array([0.0, 0.0, 1.0])
+        vector = tuple(float(v) for v in 0.25 * size * normal / np.linalg.norm(normal))
+        name = self._run(
+            lambda: self.session.create_extruded_block(
+                domains[0], "translate", vector=vector, dimension=self.dimension_box.value()
+            )
+        )
+        if name:
+            log.info("created %s: %s", name, self.session.block_status(name))
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def set_cut_plane(self, enabled: bool) -> None:
+        """Cut the blocks with the plane x = centre of the model (normal +x)."""
+        self.scene.cut_plane = None
+        if enabled and self.session.is_3d():
+            points = np.concatenate(
+                [self.session.block_grid(n).reshape(-1, 3) for n in self.session.names("block")]
+            )
+            centre = tuple(float(v) for v in 0.5 * (points.min(axis=0) + points.max(axis=0)))
+            self.scene.cut_plane = (centre, (1.0, 0.0, 0.0))
+        self.scene.rebuild()
+
+    def set_shrink(self, enabled: bool) -> None:
+        self.scene.shrink = enabled
+        self.scene.rebuild()
 
     def _quality_scope(self) -> tuple[list[str], str]:
         names = self._selected_domains()
         if names:
             return names, ", ".join(names)
+        if self.session.is_3d():
+            return self.session.names("block"), "all blocks"
         return self.session.names("domain") + self.session.names(
             "unstructured_domain"
         ), "all domains"
@@ -622,6 +694,13 @@ class MainWindow(QMainWindow):
         self.quality_dock.show_values(np.concatenate(values), scope)
 
     def _cell_corners(self, name: str, j: int, i: int) -> np.ndarray:
+        if self.session.store.get(name).kind == "block":
+            grid = self.session.block_grid(name)
+            nk, nj, ni, _ = grid.shape
+            k, jj, ii = np.unravel_index(i, (nk - 1, nj - 1, ni - 1))
+            c = grid[k : k + 2, jj : jj + 2, ii : ii + 2].reshape(-1, 3)
+            # Bottom face loop then top face loop (outlined as one polyline).
+            return c[[0, 1, 3, 2, 0, 4, 5, 7, 6, 4]]
         if self.session.store.get(name).kind == "unstructured_domain":
             mesh = self.session.unstructured_mesh(name)
             n = len(mesh["triangles"])
@@ -640,8 +719,17 @@ class MainWindow(QMainWindow):
         best = None
         for name in names:
             values = self.scene._display_quality(self.session.store.get(name))[key]
-            j, i = worst_cell(values, larger_is_worse)
-            value = float(values[j, i])
+            if values.ndim == 3:
+                # Blocks: (k, j, i); the cell is located by its flat index.
+                if larger_is_worse:
+                    flat = int(np.argmax(values))
+                else:
+                    flat = int(np.argmin(values))
+                j, i = 0, flat
+                value = float(values.reshape(-1)[flat])
+            else:
+                j, i = worst_cell(values, larger_is_worse)
+                value = float(values[j, i])
             better = best is None
             if not better:
                 if larger_is_worse:
@@ -689,7 +777,7 @@ class MainWindow(QMainWindow):
         return [n for n in self.selected_names() if self.session.store.get(n).kind == kind]
 
     def create_patch_from_selection(self, name: str, patch_type: str = "wall") -> str | None:
-        connectors = self._selected_of_kind("connector")
+        connectors = self._selected_of_kind("connector") + self._selected_of_kind("domain")
         if not name:
             self.statusBar().showMessage("Enter a patch name", 5000)
             return None
@@ -745,6 +833,8 @@ class MainWindow(QMainWindow):
                 colors[connector_id] = UNASSIGNED_COLOR
         for index, patch in enumerate(self.session.store.entities("patch")):
             for item in patch.params["members"]:
+                if "connector" not in item:
+                    continue
                 colors[item["connector"]] = PATCH_PALETTE[index % len(PATCH_PALETTE)]
         return colors
 

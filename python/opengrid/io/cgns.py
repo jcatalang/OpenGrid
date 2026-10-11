@@ -116,6 +116,8 @@ def write_cgns(path, session, topology, base_name: str = "OpenGrid", periodic=()
         if patch.params["patch_type"] == "periodic":
             continue
         for item in patch.params["members"]:
+            if "connector" not in item:
+                continue
             use = boundary.get(item["connector"])
             if use is None:
                 continue
@@ -263,3 +265,64 @@ def _unique(name: str, used: set) -> str:
         candidate = name[: MAX_NAME - len(suffix)] + suffix
     used.add(candidate)
     return candidate
+
+
+def write_cgns_blocks(path, session, topology, base_name: str = "OpenGrid") -> dict:
+    """3D structured CGNS of the model's blocks: one zone per block (zone family), one Family_t
+    per patch, one BC_t per patched boundary face and GridConnectivity1to1_t in both directions
+    for every interface."""
+    from opengrid.io.assembly3d import block_zones
+    from opengrid.model.blocks import face_range, one_to_one_3d, patch_faces
+
+    if not _core.cgns_available():
+        raise RuntimeError("OpenGrid was built without CGNS support")
+    store = session.store
+    blocks = store.entities("block")
+    zone_index = {b.id: k for k, b in enumerate(blocks)}
+    zone_names, block_zone = block_zones(session)
+    families = [(name, "") for name in zone_names]
+    for patch in store.entities("patch"):
+        families.append((patch.name, CGNS_BC_TYPES[patch.params["patch_type"]]))
+    issues = []
+    for name in [b.name for b in blocks] + [f[0] for f in families]:
+        if len(name) > MAX_NAME:
+            issues.append(Issue(name, f"is longer than {MAX_NAME} characters (CGNS limit)"))
+    if issues:
+        raise ValidationError(issues)
+    zones = []
+    for b in blocks:
+        zones.append(
+            (b.name, np.ascontiguousarray(session.block_grid(b.name)), zone_names[block_zone[b.id]])
+        )
+    assigned, _issues = patch_faces(store, topology)
+    bcs = []
+    names_in_zone: dict[int, set] = {}
+    for (block_id, face), patch in sorted(assigned.items()):
+        zone = zone_index[block_id]
+        r = face_range(session.blocks.grid(block_id), face)
+        name = _unique(f"{patch}_{face}", names_in_zone.setdefault(zone, set()))
+        bcs.append((zone, name, patch, tuple(v + 1 for v in r)))
+    connections = []
+    for a, b in topology.interfaces:
+        for this, donor in ((a, b), (b, a)):
+            c = one_to_one_3d(session.blocks, this, donor)
+            zone = zone_index[this.block]
+            label = f"{store.get(donor.block).name}_{donor.face}"
+            name = _unique(label, names_in_zone.setdefault(zone, set()))
+            connections.append(
+                (
+                    zone,
+                    name,
+                    zone_index[donor.block],
+                    tuple(v + 1 for v in c["range"]),
+                    tuple(v + 1 for v in c["donor_range"]),
+                    c["transform"],
+                )
+            )
+    _core.write_cgns_structured_3d(str(path), base_name, zones, families, bcs, connections)
+    return {
+        "zones": len(zones),
+        "families": len(families),
+        "boundaries": len(bcs),
+        "connections": len(connections),
+    }

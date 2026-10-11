@@ -12,8 +12,9 @@ Two forms:
   * a single UnstructuredGrid (format 1.0) of all domains (no patches or zones in the model);
   * a PartitionedDataSetCollection (format 2.1) with one cell block per zone and one line block
     per patch, grouped in the Assembly as Volume/<zone> and Patches/<patch>.
-Cells are quads (structured domains) and triangles (unstructured domains); points shared by
-several domains are merged so the mesh is conforming.
+Cells are quads (structured domains) and triangles (unstructured domains), or hexahedra with
+boundary quads for 3D block models; points shared by several domains / blocks are merged so the
+mesh is conforming.
 """
 
 from pathlib import Path
@@ -22,6 +23,7 @@ import h5py
 import numpy as np
 
 VTK_LINE = 3
+VTK_QUAD = 9
 VERSION = (1, 0)
 COLLECTION_VERSION = (2, 1)  # PartitionedDataSetCollection with an Assembly needs format 2.1
 RESERVED_NAMES = {"Assembly"}
@@ -167,12 +169,16 @@ def write_vtkhdf_collection(path, assembly) -> dict:
             group = _group(root, patch)
             group.attrs["Index"] = np.int64(index)
             count = int(np.count_nonzero(mask))
+            width = assembly.lines.shape[1]
+            boundary_type = VTK_LINE
+            if width == 4:
+                boundary_type = VTK_QUAD
             _write_unstructured(
                 group,
                 assembly.points,
-                np.arange(0, 2 * count + 1, 2),
+                np.arange(0, width * count + 1, width),
                 assembly.lines[mask].reshape(-1),
-                np.full(count, VTK_LINE, dtype=np.uint8),
+                np.full(count, boundary_type, dtype=np.uint8),
                 {"patch_id": assembly.line_patch[mask]},
                 COLLECTION_VERSION,
             )

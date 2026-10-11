@@ -225,6 +225,17 @@ def validate_patches(store, topology: Topology, session=None) -> BoundaryReport:
     membership: dict[int, list[str]] = {}
     for patch in store.entities("patch"):
         for item in patch.params["members"]:
+            if "connector" not in item:
+                from opengrid.model.patches import member_label
+
+                issues.append(
+                    Issue(
+                        member_label(item, store),
+                        f"is a face member of patch {patch.name}, but the model has no blocks "
+                        "(2D patches contain connectors)",
+                    )
+                )
+                continue
             membership.setdefault(item["connector"], []).append(patch.name)
     for connector_id, uses in sorted(topology.non_manifold().items()):
         name = store.get(connector_id).name

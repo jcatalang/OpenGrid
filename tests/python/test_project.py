@@ -74,7 +74,7 @@ def test_load_after_session_clears_history(tmp_path):
         (lambda d: d["database"][1].update(name=d["database"][0]["name"]), "duplicate name"),
         (lambda d: d["database"][0].update(p1=[0.0, 0.0, 0.0]), "coincide"),
         (lambda d: d.update(next_id=1), "next_id"),
-        (lambda d: d.update(blocks=[{"x": 1}]), "not supported"),
+        (lambda d: d.update(blocks=[{"x": 1}]), "record needs"),
     ],
 )
 def test_invalid_projects_are_reported(mutate, message):

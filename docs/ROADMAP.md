@@ -89,7 +89,21 @@ Phase 5 generators (triangles, quad-dominant or all-quad).
 - Proximity/collision termination works (two-element airfoil gap). The last-layer size matches the core size field within 20%.
 - Demos: NACA 0012 hybrid; two-element airfoil.
 
-## Phase 7 — 3D structured
+## Phase 7 — 3D structured *(split after Phase 6: 7a foundation, 7b smoothing + hyperbolic extrusion)*
+- **7a:**
+  - surfaces with projection;
+  - domains on surfaces / in 3D;
+  - blocks from six faces (automatic orientation) and by translate/rotate/normal extrusion;
+  - 3D TFI and quality;
+  - 3D topology and patches;
+  - exports (VTKHDF hexahedra, CGNS 3D, Plot3D 3D, Gmsh);
+  - GUI cut plane / shrink;
+  - demos: annular sector duct, extruded wing section.
+- **7b:**
+  - surface elliptic smoothing;
+  - 3D elliptic smoothing with wall control;
+  - hyperbolic extrusion;
+  - demo: 3D cylinder O-grid.
 - Surfaces: planar, ruled, revolved, extruded, NURBS, with projection accuracy < 1e-10·L.
 - Blocks from 6 faces, 3D TFI, 3D elliptic smoothing with wall control, hyperbolic extrusion, and translate/rotate/normal extrusion.
 - Block volume vs analytic (annular sector) within 1e-6 relative for fine grids. Positive Jacobians. Consistent 1-to-1 interfaces.

@@ -26,6 +26,11 @@ add_library(og_core STATIC
   src/quality/quality2d.cpp
   src/quality/quality_tri.cpp
   src/quality/quality_cells.cpp
+  src/quality/quality3d.cpp
+  src/geom/surface.cpp
+  src/structured/tfi3d.cpp
+  src/structured/extrude.cpp
+  src/structured/surface_tfi.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 

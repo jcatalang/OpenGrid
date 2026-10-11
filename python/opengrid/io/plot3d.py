@@ -20,7 +20,8 @@ def write_plot3d(
     three_d: bool = False,
     multi_grid: bool = True,
 ) -> None:
-    """Write grids of shape (nj, ni, 3). Two-dimensional files store x and y only."""
+    """Write grids of shape (nj, ni, 3), or blocks of shape (nk, nj, ni, 3) (always 3D).
+    Two-dimensional files store x and y only."""
     if not grids:
         raise ValueError("nothing to export")
     if not multi_grid and len(grids) != 1:
@@ -29,6 +30,11 @@ def write_plot3d(
     blocks = []
     for grid in grids:
         grid = np.asarray(grid, dtype=float)
+        if grid.ndim == 4:
+            nk, nj, ni, _ = grid.shape
+            dims.extend([ni, nj, nk])
+            blocks.append(np.concatenate([grid[..., c].reshape(-1) for c in range(3)]))
+            continue
         nj, ni, _ = grid.shape
         components = [grid[:, :, 0].reshape(-1), grid[:, :, 1].reshape(-1)]
         if three_d:
@@ -69,7 +75,8 @@ def read_plot3d(
     path, three_d: bool = False, multi_grid: bool = True, binary: bool | None = None
 ) -> list[np.ndarray]:
     """Read grids written by :func:`write_plot3d` (or compatible files); returns arrays of
-    shape (nj, ni, 3) (z = 0 for 2D files). ``binary=None`` detects the format."""
+    shape (nj, ni, 3) (z = 0 for 2D files), or (nk, nj, ni, 3) for 3D blocks with nk > 1.
+    ``binary=None`` detects the format."""
     path = Path(path)
     raw = path.read_bytes()
     if binary is None:
@@ -110,6 +117,14 @@ def read_plot3d(
     for d, values in zip(dims, data, strict=True):
         ni = int(d[0])
         nj = int(d[1])
+        if three_d and int(d[2]) > 1:
+            nk = int(d[2])
+            count = ni * nj * nk
+            block = np.zeros((nk, nj, ni, 3))
+            for c in range(3):
+                block[..., c] = values[c * count : (c + 1) * count].reshape(nk, nj, ni)
+            grids.append(block)
+            continue
         count = ni * nj
         grid = np.zeros((nj, ni, 3))
         grid[:, :, 0] = values[:count].reshape(nj, ni)

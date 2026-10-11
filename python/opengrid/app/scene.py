@@ -12,6 +12,8 @@ import pyvista as pv
 
 from opengrid.api import Session
 from opengrid.model.connectors import CURVE_KINDS
+from opengrid.model.entities import SURFACE_KINDS
+from opengrid.validation import ValidationError
 
 CURVE_COLOR = "#5ad1ff"
 POINT_COLOR = "#f2f2f2"
@@ -23,6 +25,8 @@ CONNECTOR_COLOR = "#ff9f43"
 NODE_COLOR = "#e8e8e8"
 STRETCHING_CMAP = "coolwarm"
 DOMAIN_COLOR = "#9fb3c8"
+BLOCK_COLOR = "#7fd1b9"
+SURFACE_COLOR = "#8a7fd1"
 QUALITY_CMAP = "viridis"
 WORST_COLOR = "#ff3b30"
 TESSELLATION_TOLERANCE = 2e-4
@@ -38,6 +42,10 @@ class Scene:
         self.show_nodes = True
         self.quality_metric: str | None = None  # colour domains by this metric when set
         self.patch_colors: dict[int, str] | None = None  # connector id -> colour (patch mode)
+        # 3D views of blocks: keep the cells on one side of a plane (origin, normal), and/or
+        # shrink every cell towards its centre.
+        self.cut_plane: tuple | None = None
+        self.shrink = False
 
     # --------------------------------------------------------------- rendering
     def rebuild(self) -> None:
@@ -55,7 +63,7 @@ class Scene:
         # redraw all of them together with the changed entities.
         targets = set(ids)
         for entity in self.session.store:
-            if entity.kind in ("connector", "domain", "unstructured_domain"):
+            if entity.kind in ("connector", "domain", "unstructured_domain", "block"):
                 targets.add(entity.id)
         for entity_id in sorted(targets):
             self._remove_entity_actor(entity_id)
@@ -170,7 +178,8 @@ class Scene:
             mesh = quad_mesh(self.session.domain_grid(entity.name, compute=False))
         name = f"entity-{entity.id}"
         selected = entity.id in self.selected_ids
-        if self.quality_metric is not None:
+        # In a 3D model the cells are the blocks: domains (their faces) stay wireframes.
+        if self.quality_metric is not None and not self.session.is_3d():
             values = self._display_quality(entity)[self.quality_metric]
             mesh.cell_data[self.quality_metric] = values.reshape(-1)
             self.plotter.add_mesh(
@@ -205,10 +214,100 @@ class Scene:
             )
         self._actors[entity.id] = [name]
 
+    def _add_surface_actor(self, entity) -> None:
+        grid = self.session.store.geometry(entity.id).grid(25, 25)
+        name = f"entity-{entity.id}"
+        color = SURFACE_COLOR
+        if entity.id in self.selected_ids:
+            color = SELECTED_COLOR
+        self.plotter.add_mesh(
+            quad_mesh(np.asarray(grid)),
+            color=color,
+            opacity=0.25,
+            name=name,
+            pickable=False,
+            reset_camera=False,
+        )
+        self._actors[entity.id] = [name]
+
+    def block_mesh(self, entity) -> pv.DataSet:
+        """The block as a structured grid, with the cut plane and shrink applied."""
+        grid = np.asarray(self.session.block_grid(entity.name))
+        mesh = pv.StructuredGrid(
+            np.ascontiguousarray(grid[..., 0].transpose(2, 1, 0)),
+            np.ascontiguousarray(grid[..., 1].transpose(2, 1, 0)),
+            np.ascontiguousarray(grid[..., 2].transpose(2, 1, 0)),
+        )
+        if self.quality_metric is not None:
+            values = self._display_quality(entity)[self.quality_metric]
+            mesh.cell_data[self.quality_metric] = values.reshape(-1)
+        if self.cut_plane is not None:
+            origin, normal = self.cut_plane
+            mesh = mesh.clip(normal=normal, origin=origin, crinkle=True)
+        if self.shrink:
+            mesh = mesh.shrink(0.8)
+        return mesh
+
+    def _add_block_actor(self, entity) -> None:
+        try:
+            mesh = self.block_mesh(entity)
+        except ValidationError:
+            return  # an invalid block is reported by the property panel / boundary checks
+        name = f"entity-{entity.id}"
+        if mesh.n_cells == 0:
+            self._actors[entity.id] = []
+            return
+        cells = self.cut_plane is not None or self.shrink
+        if self.quality_metric is not None:
+            self.plotter.add_mesh(
+                mesh,
+                scalars=self.quality_metric,
+                cmap=QUALITY_CMAP,
+                show_edges=True,
+                edge_color="#30363d",
+                name=name,
+                pickable=False,
+                reset_camera=False,
+                scalar_bar_args={"title": self.quality_metric.replace("_", " ")},
+            )
+        elif cells:
+            color = BLOCK_COLOR
+            if entity.id in self.selected_ids:
+                color = SELECTED_COLOR
+            self.plotter.add_mesh(
+                mesh,
+                color=color,
+                show_edges=True,
+                edge_color="#30363d",
+                name=name,
+                pickable=False,
+                reset_camera=False,
+            )
+        else:
+            color = BLOCK_COLOR
+            if entity.id in self.selected_ids:
+                color = SELECTED_COLOR
+            self.plotter.add_mesh(
+                mesh.extract_surface(algorithm="dataset_surface"),
+                style="wireframe",
+                color=color,
+                line_width=1.0,
+                name=name,
+                pickable=False,
+                reset_camera=False,
+            )
+        self._actors[entity.id] = [name]
+
     def _display_quality(self, entity) -> dict:
-        """Quality of the displayed mesh (the TFI grid while smoothing is pending)."""
+        """Quality of the displayed mesh (the TFI grid while smoothing is pending); for blocks
+        the 3D metrics, with area / area_ratio standing for volume / volume_ratio."""
         from opengrid import _core
 
+        if entity.kind == "block":
+            q = dict(self.session.block_quality(entity.name))
+            q["area"] = q["volume"]
+            q["area_ratio"] = q["volume_ratio"]
+            return q
         if entity.kind == "unstructured_domain":
             return self.session.domain_quality(entity.name)
         return _core.quality_2d(self.session.domain_grid(entity.name, compute=False))
@@ -245,6 +344,12 @@ class Scene:
             return
         if entity.kind in ("domain", "unstructured_domain"):
             self._add_domain_actor(entity)
+            return
+        if entity.kind == "block":
+            self._add_block_actor(entity)
+            return
+        if entity.kind in SURFACE_KINDS:
+            self._add_surface_actor(entity)
             return
         if entity.kind not in CURVE_KINDS and entity.kind != "point":
             return  # patches and zones are shown through their members

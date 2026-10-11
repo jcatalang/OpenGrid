@@ -15,11 +15,12 @@ FORMAT = "opengrid-project"
 VERSION = 1
 
 # Sections reserved for later phases; written empty so the schema is stable.
-_FUTURE_SECTIONS = ("blocks",)
+_FUTURE_SECTIONS = ()
 _SECTIONS = {
     "database": DATABASE_KINDS,
     "connectors": ("connector",),
     "domains": ("domain", "unstructured_domain"),
+    "blocks": ("block",),
     "patches": ("patch",),
     "zones": ("zone",),
 }
@@ -136,11 +137,13 @@ def from_json(text: str, source: str = "<project>") -> Store:
     # Database entities first; connectors are validated against them. Periodic pairings refer
     # to other patches of the same section, so patches are added without them first and the
     # pairings applied in a second pass.
+    # Within a section entities are added one by one in id order, so references inside the
+    # section (surfaces -> curves) resolve.
     store = Store()
     deferred = []
     for section in _SECTIONS:
-        entities = []
-        for _where, record in records[section]:
+        store.begin()
+        for _where, record in sorted(records[section], key=lambda item: item[1]["id"]):
             raw = {key: value for key, value in record.items() if key not in _RECORD_KEYS}
             if record["type"] == "patch" and raw.get("periodic") is not None:
                 deferred.append((record, raw))
@@ -151,14 +154,11 @@ def from_json(text: str, source: str = "<project>") -> Store:
             except ValidationError as error:
                 issues.extend(error.issues)
                 continue
-            entities.append(Entity(record["id"], record["name"], record["type"], params))
+            store.next_id = record["id"]
+            store.add(record["type"], params, record["name"])
+        store.commit()
         if issues:
             raise ValidationError(issues)
-        store.begin()
-        for entity in sorted(entities, key=lambda e: e.id):
-            store.next_id = entity.id
-            store.add(entity.kind, entity.params, entity.name)
-        store.commit()
     if deferred:
         store.begin()
         for record, raw in deferred:

@@ -5,6 +5,8 @@ Input that cannot be parsed or that the model rejects is reported in the panel; 
 changed in that case.
 """
 
+import math
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -21,7 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from opengrid.api import Session
-from opengrid.model.connectors import DISTRIBUTION_TYPES, SPACING_MODES
+from opengrid.model.blocks import EXTRUSION_MODES
+from opengrid.model.connectors import CURVE_KINDS, DISTRIBUTION_TYPES, SPACING_MODES
 from opengrid.model.domains import (
     CONTROLS,
     DEFAULT_ELLIPTIC,
@@ -31,7 +34,7 @@ from opengrid.model.domains import (
     SOLVERS,
 )
 from opengrid.model.entities import SPLINE_METHODS
-from opengrid.model.patches import PATCH_TYPES
+from opengrid.model.patches import PATCH_TYPES, member_label
 from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
 from opengrid.validation import ValidationError
 
@@ -61,7 +64,74 @@ FIELDS = {
         ("weights", "numbers"),
         ("knots", "numbers"),
     ),
+    "plane": (("origin", "vec3"), ("u_vector", "vec3"), ("v_vector", "vec3")),
+    "ruled_surface": (),
+    "extruded_surface": (("direction", "vec3"),),
+    "revolved_surface": (
+        ("axis_point", "vec3"),
+        ("axis", "vec3"),
+        ("start_angle", "number"),
+        ("end_angle", "number"),
+    ),
+    "nurbs_surface": (("knots_u", "numbers"), ("knots_v", "numbers")),
 }
+
+
+class ExtrusionEditor(QWidget):
+    """Extrusion of a block: mode, vector / axis, angle (degrees in the editor, radians in the
+    model), distance, number of points and distribution."""
+
+    def __init__(self, value: dict, parent=None):
+        super().__init__(parent)
+        self.domain = value["domain"]
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.mode = QComboBox()
+        self.mode.addItems(list(EXTRUSION_MODES))
+        self.mode.setCurrentText(value["mode"])
+        self.vector = QLineEdit(format_vec3(value["vector"]))
+        self.axis_point = QLineEdit(format_vec3(value["axis_point"]))
+        self.angle = QLineEdit(format_number(math.degrees(value["angle"])))
+        self.distance = QLineEdit(format_number(value["distance"]))
+        self.dimension = QSpinBox()
+        self.dimension.setRange(2, 100000)
+        self.dimension.setValue(value["dimension"])
+        self.distribution = DistributionEditor(value["distribution"])
+        layout.addRow("mode", self.mode)
+        layout.addRow("vector / axis", self.vector)
+        layout.addRow("axis point", self.axis_point)
+        layout.addRow("angle [deg]", self.angle)
+        layout.addRow("distance", self.distance)
+        layout.addRow("points", self.dimension)
+        layout.addRow("distribution", self.distribution)
+
+    def value(self) -> dict:
+        def vec(edit, label):
+            values = parse_numbers(edit.text(), label)
+            if len(values) not in (2, 3):
+                raise ParseError(f"{label}: expected 2 or 3 numbers")
+            if len(values) == 2:
+                values.append(0.0)
+            return tuple(values)
+
+        def one(edit, label):
+            values = parse_numbers(edit.text(), label)
+            if len(values) != 1:
+                raise ParseError(f"{label}: expected one number")
+            return values[0]
+
+        distribution = self.distribution.value()
+        distribution.pop("mode", None)
+        return {
+            "domain": self.domain,
+            "mode": self.mode.currentText(),
+            "vector": vec(self.vector, "vector"),
+            "axis_point": vec(self.axis_point, "axis point"),
+            "angle": math.radians(one(self.angle, "angle")),
+            "distance": one(self.distance, "distance"),
+            "dimension": self.dimension.value(),
+            "distribution": distribution,
+        }
 
 
 CONNECTOR_FIELDS = (
@@ -598,6 +668,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "block":
+            self._block_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         if entity.kind in ("patch", "zone"):
             self._group_rows(entity)
             self.apply_button.setEnabled(True)
@@ -607,7 +682,7 @@ class PropertyPanel(QWidget):
             editor = self._make_editor(kind, entity.params[field])
             self._form.addRow(field, editor)
             self._editors[field] = (kind, editor)
-        if entity.kind != "point":
+        if entity.kind in CURVE_KINDS:
             length = self.session.length(entity.name)
             self._form.addRow("length", QLabel(f"{length:.10g}"))
         self.apply_button.setEnabled(True)
@@ -636,6 +711,26 @@ class PropertyPanel(QWidget):
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 
+    def _block_rows(self, entity) -> None:
+        params = entity.params
+        try:
+            text = self.session.block_status(entity.name)
+        except ValidationError as error:
+            text = str(error)
+        status = QLabel(text)
+        status.setWordWrap(True)
+        self._form.addRow("status", status)
+        if params["faces"] is not None:
+            faces = QLabel(", ".join(self.session.store.get(f).name for f in params["faces"]))
+            faces.setWordWrap(True)
+            self._form.addRow("faces", faces)
+            return
+        source = QLabel(self.session.store.get(params["extrusion"]["domain"]).name)
+        self._form.addRow("base domain", source)
+        editor = ExtrusionEditor(params["extrusion"])
+        self._form.addRow("extrusion", editor)
+        self._editors["extrusion"] = ("extrusion", editor)
+
     def _group_rows(self, entity) -> None:
         key = "domain"
         if entity.kind == "patch":
@@ -645,9 +740,12 @@ class PropertyPanel(QWidget):
             combo.setCurrentText(entity.params["patch_type"])
             self._form.addRow("patch type", combo)
             self._editors["patch_type"] = ("patch_type", combo)
-        names = [self.session.store.get(item[key]).name for item in entity.params["members"]]
+        names = [member_label(item, self.session.store) for item in entity.params["members"]]
         members = QPlainTextEdit("\n".join(names))
-        members.setPlaceholderText(f"one {key} name per line")
+        placeholder = f"one {key} name per line"
+        if entity.kind == "patch":
+            placeholder = "one connector, domain or block.face per line"
+        members.setPlaceholderText(placeholder)
         self._form.addRow("members", members)
         self._editors["members"] = (f"members:{key}", members)
 
@@ -795,13 +893,23 @@ class PropertyPanel(QWidget):
         if kind.startswith("members:"):
             key = kind.split(":", 1)[1]
             names = [line.strip() for line in editor.toPlainText().splitlines() if line.strip()]
+            store = self.session.store
             members = []
             for name in names:
-                if name not in self.session.store:
-                    raise ParseError(f"members: no entity {name!r}")
-                members.append({key: self.session.store.get(name).id})
+                if name in store:
+                    entity = store.get(name)
+                    member_key = key
+                    if key == "connector" and entity.kind == "domain":
+                        member_key = "domain"
+                    members.append({member_key: entity.id})
+                    continue
+                block, _dot, face = name.rpartition(".")
+                if key == "connector" and block in store:
+                    members.append({"block": store.get(block).id, "face": face})
+                    continue
+                raise ParseError(f"members: no entity {name!r}")
             return tuple(members)
-        if kind == "generator":
+        if kind in ("generator", "extrusion"):
             return editor.value()
         if kind == "dimension":
             return editor.value()

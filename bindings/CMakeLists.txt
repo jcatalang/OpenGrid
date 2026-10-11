@@ -7,7 +7,7 @@ execute_process(
   OUTPUT_VARIABLE nanobind_ROOT)
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(_core NB_STATIC og_core.cpp)
+nanobind_add_module(_core NB_STATIC og_core.cpp og_3d.cpp)
 target_link_libraries(_core PRIVATE og_core og_options)
 
 install(TARGETS _core LIBRARY DESTINATION opengrid)

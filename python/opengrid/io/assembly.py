@@ -39,6 +39,9 @@ class MeshAssembly:
     # Periodic pairs: (source patch index, target patch index, transform dict,
     # target point ids, matching source point ids)
     periodic: list = field(default_factory=list)
+    # 2: quads / triangles with boundary lines; 3: hexahedra with boundary quads ("lines" then
+    # holds the boundary quads).
+    dimension: int = 2
 
     def cells(self, mask=None) -> list[np.ndarray]:
         """Point ids of each (selected) cell."""
@@ -146,6 +149,8 @@ def assemble(
     needed = []
     for patch in patches:
         for item in patch.params["members"]:
+            if "connector" not in item:
+                continue
             if item["connector"] in boundary:
                 needed.append(item["connector"])
     for connector_id in sorted(set(needed)):
@@ -173,6 +178,8 @@ def assemble(
     line_patch = []
     for index, patch in enumerate(patches):
         for item in patch.params["members"]:
+            if "connector" not in item:
+                continue
             use = boundary.get(item["connector"])
             if use is None:
                 continue

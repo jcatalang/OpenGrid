@@ -3,22 +3,30 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 #include <vector>
 
+#include "opengrid/core/dist/distribution.hpp"
 #include "opengrid/core/geom/arc.hpp"
 #include "opengrid/core/geom/cubic_spline.hpp"
+#include "opengrid/core/geom/curve_chain.hpp"
 #include "opengrid/core/geom/line.hpp"
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
+#include "opengrid/core/topo/connector_nodes.hpp"
 #include "opengrid/core/version.hpp"
 
 namespace nb = nanobind;
@@ -56,6 +64,47 @@ PointArray to_numpy(const std::vector<og::Vec3>& points) {
   const nb::capsule owner(data, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
   return PointArray(data, {points.size(), 3}, owner);
 }
+
+using ScalarArray = nb::ndarray<nb::numpy, double, nb::ndim<1>>;
+
+ScalarArray to_numpy(const std::vector<double>& values) {
+  auto* data = new double[values.size()];
+  std::copy(values.begin(), values.end(), data);
+  const nb::capsule owner(data, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+  return ScalarArray(data, {values.size()}, owner);
+}
+
+og::DistributionType distribution_type(const std::string& name) {
+  if (name == "uniform") {
+    return og::DistributionType::Uniform;
+  }
+  if (name == "geometric") {
+    return og::DistributionType::Geometric;
+  }
+  if (name == "tanh") {
+    return og::DistributionType::Tanh;
+  }
+  if (name == "sine") {
+    return og::DistributionType::Sine;
+  }
+  throw std::invalid_argument("unknown distribution type '" + name + "'");
+}
+
+og::DistributionSpec make_spec(const std::string& type, std::optional<double> begin_spacing,
+                               std::optional<double> end_spacing,
+                               std::optional<double> growth_ratio) {
+  og::DistributionSpec spec;
+  spec.type = distribution_type(type);
+  spec.begin_spacing = begin_spacing;
+  spec.end_spacing = end_spacing;
+  spec.growth_ratio = growth_ratio;
+  return spec;
+}
+
+// (start, end, n_points, type, begin_spacing, end_spacing, growth_ratio)
+using SubTuple = std::tuple<double, double, int, std::string, std::optional<double>,
+                            std::optional<double>, std::optional<double>>;
+using SegmentTuple = std::tuple<std::shared_ptr<og::Curve>, double, double>;
 
 std::vector<og::Vec3> eval_params(const og::Curve& curve, const double* ts, std::size_t n) {
   std::vector<og::Vec3> points;
@@ -155,6 +204,68 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
           nb::arg("points"), nb::arg("method"), nb::arg("start_tangent") = nb::none(),
           nb::arg("end_tangent") = nb::none())
       .def_prop_ro("knots", &og::CubicSpline::knots);
+
+  m.def(
+      "distribute",
+      [](int n_points, const std::string& type, std::optional<double> begin_spacing,
+         std::optional<double> end_spacing, std::optional<double> growth_ratio) {
+        const og::Distribution d =
+            og::distribute(n_points, make_spec(type, begin_spacing, end_spacing, growth_ratio));
+        return std::make_tuple(to_numpy(d.s), d.warnings);
+      },
+      nb::arg("n_points"), nb::arg("type") = "uniform", nb::arg("begin_spacing") = nb::none(),
+      nb::arg("end_spacing") = nb::none(), nb::arg("growth_ratio") = nb::none(),
+      "Distribution on [0, 1] (spacings as fractions); returns (s, warnings).");
+  m.def("max_stretching_ratio", &og::max_stretching_ratio, nb::arg("positions"));
+
+  nb::class_<og::CurveChain>(m, "CurveChain", "Chain of curve pieces (curve, t0, t1).")
+      .def(
+          "__init__",
+          [](og::CurveChain* self, const std::vector<SegmentTuple>& segments, double tolerance) {
+            std::vector<og::ChainSegment> pieces;
+            pieces.reserve(segments.size());
+            for (const auto& [curve, t0, t1] : segments) {
+              pieces.push_back({curve, t0, t1});
+            }
+            new (self) og::CurveChain(std::move(pieces), tolerance);
+          },
+          nb::arg("segments"), nb::arg("tolerance"))
+      .def("length", &og::CurveChain::length)
+      .def("start", [](const og::CurveChain& c) { return c.start().to_array(); })
+      .def("end", [](const og::CurveChain& c) { return c.end().to_array(); })
+      .def(
+          "point_at_length",
+          [](const og::CurveChain& c, double s) { return c.point_at_length(s).to_array(); },
+          nb::arg("s"))
+      .def(
+          "point_at_param",
+          [](const og::CurveChain& c, double u) { return c.point_at_param(u).to_array(); },
+          nb::arg("u"));
+
+  m.def(
+      "connector_nodes",
+      [](const og::CurveChain& chain, const std::string& mode, const std::vector<SubTuple>& subs) {
+        og::SpacingMode spacing_mode = og::SpacingMode::ArcLength;
+        if (mode == "parametric") {
+          spacing_mode = og::SpacingMode::Parametric;
+        } else if (mode != "arc_length") {
+          throw std::invalid_argument("unknown spacing mode '" + mode + "'");
+        }
+        std::vector<og::SubConnectorSpec> specs;
+        for (const auto& [start, end, n_points, type, begin, finish, ratio] : subs) {
+          og::SubConnectorSpec spec;
+          spec.start = start;
+          spec.end = end;
+          spec.n_points = n_points;
+          spec.distribution = make_spec(type, begin, finish, ratio);
+          specs.push_back(spec);
+        }
+        const og::ConnectorNodes nodes = og::connector_nodes(chain, spacing_mode, specs);
+        return std::make_tuple(to_numpy(nodes.points), to_numpy(nodes.arc_positions),
+                               nodes.warnings, nodes.max_stretching_ratio);
+      },
+      nb::arg("chain"), nb::arg("mode"), nb::arg("subs"),
+      "Connector nodes: returns (points (n, 3), arc_positions (n,), warnings, max ratio).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

@@ -81,3 +81,63 @@
 - nanobind's exit-time leak report is disabled (Qt/VTK shutdown order). The API-only suite
   runs leak-free with it enabled (`OG_LEAK_WARNINGS=1`).
 - CI not run (no remote).
+
+## Phase 2 — Connectors and distributions (2026-10-11) — awaiting review
+- **C++**:
+  - Distributions: uniform; geometric (begin, end or growth ratio); tanh and sine, one- and
+    two-sided. Discrete end-spacing matching, and fallbacks with warnings.
+  - Brent root finder, `CurveChain` (arc-length and parametric access), and `connector_nodes`
+    (sub-connectors/breakpoints, arc positions, max stretching ratio).
+- **Python**:
+  - `connector` entity with full validation: curves exist and are curves, the chain is
+    continuous, the distribution is consistent, breakpoints increase.
+  - Dependency protection on delete/modify, and connectors in `.ogp` and the journal (curve
+    names resolved at the time of the command).
+  - Spacing propagation at shared nodes, with a per-connector switch.
+  - Session API: `create_connector`, `create_connectors_on_curves`, `create_chain_connector`
+    (automatic ordering/orientation), `set_dimension`, `set_distribution`, `connector_nodes`
+    and `connector_report`.
+- **GUI**:
+  - Connectors drawn with their nodes and coloured per interval by stretching ratio
+    (coolwarm, red at the threshold). Toggles for colouring and nodes; the threshold is set
+    from a dialog.
+  - Connectors listed in the tree with "⚠" when they have warnings or exceed the threshold.
+    Warnings are logged on create/modify.
+  - Property panel for dimension, mode, distribution, breakpoints (one line each) and
+    propagation, plus live length, achieved spacings, max ratio, propagation source and
+    warnings.
+  - "Connectors on curves" and "Chain connector" actions with a default-dimension box. Picking
+    prefers a connector over its curve.
+- **Demo**: `examples/02_connectors.py` sets up a NACA 0012 with LE 1e-3 / TE 5e-4 tanh
+  clustering (121 points per surface), a wake whose TE spacing is propagated, and a farfield
+  with a breakpoint. Outputs: `02_connectors.ogp`, journal, `02_connectors.png` and
+  `phase2_main_window.png`.
+
+### Verified
+- `ctest`: 50/50, including the `ci` preset with `-Werror`.
+  - Achieved end spacings within 1e-8 relative over sweeps of type × points (3 to 1001) ×
+    spacing (begin down to 1e-12, far end down to 1e-7).
+  - Monotonicity, constant geometric ratio, deterministic output, and documented fallbacks for
+    8 infeasible cases with warnings.
+  - Tiny spacings down to 1e-300 stay finite, and 3000 seeded random requests produce no
+    NaN or non-monotone result.
+  - Chain continuity and gap errors, breakpoint nodes and spacings, and parametric vs
+    arc-length mode.
+- `pytest`: 136/136. Covered:
+  - Connector API, validation (14 error cases), propagation and its undo.
+  - Dependency protection, renames, project round trip with identical nodes, and journal
+    replay.
+  - GUI creation, picking, editing, threshold warnings and toggles.
+- Demo: every connector end spacing within 1e-13 relative (requirement 1e-8). The breakpoint
+  node sits at 0.5 of the circumference to 12 digits, and the journal replay gives identical
+  nodes.
+- ruff, ruff format, clang-format, clang-tidy (0 findings) and check_no_ternary: clean.
+
+### Not verified / known limitations
+- The far-end spacing below about 1e-7·L can't reach 1e-8 relative accuracy (a
+  floating-point limit; see ARCHITECTURE).
+- Spacing propagation is one level deep and only fills tanh/sine ends that have no spacing.
+  Geometric and uniform connectors never adopt spacings.
+- Connector split/join and dimensioning by average spacing are not in Phase 2 (the spec lists
+  them among the GUI edit tools); they're candidates for Phase 3 prep.
+- Interaction was not tested with a real mouse or trackpad. CI not run (no remote).

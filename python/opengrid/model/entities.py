@@ -13,7 +13,8 @@ from typing import Any
 from opengrid import _core
 from opengrid.validation import Issue, ValidationError
 
-KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs")
+DATABASE_KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs")
+KINDS = (*DATABASE_KINDS, "connector")
 SPLINE_METHODS = ("natural", "clamped", "catmull_rom")
 
 _SPLINE_ENUM = {
@@ -171,12 +172,35 @@ _SCHEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...], Callable[[_Checker, 
 }
 
 
-def normalize_params(kind: str, raw: dict, where: str) -> dict:
+_CONNECTOR_KEYS = (
+    ("segments", "dimension"),
+    ("mode", "distribution", "breakpoints", "propagate_spacing"),
+)
+
+
+def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
     """Validate raw parameters of an entity and return them in canonical form.
 
     Raises ValidationError listing every problem (unknown kind, missing or unexpected keys,
-    malformed values, and geometric errors reported by the C++ constructors).
+    malformed values, and geometric errors reported by the C++ constructors). Connectors
+    reference other entities and need the ``store``.
     """
+    if kind == "connector":
+        from opengrid.model.connectors import normalize_connector
+
+        checker = _Checker(where)
+        required, optional = _CONNECTOR_KEYS
+        for key in required:
+            if key not in raw:
+                checker.fail(key, "missing")
+        for key in raw:
+            if key not in required and key not in optional:
+                checker.fail(key, "unexpected parameter for a connector")
+        if checker.issues:
+            raise ValidationError(checker.issues)
+        if store is None:
+            raise ValueError("connector parameters need the store to resolve curves")
+        return normalize_connector(raw, store, where)
     if kind not in _SCHEMAS:
         raise ValidationError([Issue(where, f"unknown entity type {kind!r}")])
     required, optional, converter = _SCHEMAS[kind]
@@ -204,6 +228,8 @@ def build_geometry(kind: str, params: dict):
     """Construct the C++ curve for canonical parameters (None for a point)."""
     if kind == "point":
         return None
+    if kind == "connector":
+        raise ValueError("connectors have no single curve; use Session.connector_nodes")
     if kind == "line":
         return _core.Line(params["p0"], params["p1"])
     if kind == "arc":

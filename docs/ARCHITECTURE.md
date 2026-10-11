@@ -205,6 +205,51 @@ Gauss–Kronrod 7/15 with a round-off floor), arc-length inversion (safeguarded 
 1e-14·L) and projection (sampling, then golden-section search, then Newton on (x−p)·x′) all work segment by
 segment, so derivative jumps at knots never cost accuracy.
 
+### Connectors and distributions (Phase 2)
+- **Distributions** (`core/…/dist`) work on the unit interval:
+  - uniform;
+  - geometric, given exactly one of begin spacing, end spacing or growth ratio;
+  - tanh and sine, each one- or two-sided.
+- **tanh** is Vinokur's (1983) tanh/tan family.
+- **sine** is the companion sinh/sin family. The spec only says "sine", which I've read as the
+  Hyperbolic-sine distribution: one-sided uses sinh to cluster and sin to
+  de-cluster, two-sided uses sin to cluster and sinh to de-cluster. The two-sided sine family
+  cannot cluster an end below about (π/2n)²; such requests fall back to tanh with a warning.
+- **Discrete spacing matching.** Vinokur prescribes end *derivatives*. An outer Brent
+  (one-sided) or damped Newton (two-sided) iteration makes the *discrete* first and last
+  intervals match the request, to about 1e-13 relative.
+- **Far-end precision.** All formulas are evaluated without cancellation, and the far end
+  comes from the complement 1 − s. Even so, a spacing δ next to the far end is the difference
+  of two positions near 1, which limits its relative accuracy to about ε/δ. Spacings of
+  1e-7·L or more meet the 1e-8 target; smaller far-end spacings are still finite and monotone,
+  just less exact.
+- **Fallbacks.** Infeasible requests always yield a finite, strictly increasing distribution
+  plus a warning, never an exception or a NaN. Examples: spacing ≥ length, end spacings that
+  sum to ≥ 1, too few points, or ratios outside floating-point range.
+- **Connectors** reference curves by entity id, so renames are safe. They are chains of
+  (curve, t0, t1) pieces (`og::CurveChain`), with optional breakpoints that create
+  sub-connectors.
+  - Spacings are absolute lengths.
+  - In arc-length mode the distribution maps to arc length. In parametric mode it maps to the
+    chain parameter, so the achieved physical spacing differs on curves with non-uniform
+    speed.
+- **Dependencies.** A curve used by a connector cannot be deleted, and it cannot be modified
+  in a way that breaks a connector's chain. Both are rejected with a validation error naming
+  the connector.
+- **Spacing propagation** is pull-based and one level deep. A tanh/sine end with no spacing,
+  on a connector with `propagate_spacing`, adopts the smallest explicit spacing that other
+  connectors prescribe at the same node. It is evaluated on demand, so undo/redo and edits
+  stay consistent automatically.
+- **Derived data.** Nodes, chains and diagnostics are cached by the Session's
+  `ConnectorEvaluator` and invalidated on every model change.
+- **Stretching threshold.** The warning threshold for the stretching ratio (default 1.3) is a
+  session/GUI preference. It is not stored in the project.
+- **Quadrature changed in Phase 2** from recursive to globally adaptive (QAG-style, bounded
+  number of subintervals). The recursive version had exponential worst-case cost on integrands
+  carrying round-off noise. That case was real: the Phase 1 spline derivative cancelled on
+  short segments, and building a finely spaced spline's length table took 7.5 s. Splines are
+  now evaluated in difference form.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

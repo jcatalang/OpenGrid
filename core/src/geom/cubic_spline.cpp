@@ -116,17 +116,19 @@ void CubicSpline::catmull_rom() {
   tangents_[n - 1] = 0.5 * (3.0 * d_last - tangents_[n - 2]);
 }
 
+// Evaluation uses the chord difference D = P_{i+1} - P_i instead of P_i and P_{i+1}
+// separately (h00 = 1 - h01): on short segments the separate terms are O(|P| / h) and
+// cancel, which would put O(eps |P| / h) noise into the derivatives.
 Vec3 CubicSpline::eval(double t) const {
   const std::size_t i = find_segment(knots_, t);
   const double h = knots_[i + 1] - knots_[i];
   const double u = (t - knots_[i]) / h;
   const double u2 = u * u;
   const double u3 = u2 * u;
-  const double h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
-  const double h10 = u3 - 2.0 * u2 + u;
   const double h01 = -2.0 * u3 + 3.0 * u2;
+  const double h10 = u3 - 2.0 * u2 + u;
   const double h11 = u3 - u2;
-  return h00 * points_[i] + (h10 * h) * tangents_[i] + h01 * points_[i + 1] +
+  return points_[i] + h01 * (points_[i + 1] - points_[i]) + (h10 * h) * tangents_[i] +
          (h11 * h) * tangents_[i + 1];
 }
 
@@ -135,24 +137,22 @@ Vec3 CubicSpline::d1(double t) const {
   const double h = knots_[i + 1] - knots_[i];
   const double u = (t - knots_[i]) / h;
   const double u2 = u * u;
-  const double h00 = 6.0 * u2 - 6.0 * u;
-  const double h10 = 3.0 * u2 - 4.0 * u + 1.0;
   const double h01 = -6.0 * u2 + 6.0 * u;
+  const double h10 = 3.0 * u2 - 4.0 * u + 1.0;
   const double h11 = 3.0 * u2 - 2.0 * u;
-  return (h00 / h) * points_[i] + h10 * tangents_[i] + (h01 / h) * points_[i + 1] +
-         h11 * tangents_[i + 1];
+  const Vec3 slope = (points_[i + 1] - points_[i]) / h;
+  return h01 * slope + h10 * tangents_[i] + h11 * tangents_[i + 1];
 }
 
 Vec3 CubicSpline::d2(double t) const {
   const std::size_t i = find_segment(knots_, t);
   const double h = knots_[i + 1] - knots_[i];
   const double u = (t - knots_[i]) / h;
-  const double h00 = 12.0 * u - 6.0;
-  const double h10 = 6.0 * u - 4.0;
   const double h01 = -12.0 * u + 6.0;
+  const double h10 = 6.0 * u - 4.0;
   const double h11 = 6.0 * u - 2.0;
-  return (h00 / (h * h)) * points_[i] + (h10 / h) * tangents_[i] +
-         (h01 / (h * h)) * points_[i + 1] + (h11 / h) * tangents_[i + 1];
+  const Vec3 slope = (points_[i + 1] - points_[i]) / h;
+  return (h01 / h) * slope + (h10 / h) * tangents_[i] + (h11 / h) * tangents_[i + 1];
 }
 
 std::vector<double> CubicSpline::breakpoints() const {

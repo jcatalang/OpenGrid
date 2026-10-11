@@ -85,6 +85,18 @@ class Store:
             self._geometry[entity.id] = build_geometry(entity.kind, entity.params)
         return self._geometry[entity.id]
 
+    def dependents(self, key: str | int) -> list[Entity]:
+        """Connectors whose segments reference the given entity."""
+        entity_id = self.get(key).id
+        result = []
+        for entity in self:
+            if entity.kind == "connector":
+                for segment in entity.params["segments"]:
+                    if segment["curve"] == entity_id:
+                        result.append(entity)
+                        break
+        return result
+
     def snapshot(self) -> dict[int, Entity]:
         return dict(self._entities)
 

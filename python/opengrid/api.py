@@ -25,6 +25,7 @@ from opengrid.commands import (
 )
 from opengrid.commands.base import JOURNAL_HEADER
 from opengrid.io import read_airfoil_dat, read_points_csv
+from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.store import Entity, Store
 from opengrid.validation import Issue, ValidationError
 
@@ -35,7 +36,11 @@ class Session:
     def __init__(self):
         self.store = Store()
         self.commands = CommandStack(self.store)
+        self.connectors = ConnectorEvaluator(self.store)
+        self.commands.add_listener(self._invalidate_derived)
         self.project_path: Path | None = None
+        # GUI/report threshold for the stretching-ratio warning (not stored in projects).
+        self.stretching_threshold = 1.3
 
     # ------------------------------------------------------------- creation
     def create_point(self, xyz, name: str | None = None) -> str:
@@ -110,6 +115,98 @@ class Session:
             "weights": weights,
         }
         return self._create("nurbs", params, name)
+
+    # ----------------------------------------------------------- connectors
+    def create_connector(
+        self,
+        segments,
+        dimension: int,
+        distribution="uniform",
+        mode: str = "arc_length",
+        breakpoints=(),
+        propagate_spacing: bool = True,
+        name: str | None = None,
+    ) -> str:
+        """Connector on a curve or curve chain.
+
+        ``segments``: a curve name, or a list whose items are curve names or
+        ``{"curve": name, "t0": .., "t1": ..}`` / ``(name, t0, t1)`` pieces (t1 < t0 runs a curve
+        backwards). ``distribution``: a type name ('uniform', 'geometric', 'tanh', 'sine') or a
+        dict with ``type`` and optional ``begin_spacing``, ``end_spacing`` (absolute lengths) and
+        ``growth_ratio`` (geometric). ``breakpoints``: list of ``{"position": fraction,
+        "index": node, "distribution": ...}``; the breakpoint's distribution applies to the
+        sub-connector after it.
+        """
+        params = {
+            "segments": segments,
+            "dimension": dimension,
+            "mode": mode,
+            "distribution": distribution,
+            "breakpoints": breakpoints,
+            "propagate_spacing": propagate_spacing,
+        }
+        return self._create("connector", params, name)
+
+    def create_connectors_on_curves(
+        self, curves, dimension: int, distribution="uniform"
+    ) -> list[str]:
+        """One connector per curve (a single undo step)."""
+        if isinstance(curves, str):
+            curves = [curves]
+        items = []
+        for curve in curves:
+            params = {"segments": curve, "dimension": dimension, "distribution": distribution}
+            items.append(("connector", params, None))
+        return self.commands.run(CreateEntities(items, label=f"Create {len(items)} connectors"))
+
+    def create_chain_connector(
+        self, curves, dimension: int, distribution="uniform", name: str | None = None
+    ) -> str:
+        """One connector along several curves, ordered and oriented automatically."""
+        segments = order_chain(self.store, list(curves))
+        return self.create_connector(segments, dimension, distribution, name=name)
+
+    def set_dimension(self, name: str, dimension: int) -> str:
+        return self.modify(name, dimension=dimension)
+
+    def set_distribution(
+        self,
+        name: str,
+        type: str,
+        begin_spacing: float | None = None,
+        end_spacing: float | None = None,
+        growth_ratio: float | None = None,
+    ) -> str:
+        distribution = {
+            "type": type,
+            "begin_spacing": begin_spacing,
+            "end_spacing": end_spacing,
+            "growth_ratio": growth_ratio,
+        }
+        return self.modify(name, distribution=distribution)
+
+    def connector_nodes(self, name: str) -> ConnectorNodes:
+        """Nodes and diagnostics of a connector (cached until the model changes)."""
+        entity = self.store.get(name)
+        if entity.kind != "connector":
+            raise ValueError(f"{name!r} is a {entity.kind}, not a connector")
+        return self.connectors.nodes(entity.id)
+
+    def connector_report(self, name: str) -> str:
+        """One-paragraph summary: points, length, achieved spacings, stretching, warnings."""
+        nodes = self.connector_nodes(name)
+        lines = [
+            f"{name}: {len(nodes.points)} points, length {nodes.length:.10g}",
+            f"  spacing begin {nodes.begin_spacing:.6g}, end {nodes.end_spacing:.6g}",
+            f"  max stretching ratio {nodes.max_stretching_ratio:.4g}",
+        ]
+        for end, text in nodes.propagated.items():
+            lines.append(f"  {end} spacing propagated: {text}")
+        if nodes.max_stretching_ratio > self.stretching_threshold:
+            lines.append(f"  WARNING: stretching ratio exceeds {self.stretching_threshold:g}")
+        for warning in nodes.warnings:
+            lines.append(f"  WARNING: {warning}")
+        return "\n".join(lines)
 
     # -------------------------------------------------------------- editing
     def modify(self, name: str, **params) -> str:
@@ -255,9 +352,13 @@ class Session:
     def _create(self, kind: str, params: dict, name: str | None) -> str:
         return self.commands.run(CreateEntity(kind, params, name))
 
+    def _invalidate_derived(self, _change) -> None:
+        self.connectors.invalidate()
+
     def _replace_store(self, store: Store) -> None:
         listeners = list(self.commands._listeners)
         self.store = store
+        self.connectors = ConnectorEvaluator(store)
         self.commands = CommandStack(store)
         for listener in listeners:
             self.commands.add_listener(listener)

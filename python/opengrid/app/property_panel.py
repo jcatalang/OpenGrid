@@ -7,6 +7,7 @@ changed in that case.
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from opengrid.api import Session
+from opengrid.model.connectors import DISTRIBUTION_TYPES, SPACING_MODES
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.validation import ValidationError
 
@@ -52,8 +54,101 @@ FIELDS = {
 }
 
 
+CONNECTOR_FIELDS = (
+    ("dimension", "dimension"),
+    ("mode", "mode"),
+    ("distribution", "distribution"),
+    ("breakpoints", "breakpoints"),
+    ("propagate_spacing", "flag"),
+)
+
+
 class ParseError(ValueError):
     pass
+
+
+def format_optional(value) -> str:
+    if value is None:
+        return ""
+    return format_number(value)
+
+
+def parse_optional(text: str, field: str) -> float | None:
+    if not text.strip() or text.strip() == "-":
+        return None
+    values = parse_numbers(text, field)
+    if len(values) != 1:
+        raise ParseError(f"{field}: expected one number")
+    return values[0]
+
+
+def format_breakpoints(breakpoints) -> str:
+    """One line per breakpoint: position index type begin end ratio ('-' = none)."""
+    lines = []
+    for item in breakpoints:
+        dist = item["distribution"]
+        values = []
+        for key in ("begin_spacing", "end_spacing", "growth_ratio"):
+            if dist[key] is None:
+                values.append("-")
+            else:
+                values.append(format_number(dist[key]))
+        lines.append(
+            f"{format_number(item['position'])} {item['index']} {dist['type']} {' '.join(values)}"
+        )
+    return "\n".join(lines)
+
+
+def parse_breakpoints(text: str) -> tuple:
+    result = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        fields = line.split()
+        if not fields:
+            continue
+        where = f"breakpoints line {number}"
+        if len(fields) not in (3, 6):
+            raise ParseError(f"{where}: expected 'position index type [begin end ratio]'")
+        position = parse_numbers(fields[0], where)[0]
+        try:
+            index = int(fields[1])
+        except ValueError:
+            raise ParseError(f"{where}: index {fields[1]!r} is not an integer") from None
+        dist = {"type": fields[2], "begin_spacing": None, "end_spacing": None, "growth_ratio": None}
+        if len(fields) == 6:
+            dist["begin_spacing"] = parse_optional(fields[3], where)
+            dist["end_spacing"] = parse_optional(fields[4], where)
+            dist["growth_ratio"] = parse_optional(fields[5], where)
+        result.append({"position": position, "index": index, "distribution": dist})
+    return tuple(result)
+
+
+class DistributionEditor(QWidget):
+    """Type + begin/end spacing + growth ratio (empty fields mean 'not specified')."""
+
+    def __init__(self, value: dict, parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.type = QComboBox()
+        self.type.addItems(list(DISTRIBUTION_TYPES))
+        self.type.setCurrentText(value["type"])
+        self.begin = QLineEdit(format_optional(value["begin_spacing"]))
+        self.end = QLineEdit(format_optional(value["end_spacing"]))
+        self.ratio = QLineEdit(format_optional(value["growth_ratio"]))
+        for edit in (self.begin, self.end, self.ratio):
+            edit.setPlaceholderText("none")
+        layout.addRow("type", self.type)
+        layout.addRow("begin spacing", self.begin)
+        layout.addRow("end spacing", self.end)
+        layout.addRow("growth ratio", self.ratio)
+
+    def value(self) -> dict:
+        return {
+            "type": self.type.currentText(),
+            "begin_spacing": parse_optional(self.begin.text(), "begin spacing"),
+            "end_spacing": parse_optional(self.end.text(), "end spacing"),
+            "growth_ratio": parse_optional(self.ratio.text(), "growth ratio"),
+        }
 
 
 def format_number(value: float) -> str:
@@ -143,6 +238,11 @@ class PropertyPanel(QWidget):
         name_edit = QLineEdit(entity.name)
         self._form.addRow("name", name_edit)
         self._editors["name"] = ("name", name_edit)
+        if entity.kind == "connector":
+            self._connector_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         for field, kind in FIELDS[entity.kind]:
             editor = self._make_editor(kind, entity.params[field])
             self._form.addRow(field, editor)
@@ -153,7 +253,62 @@ class PropertyPanel(QWidget):
         self.apply_button.setEnabled(True)
         self.revert_button.setEnabled(True)
 
+    def _connector_rows(self, entity) -> None:
+        params = entity.params
+        pieces = []
+        for segment in params["segments"]:
+            curve = self.session.store.get(segment["curve"]).name
+            pieces.append(f"{curve} [{segment['t0']:g} → {segment['t1']:g}]")
+        segments = QLabel("\n".join(pieces))
+        segments.setWordWrap(True)
+        self._form.addRow("segments", segments)
+        for field, kind in CONNECTOR_FIELDS:
+            editor = self._make_editor(kind, params[field])
+            self._form.addRow(field.replace("_", " "), editor)
+            self._editors[field] = (kind, editor)
+        nodes = self.session.connector_nodes(entity.name)
+        self._form.addRow("length", QLabel(f"{nodes.length:.10g}"))
+        self._form.addRow(
+            "begin / end spacing", QLabel(f"{nodes.begin_spacing:.6g} / {nodes.end_spacing:.6g}")
+        )
+        ratio = QLabel(f"{nodes.max_stretching_ratio:.4g}")
+        if nodes.max_stretching_ratio > self.session.stretching_threshold:
+            ratio.setText(
+                f"{nodes.max_stretching_ratio:.4g}  (> {self.session.stretching_threshold:g})"
+            )
+            ratio.setStyleSheet("color: #ff6b6b;")
+        self._form.addRow("max stretching", ratio)
+        for end, text in nodes.propagated.items():
+            self._form.addRow(f"{end} spacing from", QLabel(text))
+        if nodes.warnings:
+            warnings = QLabel("\n".join(nodes.warnings))
+            warnings.setWordWrap(True)
+            warnings.setStyleSheet("color: #ff6b6b;")
+            self._form.addRow("warnings", warnings)
+
     def _make_editor(self, kind: str, value) -> QWidget:
+        if kind == "dimension":
+            editor = QSpinBox()
+            editor.setRange(2, 10_000_000)
+            editor.setValue(int(value))
+            return editor
+        if kind == "mode":
+            editor = QComboBox()
+            editor.addItems(list(SPACING_MODES))
+            editor.setCurrentText(value)
+            return editor
+        if kind == "distribution":
+            return DistributionEditor(value)
+        if kind == "flag":
+            editor = QCheckBox()
+            editor.setChecked(bool(value))
+            return editor
+        if kind == "breakpoints":
+            editor = QPlainTextEdit(format_breakpoints(value))
+            editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            editor.setPlaceholderText("position index type [begin end ratio], '-' = none")
+            editor.setMinimumHeight(60)
+            return editor
         if kind == "vec3" or kind == "opt_vec3":
             editor = QLineEdit(format_vec3(value))
             if kind == "opt_vec3":
@@ -197,6 +352,16 @@ class PropertyPanel(QWidget):
         return new_name, changes
 
     def _read_editor(self, field: str, kind: str, editor: QWidget):
+        if kind == "dimension":
+            return editor.value()
+        if kind == "mode":
+            return editor.currentText()
+        if kind == "distribution":
+            return editor.value()
+        if kind == "flag":
+            return editor.isChecked()
+        if kind == "breakpoints":
+            return parse_breakpoints(editor.toPlainText())
         if kind == "vec3":
             return _canonical_vec(parse_vec3(editor.text(), field))
         if kind == "opt_vec3":

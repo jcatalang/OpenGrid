@@ -1,9 +1,12 @@
 #include "opengrid/core/util/gauss_kronrod.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <utility>
+#include <vector>
 
 namespace og {
 namespace {
@@ -51,33 +54,6 @@ Estimate qk15(const std::function<double(double)>& f, double a, double b) {
   return {kronrod * half, std::fabs((kronrod - gauss) * half), abs_sum * std::fabs(half)};
 }
 
-double adapt(const std::function<double(double)>& f, double a, double b, const Estimate& whole,
-             const QuadratureOptions& options, int depth) {
-  double tolerance = options.rel_tol * std::fabs(whole.kronrod);
-  if (options.abs_tol > tolerance) {
-    tolerance = options.abs_tol;
-  }
-  // Round-off floor (QUADPACK): an error estimate below ~50 eps |f| cannot be improved.
-  const double roundoff = 50.0 * std::numeric_limits<double>::epsilon() * whole.abs_integral;
-  if (roundoff > tolerance) {
-    tolerance = roundoff;
-  }
-  if (whole.error <= tolerance || depth >= options.max_depth) {
-    return whole.kronrod;
-  }
-  const double mid = 0.5 * (a + b);
-  if (mid <= a || mid >= b) {
-    return whole.kronrod;  // interval no longer representable
-  }
-  const Estimate left = qk15(f, a, mid);
-  const Estimate right = qk15(f, mid, b);
-  // Converged when the refined estimate agrees with the coarse one to the tolerance.
-  if (std::fabs(left.kronrod + right.kronrod - whole.kronrod) <= tolerance) {
-    return left.kronrod + right.kronrod;
-  }
-  return adapt(f, a, mid, left, options, depth + 1) + adapt(f, mid, b, right, options, depth + 1);
-}
-
 }  // namespace
 
 double integrate_gk15(const std::function<double(double)>& f, double a, double b,
@@ -88,7 +64,63 @@ double integrate_gk15(const std::function<double(double)>& f, double a, double b
   if (a > b) {
     return -integrate_gk15(f, b, a, options);
   }
-  return adapt(f, a, b, qk15(f, a, b), options, 0);
+  struct Interval {
+    double a;
+    double b;
+    Estimate estimate;
+  };
+  // Max-heap on the error estimate; ties broken by the left end for determinism.
+  auto worse = [](const Interval& x, const Interval& y) {
+    if (x.estimate.error != y.estimate.error) {
+      return x.estimate.error < y.estimate.error;
+    }
+    return x.a > y.a;
+  };
+  std::vector<Interval> heap;
+  heap.push_back({a, b, qk15(f, a, b)});
+  double total = heap.front().estimate.kronrod;
+  double error = heap.front().estimate.error;
+  double abs_total = heap.front().estimate.abs_integral;
+  while (std::cmp_less(heap.size(), options.max_intervals)) {
+    double tolerance = options.rel_tol * std::fabs(total);
+    if (options.abs_tol > tolerance) {
+      tolerance = options.abs_tol;
+    }
+    const double roundoff = 50.0 * std::numeric_limits<double>::epsilon() * abs_total;
+    if (roundoff > tolerance) {
+      tolerance = roundoff;
+    }
+    if (error <= tolerance) {
+      break;
+    }
+    std::pop_heap(heap.begin(), heap.end(), worse);
+    const Interval worst = heap.back();
+    heap.pop_back();
+    const double mid = 0.5 * (worst.a + worst.b);
+    if (mid <= worst.a || mid >= worst.b) {
+      heap.push_back(worst);
+      std::push_heap(heap.begin(), heap.end(), worse);
+      break;  // interval no longer representable
+    }
+    const Interval left{worst.a, mid, qk15(f, worst.a, mid)};
+    const Interval right{mid, worst.b, qk15(f, mid, worst.b)};
+    total += left.estimate.kronrod + right.estimate.kronrod - worst.estimate.kronrod;
+    error += left.estimate.error + right.estimate.error - worst.estimate.error;
+    abs_total +=
+        left.estimate.abs_integral + right.estimate.abs_integral - worst.estimate.abs_integral;
+    heap.push_back(left);
+    std::push_heap(heap.begin(), heap.end(), worse);
+    heap.push_back(right);
+    std::push_heap(heap.begin(), heap.end(), worse);
+  }
+  // Re-sum in position order so the result does not depend on the update history.
+  std::sort(heap.begin(), heap.end(),
+            [](const Interval& x, const Interval& y) { return x.a < y.a; });
+  double sum = 0.0;
+  for (const Interval& interval : heap) {
+    sum += interval.estimate.kronrod;
+  }
+  return sum;
 }
 
 }  // namespace og

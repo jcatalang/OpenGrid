@@ -9,8 +9,10 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMessageBox,
+    QSpinBox,
     QToolBar,
     QWidget,
 )
@@ -31,6 +33,8 @@ SNAP_PIXELS = 10.0
 PICK_PIXELS = 8.0
 CLICK_MOVE_PIXELS = 4.0
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
+DEFAULT_DIMENSION = 21
+CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
 
 
 class MainWindow(QMainWindow):
@@ -57,14 +61,17 @@ class MainWindow(QMainWindow):
             namespace={"opengrid": opengrid, "og": session, "window": self}
         )
 
-        self._add_dock("Model", self.model_tree, Qt.DockWidgetArea.LeftDockWidgetArea)
-        self._add_dock("Properties", self.property_panel, Qt.DockWidgetArea.LeftDockWidgetArea)
+        model_dock = self._add_dock("Model", self.model_tree, Qt.DockWidgetArea.LeftDockWidgetArea)
+        properties_dock = self._add_dock(
+            "Properties", self.property_panel, Qt.DockWidgetArea.LeftDockWidgetArea
+        )
         console_dock = self._add_dock(
             "Console", self.console, Qt.DockWidgetArea.BottomDockWidgetArea
         )
         log_dock = self._add_dock("Log", self.log_panel, Qt.DockWidgetArea.BottomDockWidgetArea)
         self.tabifyDockWidget(log_dock, console_dock)
         console_dock.raise_()
+        self.resizeDocks([model_dock, properties_dock], [320, 480], Qt.Orientation.Vertical)
 
         self._create_actions()
         self._create_menus()
@@ -145,6 +152,26 @@ class MainWindow(QMainWindow):
         self.cancel_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.viewport.addAction(self.cancel_action)
 
+        self.connectors_action = self._action(
+            "Connectors on curves",
+            self.create_connectors_on_selection,
+            tip="One connector on each selected curve",
+        )
+        self.chain_action = self._action(
+            "Chain connector",
+            self.create_chain_connector_on_selection,
+            tip="One connector along the selected curves (ordered end to end)",
+        )
+        self.color_action = QAction("Colour connectors by stretching ratio", self)
+        self.color_action.setCheckable(True)
+        self.color_action.setChecked(True)
+        self.color_action.toggled.connect(self.set_color_by_stretching)
+        self.nodes_action = QAction("Show connector nodes", self)
+        self.nodes_action.setCheckable(True)
+        self.nodes_action.setChecked(True)
+        self.nodes_action.toggled.connect(self.set_show_nodes)
+        self.threshold_action = self._action("Stretching ratio threshold…", self.ask_threshold)
+
         self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
         self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.viewport.addAction(self.fit_action)
@@ -189,11 +216,18 @@ class MainWindow(QMainWindow):
         for name in ("point", "line", "arc", "polyline", "spline"):
             create_menu.addAction(self.tool_actions[name])
         create_menu.addSeparator()
+        create_menu.addAction(self.connectors_action)
+        create_menu.addAction(self.chain_action)
+        create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.color_action)
+        view_menu.addAction(self.nodes_action)
+        view_menu.addAction(self.threshold_action)
 
     def _create_toolbars(self) -> None:
         toolbar = QToolBar("Tools", self)
@@ -203,6 +237,15 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.finish_action)
         toolbar.addAction(self.cancel_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.connectors_action)
+        toolbar.addAction(self.chain_action)
+        toolbar.addWidget(QLabel(" dim "))
+        self.dimension_box = QSpinBox()
+        self.dimension_box.setRange(2, 100000)
+        self.dimension_box.setValue(DEFAULT_DIMENSION)
+        self.dimension_box.setToolTip("Number of points for new connectors")
+        toolbar.addWidget(self.dimension_box)
         toolbar.addSeparator()
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
@@ -345,15 +388,34 @@ class MainWindow(QMainWindow):
             self.scene.rebuild()
         else:
             self.scene.update_entities(change.ids())
-        self.model_tree.populate(self.session.store)
+            self._report_connector_warnings(change.ids())
+        self.model_tree.populate(self.session)
         self.set_selection(self.selected_ids)
         self._update_edit_actions()
         if not had_geometry and len(self.session.store) > 0:
             self.scene.fit()
 
+    def _report_connector_warnings(self, ids) -> None:
+        for entity_id in ids:
+            if entity_id not in self.session.store:
+                continue
+            entity = self.session.store.get(entity_id)
+            if entity.kind != "connector":
+                continue
+            nodes = self.session.connector_nodes(entity.name)
+            for warning in nodes.warnings:
+                log.warning("%s: %s", entity.name, warning)
+            if nodes.max_stretching_ratio > self.session.stretching_threshold:
+                log.warning(
+                    "%s: max stretching ratio %.4g exceeds %g",
+                    entity.name,
+                    nodes.max_stretching_ratio,
+                    self.session.stretching_threshold,
+                )
+
     def _refresh_all(self) -> None:
         self.scene.rebuild()
-        self.model_tree.populate(self.session.store)
+        self.model_tree.populate(self.session)
         self.set_selection([])
         self._update_edit_actions()
         self._update_tool_feedback(None)
@@ -390,6 +452,68 @@ class MainWindow(QMainWindow):
         else:
             log.info("%s", text)
         self.statusBar().showMessage(text.splitlines()[0], 5000)
+
+    # -------------------------------------------------------------- connectors
+    def _selected_curves(self) -> list[str]:
+        names = []
+        for name in self.selected_names():
+            if self.session.store.get(name).kind in CURVE_KINDS:
+                names.append(name)
+        return names
+
+    def create_connectors_on_selection(self) -> list[str]:
+        curves = self._selected_curves()
+        if not curves:
+            self.statusBar().showMessage("Select one or more curves first", 5000)
+            return []
+        names = self._run(
+            lambda: self.session.create_connectors_on_curves(curves, self.dimension_box.value())
+        )
+        if names:
+            log.info("created %s", ", ".join(names))
+            self.set_selection([self.session.store.get(n).id for n in names])
+        return names or []
+
+    def create_chain_connector_on_selection(self) -> str | None:
+        curves = self._selected_curves()
+        if not curves:
+            self.statusBar().showMessage("Select the curves of the chain first", 5000)
+            return None
+        name = self._run(
+            lambda: self.session.create_chain_connector(curves, self.dimension_box.value())
+        )
+        if name:
+            log.info("created %s", name)
+            self.set_selection([self.session.store.get(name).id])
+        return name
+
+    def set_color_by_stretching(self, enabled: bool) -> None:
+        self.scene.color_by_stretching = enabled
+        self.scene.rebuild()
+
+    def set_show_nodes(self, enabled: bool) -> None:
+        self.scene.show_nodes = enabled
+        self.scene.rebuild()
+
+    def set_threshold(self, value: float) -> None:
+        self.session.stretching_threshold = value
+        self.scene.rebuild()
+        self.model_tree.populate(self.session)
+        self.property_panel.refresh()
+        log.info("stretching ratio threshold set to %g", value)
+
+    def ask_threshold(self) -> None:
+        value, ok = QInputDialog.getDouble(
+            self,
+            "Stretching ratio threshold",
+            "Warn when consecutive spacings differ by more than:",
+            self.session.stretching_threshold,
+            1.0,
+            100.0,
+            3,
+        )
+        if ok:
+            self.set_threshold(value)
 
     # ------------------------------------------------------------ edit actions
     def undo(self) -> None:

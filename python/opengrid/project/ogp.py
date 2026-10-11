@@ -7,7 +7,7 @@ Hence save -> load -> save is byte-identical.
 import json
 from pathlib import Path
 
-from opengrid.model.entities import KINDS, normalize_params
+from opengrid.model.entities import DATABASE_KINDS, normalize_params
 from opengrid.model.store import Entity, Store
 from opengrid.validation import Issue, ValidationError
 
@@ -15,7 +15,8 @@ FORMAT = "opengrid-project"
 VERSION = 1
 
 # Sections reserved for later phases; written empty so the schema is stable.
-_FUTURE_SECTIONS = ("blocks", "connectors", "domains", "patches", "zones")
+_FUTURE_SECTIONS = ("blocks", "domains", "patches", "zones")
+_SECTIONS = {"database": DATABASE_KINDS, "connectors": ("connector",)}
 _RECORD_KEYS = ("id", "name", "type")
 
 
@@ -40,7 +41,9 @@ def to_json(store: Store) -> str:
         "name_counters": dict(sorted(store.name_counters.items())),
         "settings": {},
     }
-    sections = {"database": [_record(entity) for entity in store]}
+    sections = {}
+    for section, kinds in _SECTIONS.items():
+        sections[section] = [_record(entity) for entity in store if entity.kind in kinds]
     for name in _FUTURE_SECTIONS:
         sections[name] = []
     lines = ["{"]
@@ -80,47 +83,38 @@ def from_json(text: str, source: str = "<project>") -> Store:
         )
 
     issues: list[Issue] = []
-    store = Store()
     seen_ids: set[int] = set()
     seen_names: set[str] = set()
-    entities: list[Entity] = []
-    for index, record in enumerate(data.get("database", [])):
-        where = f"{source}: database[{index}]"
-        if not isinstance(record, dict) or any(key not in record for key in _RECORD_KEYS):
-            issues.append(Issue(where, "record needs 'id', 'name' and 'type'"))
-            continue
-        entity_id = record["id"]
-        name = record["name"]
-        kind = record["type"]
-        if isinstance(entity_id, bool) or not isinstance(entity_id, int) or entity_id < 1:
-            issues.append(Issue(where, f"invalid id {entity_id!r}"))
-            continue
-        if entity_id in seen_ids:
-            issues.append(Issue(where, f"duplicate id {entity_id}"))
-            continue
-        if name in seen_names:
-            issues.append(Issue(where, f"duplicate name {name!r}"))
-            continue
-        if kind not in KINDS:
-            issues.append(Issue(where, f"unknown type {kind!r}"))
-            continue
-        raw = {}
-        for key, value in record.items():
-            if key not in _RECORD_KEYS:
-                raw[key] = value
-        try:
-            params = normalize_params(kind, raw, f"{source}: {name}")
-        except ValidationError as error:
-            issues.extend(error.issues)
-            continue
-        seen_ids.add(entity_id)
-        seen_names.add(name)
-        entities.append(Entity(entity_id, name, kind, params))
+    records: dict[str, list[tuple[str, dict]]] = {}
+    for section, kinds in _SECTIONS.items():
+        records[section] = []
+        for index, record in enumerate(data.get(section, [])):
+            where = f"{source}: {section}[{index}]"
+            if not isinstance(record, dict) or any(key not in record for key in _RECORD_KEYS):
+                issues.append(Issue(where, "record needs 'id', 'name' and 'type'"))
+                continue
+            entity_id = record["id"]
+            name = record["name"]
+            kind = record["type"]
+            if isinstance(entity_id, bool) or not isinstance(entity_id, int) or entity_id < 1:
+                issues.append(Issue(where, f"invalid id {entity_id!r}"))
+                continue
+            if entity_id in seen_ids:
+                issues.append(Issue(where, f"duplicate id {entity_id}"))
+                continue
+            if name in seen_names:
+                issues.append(Issue(where, f"duplicate name {name!r}"))
+                continue
+            if kind not in kinds:
+                issues.append(Issue(where, f"unknown type {kind!r} in section {section!r}"))
+                continue
+            seen_ids.add(entity_id)
+            seen_names.add(name)
+            records[section].append((where, record))
 
     for section in _FUTURE_SECTIONS:
         if data.get(section):
             issues.append(Issue(f"{source}: {section}", "not supported in this version yet"))
-
     next_id = data.get("next_id", 1)
     if seen_ids and next_id <= max(seen_ids):
         issues.append(
@@ -129,11 +123,25 @@ def from_json(text: str, source: str = "<project>") -> Store:
     if issues:
         raise ValidationError(issues)
 
-    store.begin()
-    for entity in entities:
-        store.next_id = entity.id
-        store.add(entity.kind, entity.params, entity.name)
-    store.commit()
+    # Database entities first; connectors are validated against them.
+    store = Store()
+    for section in _SECTIONS:
+        entities = []
+        for _where, record in records[section]:
+            raw = {key: value for key, value in record.items() if key not in _RECORD_KEYS}
+            try:
+                params = normalize_params(record["type"], raw, f"{source}: {record['name']}", store)
+            except ValidationError as error:
+                issues.extend(error.issues)
+                continue
+            entities.append(Entity(record["id"], record["name"], record["type"], params))
+        if issues:
+            raise ValidationError(issues)
+        store.begin()
+        for entity in sorted(entities, key=lambda e: e.id):
+            store.next_id = entity.id
+            store.add(entity.kind, entity.params, entity.name)
+        store.commit()
     store.next_id = next_id
     store.name_counters = dict(data.get("name_counters", {}))
     return store

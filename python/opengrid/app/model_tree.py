@@ -8,6 +8,15 @@ CATEGORIES = ("Database", "Connectors", "Domains", "Blocks", "Patches", "Zones")
 ENTITY_ID_ROLE = Qt.ItemDataRole.UserRole
 
 
+def connector_info(session, entity) -> str:
+    """'<n> pts', with a warning sign if the connector has warnings or exceeds the threshold."""
+    text = f"{entity.params['dimension']} pts"
+    nodes = session.connector_nodes(entity.name)
+    if nodes.warnings or nodes.max_stretching_ratio > session.stretching_threshold:
+        text += "  ⚠"
+    return text
+
+
 class ModelTree(QTreeWidget):
     """Tree of model entities grouped by category; emits the selected entity ids."""
 
@@ -36,23 +45,29 @@ class ModelTree(QTreeWidget):
     def category_item(self, name: str) -> QTreeWidgetItem:
         return self._category_items[name]
 
-    def populate(self, store) -> None:
-        """Rebuild the Database category from the store (ids kept as item data)."""
+    def populate(self, session) -> None:
+        """Rebuild the Database and Connectors categories (entity ids kept as item data)."""
         self.blockSignals(True)
-        database = self._category_items["Database"]
-        database.takeChildren()
         self._entity_items.clear()
-        for entity in store:
-            item = QTreeWidgetItem(database, [entity.name, entity.kind])
+        database = self._category_items["Database"]
+        connectors = self._category_items["Connectors"]
+        database.takeChildren()
+        connectors.takeChildren()
+        for entity in session.store:
+            if entity.kind == "connector":
+                item = QTreeWidgetItem(connectors, [entity.name, connector_info(session, entity)])
+            else:
+                item = QTreeWidgetItem(database, [entity.name, entity.kind])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
-        database.setText(1, f"{len(store)}")
+        database.setText(1, f"{database.childCount()}")
+        connectors.setText(1, f"{connectors.childCount()}")
         self.resizeColumnToContents(0)
         self.blockSignals(False)
 
-    def entity_names(self) -> list[str]:
-        database = self._category_items["Database"]
-        return [database.child(i).text(0) for i in range(database.childCount())]
+    def entity_names(self, category: str = "Database") -> list[str]:
+        parent = self._category_items[category]
+        return [parent.child(i).text(0) for i in range(parent.childCount())]
 
     def select_ids(self, ids) -> None:
         self.blockSignals(True)

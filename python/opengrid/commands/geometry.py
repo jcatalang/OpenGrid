@@ -1,6 +1,11 @@
-"""Commands creating, modifying, renaming and deleting database entities."""
+"""Commands creating, modifying, renaming and deleting entities (geometry and connectors).
+
+Each command renders its journal line during ``execute`` (entity references are written by
+their names at that moment, so a journal stays valid across later renames).
+"""
 
 from opengrid.commands.base import Command
+from opengrid.model.connectors import CURVE_KINDS, build_chain, script_params
 from opengrid.model.entities import normalize_params
 from opengrid.model.store import Store
 from opengrid.validation import Issue, ValidationError
@@ -18,8 +23,26 @@ def format_kwargs(params: dict) -> str:
     return ", ".join(parts)
 
 
-def create_call(kind: str, params: dict, name: str) -> str:
-    return f"og.create_{kind}({format_kwargs(params)}, name={name!r})"
+def _for_script(kind: str, params: dict, store: Store) -> dict:
+    if kind == "connector":
+        return script_params(params, store)
+    return params
+
+
+def create_call(kind: str, params: dict, name: str, store: Store) -> str:
+    return f"og.create_{kind}({format_kwargs(_for_script(kind, params, store))}, name={name!r})"
+
+
+def _check_dependents_still_valid(store: Store, entity_id: int) -> None:
+    """After a curve changed, every connector using it must still form a valid chain."""
+    issues = []
+    for connector in store.dependents(entity_id):
+        try:
+            build_chain(connector.params, store)
+        except ValueError as error:
+            issues.append(Issue(connector.name, f"would become invalid: {error}"))
+    if issues:
+        raise ValidationError(issues)
 
 
 class CreateEntity(Command):
@@ -29,19 +52,20 @@ class CreateEntity(Command):
         self.requested_name = name
         self.label = f"Create {kind}"
         self.name: str | None = None
-        self.params: dict | None = None
+        self._script = ""
 
     def execute(self, store: Store) -> str:
         where = self.requested_name
         if where is None:
             where = f"new {self.kind}"
-        self.params = normalize_params(self.kind, self.raw_params, where)
-        entity = store.add(self.kind, self.params, self.requested_name)
+        params = normalize_params(self.kind, self.raw_params, where, store)
+        entity = store.add(self.kind, params, self.requested_name)
         self.name = entity.name
+        self._script = create_call(self.kind, params, entity.name, store)
         return entity.name
 
     def script(self) -> str:
-        return create_call(self.kind, self.params, self.name)
+        return self._script
 
 
 class CreateEntities(Command):
@@ -55,29 +79,26 @@ class CreateEntities(Command):
         self.items = items
         self.label = label
         self.comment = comment
-        self.created: list[tuple[str, dict, str]] = []
+        self._script = ""
 
     def execute(self, store: Store) -> list[str]:
-        self.created = []
+        lines = []
+        if self.comment:
+            lines.append(f"# {self.comment}")
+        names = []
         for kind, raw_params, name in self.items:
             where = name
             if where is None:
                 where = f"new {kind}"
-            params = normalize_params(kind, raw_params, where)
+            params = normalize_params(kind, raw_params, where, store)
             entity = store.add(kind, params, name)
-            self.created.append((kind, params, entity.name))
-        names = []
-        for _kind, _params, name in self.created:
-            names.append(name)
+            names.append(entity.name)
+            lines.append(create_call(kind, params, entity.name, store))
+        self._script = "\n".join(lines)
         return names
 
     def script(self) -> str:
-        lines = []
-        if self.comment:
-            lines.append(f"# {self.comment}")
-        for kind, params, name in self.created:
-            lines.append(create_call(kind, params, name))
-        return "\n".join(lines)
+        return self._script
 
 
 class ModifyEntity(Command):
@@ -85,7 +106,7 @@ class ModifyEntity(Command):
         self.target = name
         self.changes = dict(changes)
         self.label = f"Modify {name}"
-        self.recorded: dict = {}
+        self._script = ""
 
     def execute(self, store: Store) -> str:
         if not self.changes:
@@ -93,15 +114,19 @@ class ModifyEntity(Command):
         entity = store.get(self.target)
         merged = dict(entity.params)
         merged.update(self.changes)
-        params = normalize_params(entity.kind, merged, entity.name)
+        params = normalize_params(entity.kind, merged, entity.name, store)
         store.update(entity.id, params=params)
-        self.recorded = {}
+        if entity.kind in CURVE_KINDS:
+            _check_dependents_still_valid(store, entity.id)
+        recorded = {}
+        shown = _for_script(entity.kind, params, store)
         for key in self.changes:
-            self.recorded[key] = params[key]
+            recorded[key] = shown[key]
+        self._script = f"og.modify({self.target!r}, {format_kwargs(recorded)})"
         return entity.name
 
     def script(self) -> str:
-        return f"og.modify({self.target!r}, {format_kwargs(self.recorded)})"
+        return self._script
 
 
 class RenameEntity(Command):
@@ -127,9 +152,19 @@ class DeleteEntities(Command):
 
     def execute(self, store: Store) -> int:
         issues = []
+        seen = set()
         for name in self.names:
             if name not in store:
                 issues.append(Issue(repr(name), "no such entity"))
+            elif name in seen:
+                issues.append(Issue(repr(name), "listed twice"))
+            seen.add(name)
+        if issues:
+            raise ValidationError(issues)
+        for name in self.names:
+            for dependent in store.dependents(name):
+                if dependent.name not in seen:
+                    issues.append(Issue(name, f"is used by connector {dependent.name!r}"))
         if issues:
             raise ValidationError(issues)
         for name in self.names:

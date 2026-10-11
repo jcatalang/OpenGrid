@@ -7,6 +7,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "opengrid/core/unstructured/advancing_front.hpp"
 #include "opengrid/core/unstructured/triangulate.hpp"
 #include "opengrid/core/util/predicates.hpp"
 
@@ -338,4 +339,183 @@ TEST(Triangulate, CollinearBoundaryPointsOnLongEdges) {
   for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
     EXPECT_GT(area(mesh, t), 0.0);
   }
+}
+
+// ---------------------------------------------------------------------------- advancing front
+
+namespace {
+
+struct Stats {
+  double area = 0.0;
+  double worst = 180.0;
+  double mean = 0.0;
+};
+
+Stats stats(const og::TriangleMesh& mesh) {
+  Stats s;
+  for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+    s.area += area(mesh, t);
+    const double angle = min_angle_deg(mesh, t);
+    s.worst = std::min(s.worst, angle);
+    s.mean += angle;
+  }
+  s.mean /= static_cast<double>(mesh.triangles.size());
+  return s;
+}
+
+}  // namespace
+
+TEST(AdvancingFront, SquareWithHole) {
+  og::TriangulationInput in;
+  add_loop(in, square(0, 0, 4, 4, 40, true));
+  add_loop(in, square(1.5, 1.5, 2.5, 2.5, 20, false));
+  const auto mesh = og::advancing_front(in, {});
+  expect_conforming(in, mesh);
+  const Stats s = stats(mesh);
+  EXPECT_NEAR(s.area, 15.0, 1e-12 * 15.0);
+  EXPECT_TRUE(mesh.warnings.empty()) << mesh.warnings.front();
+  EXPECT_GE(s.worst, 25.0);
+  EXPECT_GE(s.mean, 45.0);  // advancing-front meshes are close to equilateral
+}
+
+TEST(AdvancingFront, GradedNonConvexAndDeterministic) {
+  const auto in = l_shape(50, 50);
+  og::RefinementOptions options;
+  options.size.growth_rate = 1.2;
+  options.size.max_size = 0.2;
+  const auto a = og::advancing_front(in, options);
+  const auto b = og::advancing_front(in, options);
+  expect_conforming(in, a);
+  EXPECT_EQ(a.points, b.points);
+  EXPECT_EQ(a.triangles, b.triangles);
+  const Stats s = stats(a);
+  EXPECT_NEAR(s.area, 3.0, 3e-12);
+  EXPECT_GE(s.worst, 20.7);
+}
+
+TEST(AdvancingFront, AbruptSpacingJumpsStayValid) {
+  const auto in = l_shape(10, 100);
+  og::RefinementOptions options;
+  options.size.growth_rate = 1.1;
+  const auto mesh = og::advancing_front(in, options);
+  expect_conforming(in, mesh);
+  EXPECT_NEAR(stats(mesh).area, 3.0, 3e-12);
+}
+
+TEST(AdvancingFront, InvalidInputRejectedLikeDelaunay) {
+  og::TriangulationInput crossing;
+  add_loop(crossing, {{0, 0}, {2, 0}, {0, 2}, {2, 2}});
+  EXPECT_THROW(og::advancing_front(crossing, {}), std::invalid_argument);
+  og::TriangulationInput clockwise;
+  add_loop(clockwise, square(0, 0, 1, 1, 4, false));
+  EXPECT_THROW(og::advancing_front(clockwise, {}), std::invalid_argument);
+}
+
+TEST(DelaunayFlips, RestoreLocallyDelaunay) {
+  // Two triangles sharing the "wrong" diagonal of a square-ish quad get flipped.
+  const std::vector<std::array<double, 2>> pts = {{0, 0}, {2, 0}, {2.1, 1}, {0, 1}};
+  std::vector<std::array<MeshIndex, 3>> tris = {{0, 1, 2}, {0, 2, 3}};
+  const std::vector<std::array<MeshIndex, 2>> boundary = {{0, 1}, {1, 2}, {2, 3}, {3, 0}};
+  // Diagonal 0-2 vs 1-3: check which is Delaunay and that one call reaches it.
+  og::flip_to_delaunay(pts, tris, boundary);
+  const auto again = og::flip_to_delaunay(pts, tris, boundary);
+  EXPECT_EQ(again, 0);
+  for (const auto& t : tris) {
+    const auto& a = pts[static_cast<std::size_t>(t[0])];
+    const auto& b = pts[static_cast<std::size_t>(t[1])];
+    const auto& c = pts[static_cast<std::size_t>(t[2])];
+    EXPECT_GT((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), 0.0);
+  }
+}
+
+TEST(DelaunayFlips, FanOfConvexPolygonBecomesDelaunay) {
+  // A fan from one vertex of a convex polygon is far from Delaunay; after the flips every
+  // interior edge is locally Delaunay, orientation and area are preserved.
+  std::vector<std::array<double, 2>> pts;
+  const int n = 40;
+  for (int k = 0; k < n; ++k) {
+    const double t = 2.0 * std::numbers::pi * k / n;
+    pts.push_back({2.0 * std::cos(t), std::sin(t)});
+  }
+  std::vector<std::array<MeshIndex, 3>> tris;
+  for (MeshIndex k = 1; k + 1 < n; ++k) {
+    tris.push_back({0, k, k + 1});
+  }
+  std::vector<std::array<MeshIndex, 2>> boundary;
+  boundary.reserve(static_cast<std::size_t>(n));
+  for (MeshIndex k = 0; k < n; ++k) {
+    boundary.push_back({k, (k + 1) % n});
+  }
+  auto signed_area = [&](const std::array<MeshIndex, 3>& t) {
+    const auto& a = pts[static_cast<std::size_t>(t[0])];
+    const auto& b = pts[static_cast<std::size_t>(t[1])];
+    const auto& c = pts[static_cast<std::size_t>(t[2])];
+    return 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+  };
+  double before = 0.0;
+  for (const auto& t : tris) {
+    before += signed_area(t);
+  }
+  EXPECT_GT(og::flip_to_delaunay(pts, tris, boundary), 0);
+  EXPECT_EQ(og::flip_to_delaunay(pts, tris, boundary), 0);
+  double after = 0.0;
+  for (const auto& t : tris) {
+    EXPECT_GT(signed_area(t), 0.0);
+    after += signed_area(t);
+  }
+  EXPECT_NEAR(after, before, 1e-12 * before);
+  // Locally Delaunay: no vertex of an adjacent triangle inside a triangle's circumcircle.
+  for (const auto& t : tris) {
+    for (const auto& o : tris) {
+      int shared = 0;
+      MeshIndex apex = -1;
+      for (const MeshIndex v : o) {
+        if (v == t[0] || v == t[1] || v == t[2]) {
+          ++shared;
+        } else {
+          apex = v;
+        }
+      }
+      if (shared == 2) {
+        EXPECT_LE(og::incircle(pts[static_cast<std::size_t>(t[0])].data(),
+                               pts[static_cast<std::size_t>(t[1])].data(),
+                               pts[static_cast<std::size_t>(t[2])].data(),
+                               pts[static_cast<std::size_t>(apex)].data()),
+                  0);
+      }
+    }
+  }
+}
+
+TEST(AdvancingFront, MatchesSizeFieldAndScales) {
+  // Uniform disc: near-equilateral triangles of the requested size.
+  og::TriangulationInput in;
+  std::vector<std::array<double, 2>> circle;
+  const int n = 400;
+  for (int k = 0; k < n; ++k) {
+    const double t = 2.0 * std::numbers::pi * k / n;
+    circle.push_back({std::cos(t), std::sin(t)});
+  }
+  add_loop(in, circle);
+  og::RefinementOptions options;
+  const double h = 2.0 * std::numbers::pi / n;
+  options.size.max_size = h;
+  const auto mesh = og::advancing_front(in, options);
+  expect_conforming(in, mesh);
+  EXPECT_TRUE(mesh.warnings.empty());
+  std::vector<double> ratio;
+  double worst = 180.0;
+  for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+    double mean_edge = 0.0;
+    for (std::size_t k = 0; k < 3; ++k) {
+      const auto& a = mesh.points[static_cast<std::size_t>(mesh.triangles[t][k])];
+      const auto& b = mesh.points[static_cast<std::size_t>(mesh.triangles[t][(k + 1) % 3])];
+      mean_edge += std::hypot(a[0] - b[0], a[1] - b[1]) / 3.0;
+    }
+    ratio.push_back(mean_edge / h);
+    worst = std::min(worst, min_angle_deg(mesh, t));
+  }
+  std::sort(ratio.begin(), ratio.end());
+  EXPECT_NEAR(ratio[ratio.size() / 2], 1.0, 0.05);
+  EXPECT_GE(worst, 30.0);
 }

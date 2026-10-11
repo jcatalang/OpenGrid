@@ -69,3 +69,16 @@ def test_quality_colouring_and_worst_triangle(window):
     q = window.session.domain_quality(name)["min_angle"].reshape(-1)
     assert q[result[1]] == q.min()
     assert not window.grab().isNull()
+
+
+def test_algorithm_combo(window):
+    name = window.session.create_unstructured_domain(connectors=["c-hole", "c-outer"])
+    window.set_selection(_ids(window, name))
+    _kind, editor = window.property_panel._editors["generator"]
+    assert editor.min_angle.isEnabled()
+    editor.algorithm.setCurrentText("advancing_front")
+    assert not editor.min_angle.isEnabled()
+    assert not editor.refine.isEnabled()
+    assert window.property_panel.apply()
+    assert window.session.entity(name).params["generator"]["algorithm"] == "advancing_front"
+    assert window.session.domain_quality(name)["min_angle"].min() >= 25.0

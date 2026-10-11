@@ -21,6 +21,14 @@ double segment_distance(double x, double y, const std::array<double, 2>& a,
   return std::hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
 }
 
+constexpr std::size_t kLeafSize = 8;
+
+double box_distance(double x, double y, const std::array<double, 4>& box) {
+  const double dx = std::max({box[0] - x, 0.0, x - box[2]});
+  const double dy = std::max({box[1] - y, 0.0, y - box[3]});
+  return std::hypot(dx, dy);
+}
+
 }  // namespace
 
 SizeField::SizeField(std::vector<std::array<double, 2>> points, std::vector<double> sizes,
@@ -28,8 +36,7 @@ SizeField::SizeField(std::vector<std::array<double, 2>> points, std::vector<doub
     : points_(std::move(points)),
       sizes_(std::move(sizes)),
       options_(options),
-      gradient_(options.growth_rate - 1.0),
-      min_size_(std::numeric_limits<double>::infinity()) {
+      gradient_(options.growth_rate - 1.0) {
   if (points_.empty() || points_.size() != sizes_.size()) {
     throw std::invalid_argument("size field: need one size per boundary point");
   }
@@ -40,7 +47,6 @@ SizeField::SizeField(std::vector<std::array<double, 2>> points, std::vector<doub
     if (!(s > 0.0)) {
       throw std::invalid_argument("size field: sizes must be positive");
     }
-    min_size_ = std::min(min_size_, s);
   }
   for (const SizeSource& source : options.sources) {
     if (!(source.size > 0.0) || source.radius < 0.0) {
@@ -50,37 +56,9 @@ SizeField::SizeField(std::vector<std::array<double, 2>> points, std::vector<doub
   if (options.max_size && !(*options.max_size > 0.0)) {
     throw std::invalid_argument("size field: max size must be positive");
   }
-  double xmin = points_[0][0];
-  double xmax = xmin;
-  double ymin = points_[0][1];
-  double ymax = ymin;
-  double mean = 0.0;
-  for (std::size_t i = 0; i < points_.size(); ++i) {
-    xmin = std::min(xmin, points_[i][0]);
-    xmax = std::max(xmax, points_[i][0]);
-    ymin = std::min(ymin, points_[i][1]);
-    ymax = std::max(ymax, points_[i][1]);
-    mean += sizes_[i];
-  }
-  mean /= static_cast<double>(points_.size());
-  // About a few points per bucket.
-  cell_ = std::max(4.0 * mean, 1e-300);
-  origin_x_ = xmin;
-  origin_y_ = ymin;
-  nx_ = std::max(1L, static_cast<long>(std::floor((xmax - xmin) / cell_)) + 1);
-  ny_ = std::max(1L, static_cast<long>(std::floor((ymax - ymin) / cell_)) + 1);
-  if (nx_ * ny_ > 4'000'000) {
-    const double factor = std::sqrt(static_cast<double>(nx_ * ny_) / 4'000'000.0);
-    cell_ *= factor;
-    nx_ = std::max(1L, static_cast<long>(std::floor((xmax - xmin) / cell_)) + 1);
-    ny_ = std::max(1L, static_cast<long>(std::floor((ymax - ymin) / cell_)) + 1);
-  }
-  buckets_.assign(static_cast<std::size_t>(nx_ * ny_), {});
-  for (std::size_t i = 0; i < points_.size(); ++i) {
-    const long cx = std::min(nx_ - 1, static_cast<long>((points_[i][0] - origin_x_) / cell_));
-    const long cy = std::min(ny_ - 1, static_cast<long>((points_[i][1] - origin_y_) / cell_));
-    buckets_[static_cast<std::size_t>(cy * nx_ + cx)].push_back(i);
-  }
+  // The tree build reorders points_ and sizes_ together.
+  nodes_.reserve(2 * points_.size() / kLeafSize + 2);
+  build(0, points_.size(), 0);
 }
 
 double SizeField::operator()(double x, double y) const {
@@ -92,32 +70,81 @@ double SizeField::operator()(double x, double y) const {
     const double d = segment_distance(x, y, source.p0, source.p1);
     best = std::min(best, source.size + gradient_ * std::max(0.0, d - source.radius));
   }
-  const long cx = std::clamp(static_cast<long>(std::floor((x - origin_x_) / cell_)), -1L, nx_);
-  const long cy = std::clamp(static_cast<long>(std::floor((y - origin_y_) / cell_)), -1L, ny_);
-  const long max_ring = std::max(nx_, ny_) + 2;
-  for (long ring = 0; ring <= max_ring; ++ring) {
-    // Points in ring r are at least (r - 1) cells away.
-    const double bound =
-        min_size_ + gradient_ * static_cast<double>(std::max(0L, ring - 1)) * cell_;
-    if (bound >= best) {
-      break;
+  // Depth-first branch and bound, nearer child first.
+  std::array<std::size_t, 128> stack{};
+  std::size_t top = 0;
+  stack[top++] = 0;
+  while (top > 0) {
+    const Node& node = nodes_[stack[--top]];
+    if (node.min_size + gradient_ * box_distance(x, y, node.box) >= best) {
+      continue;
     }
-    for (long j = cy - ring; j <= cy + ring; ++j) {
-      for (long i = cx - ring; i <= cx + ring; ++i) {
-        if (std::max(std::labs(i - cx), std::labs(j - cy)) != ring) {
-          continue;
-        }
-        if (i < 0 || j < 0 || i >= nx_ || j >= ny_) {
-          continue;
-        }
-        for (const std::size_t k : buckets_[static_cast<std::size_t>(j * nx_ + i)]) {
-          const double d = std::hypot(x - points_[k][0], y - points_[k][1]);
-          best = std::min(best, sizes_[k] + gradient_ * d);
-        }
+    if (node.left == 0) {
+      for (std::size_t k = node.begin; k < node.end; ++k) {
+        const double d = std::hypot(x - points_[k][0], y - points_[k][1]);
+        best = std::min(best, sizes_[k] + gradient_ * d);
       }
+      continue;
+    }
+    const double dl = box_distance(x, y, nodes_[node.left].box);
+    const double dr = box_distance(x, y, nodes_[node.right].box);
+    if (dl <= dr) {
+      stack[top++] = node.right;
+      stack[top++] = node.left;
+    } else {
+      stack[top++] = node.left;
+      stack[top++] = node.right;
     }
   }
   return best;
+}
+
+std::size_t SizeField::build(std::size_t begin, std::size_t end, int depth) {
+  const std::size_t id = nodes_.size();
+  nodes_.emplace_back();
+  Node node;
+  node.begin = begin;
+  node.end = end;
+  node.box = {points_[begin][0], points_[begin][1], points_[begin][0], points_[begin][1]};
+  node.min_size = sizes_[begin];
+  for (std::size_t k = begin; k < end; ++k) {
+    node.box[0] = std::min(node.box[0], points_[k][0]);
+    node.box[1] = std::min(node.box[1], points_[k][1]);
+    node.box[2] = std::max(node.box[2], points_[k][0]);
+    node.box[3] = std::max(node.box[3], points_[k][1]);
+    node.min_size = std::min(node.min_size, sizes_[k]);
+  }
+  if (end - begin > kLeafSize && depth < 60) {
+    // Split at the median of the longer box side (points and sizes move together).
+    std::size_t axis = 0;
+    if (node.box[3] - node.box[1] > node.box[2] - node.box[0]) {
+      axis = 1;
+    }
+    const std::size_t mid = begin + (end - begin) / 2;
+    std::vector<std::size_t> idx(end - begin);
+    for (std::size_t k = 0; k < idx.size(); ++k) {
+      idx[k] = begin + k;
+    }
+    std::nth_element(idx.begin(), idx.begin() + static_cast<std::ptrdiff_t>(mid - begin), idx.end(),
+                     [&](std::size_t a, std::size_t b) {
+                       if (points_[a][axis] != points_[b][axis]) {
+                         return points_[a][axis] < points_[b][axis];
+                       }
+                       return a < b;
+                     });
+    std::vector<std::array<double, 2>> p(idx.size());
+    std::vector<double> h(idx.size());
+    for (std::size_t k = 0; k < idx.size(); ++k) {
+      p[k] = points_[idx[k]];
+      h[k] = sizes_[idx[k]];
+    }
+    std::copy(p.begin(), p.end(), points_.begin() + static_cast<std::ptrdiff_t>(begin));
+    std::copy(h.begin(), h.end(), sizes_.begin() + static_cast<std::ptrdiff_t>(begin));
+    node.left = build(begin, mid, depth + 1);
+    node.right = build(mid, end, depth + 1);
+  }
+  nodes_[id] = node;
+  return id;
 }
 
 }  // namespace og

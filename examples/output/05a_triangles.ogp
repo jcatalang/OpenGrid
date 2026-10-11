@@ -11,7 +11,7 @@
   {"center": [0.5, 0.0, 0.0], "end_angle": 6.283185307179586, "id": 5, "name": "farfield", "normal": [0.0, 0.0, 1.0], "radius": 20.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]}
  ],
  "domains": [
-  {"generator": {"growth_rate": 1.15, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "sources": []}, "id": 7, "loops": [[{"connector": 6, "reversed": false}], [{"connector": 3, "reversed": false}, {"connector": 4, "reversed": true}]], "name": "triangles", "type": "unstructured_domain"}
+  {"generator": {"algorithm": "delaunay", "growth_rate": 1.15, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "sources": []}, "id": 7, "loops": [[{"connector": 6, "reversed": false}], [{"connector": 3, "reversed": false}, {"connector": 4, "reversed": true}]], "name": "triangles", "type": "unstructured_domain"}
  ],
  "format": "opengrid-project",
  "name_counters": {},

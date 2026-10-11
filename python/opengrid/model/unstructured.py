@@ -1,5 +1,6 @@
 """Unstructured 2D domains: an outer loop and optional inner loops (holes) of connectors,
-triangulated by the C++ constrained Delaunay mesher (opengrid._core.triangulate).
+triangulated by the C++ meshers (opengrid._core.triangulate): constrained Delaunay with
+refinement (algorithm "delaunay", the default) or advancing front ("advancing_front").
 
 Loops are closed chains of connectors (each possibly reversed). The outer loop runs
 counter-clockwise and inner loops clockwise, i.e. the domain lies on the left of every loop.
@@ -18,7 +19,10 @@ from opengrid.model.connectors import ConnectorEvaluator
 from opengrid.model.domains import _edge_item, _signed_area, _tolerance, edge_points
 from opengrid.validation import Issue, ValidationError
 
+ALGORITHMS = ("delaunay", "advancing_front")
+
 DEFAULT_GENERATOR = {
+    "algorithm": "delaunay",
     "refine": True,
     "min_angle": 25.0,
     "growth_rate": 1.2,
@@ -61,6 +65,13 @@ def normalize_generator(raw, where: str) -> dict:
     merged = dict(DEFAULT_GENERATOR)
     merged.update(raw)
     label = f"{where}: generator"
+    algorithm = merged["algorithm"]
+    if algorithm not in ALGORITHMS:
+        issues.append(
+            Issue(
+                f"{label}.algorithm", f"must be one of {', '.join(ALGORITHMS)}, got {algorithm!r}"
+            )
+        )
     refine = merged["refine"]
     if not isinstance(refine, bool):
         issues.append(Issue(f"{label}.refine", f"must be true or false, got {refine!r}"))
@@ -92,6 +103,7 @@ def normalize_generator(raw, where: str) -> dict:
     if issues:
         raise ValidationError(issues)
     return {
+        "algorithm": algorithm,
         "refine": refine,
         "min_angle": min_angle,
         "growth_rate": growth,
@@ -312,6 +324,7 @@ class UnstructuredEvaluator:
                 max_size=generator["max_size"],
                 sources=sources,
                 max_points=generator["max_points"],
+                algorithm=generator["algorithm"],
             )
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None

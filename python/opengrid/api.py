@@ -259,9 +259,12 @@ class Session:
         Either ``loops``: the outer loop (counter-clockwise) followed by holes (clockwise), each a
         list of connector names or ``(name, reversed)`` items; or ``connectors``: a set of
         connector names assembled into closed loops automatically (largest loop = outer).
-        ``generator``: ``{"min_angle": 25, "growth_rate": 1.2, "max_size": None, "sources": [],
-        "max_points": 2000000, "refine": True}``; sources are ``{"p0", "p1" (optional; line
-        source), "size", "radius"}``.
+        ``generator``: ``{"algorithm": "delaunay", "min_angle": 25, "growth_rate": 1.2,
+        "max_size": None, "sources": [], "max_points": 2000000, "refine": True}``; sources are
+        ``{"p0", "p1" (optional; line source), "size", "radius"}``. ``algorithm`` is
+        ``"delaunay"`` (constrained Delaunay + refinement) or ``"advancing_front"`` (near
+        equilateral triangles that follow the size field closely; ``refine`` and ``min_angle``
+        apply to the Delaunay mesher only).
         """
         if loops is None:
             if connectors is None:

@@ -388,6 +388,37 @@ segment, so derivative jumps at knots never cost accuracy.
   zones are deferred to Phase 5c (export refuses with a message), and Plot3D refuses
   unstructured domains.
 
+### Advancing front (Phase 5b)
+- **Where.** `unstructured/advancing_front.cpp` (own implementation; Lo 1985, Peraire et al.
+  1987), selected per domain with `generator.algorithm = "advancing_front"`. The default stays
+  `"delaunay"`, and projects saved before the option existed load as Delaunay.
+- **Front.** Shortest edge first. The ideal apex sits at equilateral height for the local
+  target size, which is clamped to [0.55, 1.3]× the edge length.
+- **Candidates.** Existing front nodes within 0.9 h of the ideal apex come first, then the
+  ideal point, then other nearby nodes; the first valid candidate is taken. All validity tests
+  use the exact predicates.
+- **Reuse radius.** It must exceed 1/1.3 ≈ 0.77. Neighbouring apexes lie about one edge length
+  from the ideal point, and the front only coarsens if it reuses them. Measured on a graded
+  cylinder: radius 0.8 gives median edge/target 0.48; 0.9 gives 1.01. A best-quality choice
+  among candidates (instead of first valid) did not coarsen either.
+- **Leftover edges.** Edges still open after retries go to the Delaunay mesher, with a warning.
+  None occurred in the tests or demos.
+- **Post-processing:**
+  - Lawson flips on a triangle-neighbour array (segments are never flipped).
+  - Three passes of guarded Laplacian smoothing: a move is undone if it lowers the smallest
+    angle around the node; sines are compared instead of angles.
+  - Flips again.
+- **Bug found during development.** A triangle closing against an existing front edge was
+  first rejected as overlapping that very edge, which stalled the front everywhere; fixed by
+  exempting the edges being closed.
+- **Shared speed-ups (both meshers):**
+  - The size field moved from a bucket ring search (O(r³) cell visits for points deep inside a
+    boundary loop) to a k-d tree branch and bound. The result is still the exact minimum, now
+    1–8 µs per query.
+  - `orient2d` has an allocation-free exact path for exact coordinate differences (Shewchuk
+    stage B); it handles the 16% of tests the filter cannot decide in near-equilateral meshes.
+  - Delaunay on a 6000-node disc: 2.8 s → 0.3 s, same mesh.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

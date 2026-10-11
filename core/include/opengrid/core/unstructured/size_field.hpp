@@ -5,8 +5,10 @@
 //             min_s ( size_s + g max(0, dist(x, source_s) - radius_s) ) over sources )
 // with g = growth_rate - 1: the size grows linearly away from the boundary (whose local size h_j
 // is the mean length of the segments at node j) and from point/line sources. The boundary term
-// is evaluated with a uniform bucket grid and an expanding ring search with an exact lower
-// bound, so it equals the brute-force minimum.
+// is evaluated by branch and bound on a k-d tree whose nodes store their bounding box and the
+// smallest h_j below them: a subtree is skipped when min h + g dist(x, box) cannot improve the
+// current minimum, so the result equals the brute-force minimum exactly (the minimum does not
+// depend on the visiting order) at O(log n) typical cost per query.
 #pragma once
 
 #include <array>
@@ -41,13 +43,17 @@ class SizeField {
   std::vector<double> sizes_;
   SizeFieldOptions options_;
   double gradient_;
-  double min_size_;
-  double origin_x_ = 0.0;
-  double origin_y_ = 0.0;
-  double cell_ = 1.0;
-  long nx_ = 1;
-  long ny_ = 1;
-  std::vector<std::vector<std::size_t>> buckets_;
+
+  struct Node {
+    std::array<double, 4> box{};  // xmin, ymin, xmax, ymax
+    double min_size = 0.0;
+    std::size_t begin = 0;  // range in points_ (reordered) for leaves
+    std::size_t end = 0;
+    std::size_t left = 0;  // child node indices; 0 for a leaf (the root is never a child)
+    std::size_t right = 0;
+  };
+  std::size_t build(std::size_t begin, std::size_t end, int depth);
+  std::vector<Node> nodes_;
 };
 
 }  // namespace og

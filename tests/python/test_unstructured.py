@@ -208,3 +208,56 @@ def test_zone_with_unstructured_domain():
     og = hybrid()
     og.create_zone("fluid", ["ring", "outside"])
     assert og.boundary_report().ok
+
+
+def test_advancing_front_conformity_area_and_quality():
+    og = annulus(generator={"algorithm": "advancing_front", "growth_rate": 1.15})
+    mesh = og.unstructured_mesh("ring")
+    q = og.domain_quality("ring")
+    assert q["area"].sum() == pytest.approx(polygon_area(61, 5) - polygon_area(41, 1), rel=1e-12)
+    assert q["area"].min() > 0
+    assert q["min_angle"].min() >= 25.0
+    assert q["min_angle"].mean() >= 45.0
+    counts = edge_counts(mesh["triangles"])
+    assert max(counts.values()) == 1
+    assert np.array_equal(mesh["points"][:60], og.connector_nodes("c-outer").points[:-1])
+    assert mesh["warnings"] == []
+    again = annulus(generator={"algorithm": "advancing_front", "growth_rate": 1.15})
+    assert np.array_equal(again.unstructured_mesh("ring")["triangles"], mesh["triangles"])
+
+
+def test_algorithm_switch_undo_and_validation(tmp_path):
+    og = annulus()
+    delaunay = og.unstructured_mesh("ring")["triangles"]
+    og.set_unstructured_generator("ring", algorithm="advancing_front")
+    front = og.unstructured_mesh("ring")["triangles"]
+    assert len(front) != len(delaunay) or not np.array_equal(front, delaunay)
+    og.undo()
+    assert np.array_equal(og.unstructured_mesh("ring")["triangles"], delaunay)
+    og.redo()
+    path = tmp_path / "af.ogp"
+    og.save(path)
+    loaded = opengrid.Session()
+    loaded.load(path)
+    assert loaded.entity("ring").params["generator"]["algorithm"] == "advancing_front"
+    assert np.array_equal(loaded.unstructured_mesh("ring")["triangles"], front)
+    with pytest.raises(opengrid.ValidationError, match="algorithm"):
+        og.set_unstructured_generator("ring", algorithm="paving")
+    # Projects written before the option existed default to the Delaunay mesher.
+    text = path.read_text().replace('"algorithm": "advancing_front", ', "")
+    assert '"algorithm"' not in text
+    old = tmp_path / "old.ogp"
+    old.write_text(text)
+    previous = opengrid.Session()
+    previous.load(old)
+    assert previous.entity("ring").params["generator"]["algorithm"] == "delaunay"
+
+
+def test_advancing_front_sources():
+    og = annulus(generator={"algorithm": "advancing_front"})
+    coarse = len(og.unstructured_mesh("ring")["triangles"])
+    og.set_unstructured_generator("ring", sources=[{"p0": (3, 0), "size": 0.05, "radius": 0.3}])
+    mesh = og.unstructured_mesh("ring")
+    assert len(mesh["triangles"]) > coarse
+    q = og.domain_quality("ring")
+    assert q["min_angle"].min() >= 20.7

@@ -1,5 +1,6 @@
 #include "opengrid/core/util/predicates.hpp"
 
+#include <array>
 #include <cmath>
 #include <ranges>
 #include <vector>
@@ -154,7 +155,75 @@ int sign(double v) {
   return 0;
 }
 
+int orient2d_general(const double* a, const double* b, const double* c);
+
+// Sign of (x1 + x0) - (y1 + y0) for two-component expansions, without allocation: the exact
+// four-component difference (Shewchuk's two_two_diff) is formed in place.
+int sign_two_two_diff(double x1, double x0, double y1, double y0) {
+  std::array<double, 4> h{};
+  std::size_t n = 0;
+  // grow_expansion of {x0, x1} by -y0, then by -y1 (zero elimination).
+  const std::array<double, 2> x = {x0, x1};
+  std::array<double, 4> g{};
+  std::size_t m = 0;
+  double q = -y0;
+  for (const double hv : x) {
+    double sum = 0.0;
+    double err = 0.0;
+    two_sum(q, hv, sum, err);
+    q = sum;
+    if (err != 0.0) {
+      g[m++] = err;
+    }
+  }
+  g[m++] = q;
+  q = -y1;
+  for (std::size_t k = 0; k < m; ++k) {
+    double sum = 0.0;
+    double err = 0.0;
+    two_sum(q, g[k], sum, err);
+    q = sum;
+    if (err != 0.0) {
+      h[n++] = err;
+    }
+  }
+  h[n++] = q;
+  for (std::size_t k = n; k > 0; --k) {
+    if (h[k - 1] != 0.0) {
+      return sign(h[k - 1]);
+    }
+  }
+  return 0;
+}
+
 int orient2d_exact(const double* a, const double* b, const double* c) {
+  // Common case: the coordinate differences are exact (Shewchuk's stage B with zero tails), so
+  // the determinant is an exact difference of two exact products.
+  double acx = 0.0;
+  double acx_tail = 0.0;
+  double bcy = 0.0;
+  double bcy_tail = 0.0;
+  double acy = 0.0;
+  double acy_tail = 0.0;
+  double bcx = 0.0;
+  double bcx_tail = 0.0;
+  two_diff(a[0], c[0], acx, acx_tail);
+  two_diff(b[1], c[1], bcy, bcy_tail);
+  two_diff(a[1], c[1], acy, acy_tail);
+  two_diff(b[0], c[0], bcx, bcx_tail);
+  if (acx_tail == 0.0 && bcy_tail == 0.0 && acy_tail == 0.0 && bcx_tail == 0.0) {
+    double l1 = 0.0;
+    double l0 = 0.0;
+    double r1 = 0.0;
+    double r0 = 0.0;
+    two_product(acx, bcy, l1, l0);
+    two_product(acy, bcx, r1, r0);
+    return sign_two_two_diff(l1, l0, r1, r0);
+  }
+  return orient2d_general(a, b, c);
+}
+
+int orient2d_general(const double* a, const double* b, const double* c) {
   const Expansion acx = difference(a[0], c[0]);
   const Expansion bcy = difference(b[1], c[1]);
   const Expansion acy = difference(a[1], c[1]);

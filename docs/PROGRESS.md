@@ -287,7 +287,7 @@
 - Gmsh 4.12 (/Applications/Gmsh.app, or $OPENGRID_GMSH) reads all exported meshes without errors or
   warnings, with matching node/element counts (tests skip if Gmsh is absent).
 
-## Phase 5a — Unstructured 2D: constrained Delaunay + refinement (2026-10-11) — awaiting review
+## Phase 5a — Unstructured 2D: constrained Delaunay + refinement (2026-10-11) — approved, committed 5f2838c
 - **C++**: exact predicates, Bowyer–Watson + Sloan recovery + Lawson flips + classification,
   Delaunay refinement (circumcenters / off-centers, boundary never split, diametral-lens
   rejection), size field (boundary spacing + growth, max size, point/line sources), triangle
@@ -330,3 +330,46 @@
   fixed); quality checks run away from such jumps.
 - **CGNS unstructured export**: Phase 5c.
 - **Not in 5a:** advancing front (5b); quads and smoothing (5c).
+
+## Phase 5b — Advancing-front triangulation (2026-10-11) — approved
+- **C++:** `advancing_front()` and `flip_to_delaunay()` (neighbour-array Lawson flips),
+  `smooth_interior()` (guarded Laplacian).
+- **Size field:** a k-d tree replaces the bucket grid.
+- **Predicates:** allocation-free exact `orient2d` path.
+- **Python / GUI:**
+  - `generator.algorithm` ("delaunay" | "advancing_front"), validated, saved, journaled, undoable.
+  - Older projects default to Delaunay.
+  - GUI algorithm combo; min angle and refine are disabled for the advancing front.
+- **Demo:** `examples/05b_advancing_front.py`, NACA 0012 in R = 20 c, growth 1.15.
+
+  | | Triangles | Min angle | Mean min angle | Under 30° |
+  |---|---|---|---|---|
+  | Delaunay | 9866 | 28.15° | 46.8° | 0.21% |
+  | Advancing front | 7490 | 29.15° | 52.5° | 0.11% |
+
+  - Hybrid O-ring + advancing front outside: 5958 triangles, min angle 31.31°, conforming.
+  - Gmsh 4.12 reads both files clean.
+  - Outputs: `05b_advancing_front.png`, `phase5b_main_window.png`, projects, journals.
+
+### Verified
+- `ctest`: 80/80 (`-Werror`); clang-tidy: 0 findings. Advancing-front tests:
+  - square with hole: exact area, ≥ 25°, mean ≥ 45°, no warnings;
+  - graded L-shape: ≥ 20.7°, deterministic;
+  - abrupt spacing jump: valid mesh;
+  - invalid input rejected;
+  - uniform disc: median size ratio 1 ± 0.05, ≥ 30°;
+  - flips: fan → locally Delaunay, area and orientation preserved, idempotent.
+- `pytest`: 206/206 (+4: advancing-front annulus, algorithm switch/undo/save/old projects,
+  sources, GUI combo).
+- Benchmarks (scratch probes, not in CI), advancing front vs Delaunay:
+
+  | Case | Triangles | Median size ratio | Min angle | Mean min angle |
+  |---|---|---|---|---|
+  | Graded cylinder | 6770 / 9058 | 1.01 / 0.91 | 32.8° / 28.1° | 51.4° / 47.0° |
+  | 1.1 M-triangle disc (2.4 s vs Delaunay 1.1 s) | — | 1.00 | 32.8° | 59.4° |
+
+### Not verified / known limitations
+- **No angle guarantee:** the advancing front's angles are measured, not proven. The
+  Delaunay-fallback path for leftover edges is covered by code but never triggered in the tests.
+- **Speed:** the advancing front is about 2× slower than Delaunay at 1 M triangles.
+- **Status label:** clipped in the GUI property panel (pre-existing).

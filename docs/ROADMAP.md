@@ -60,7 +60,14 @@ Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(ma
 - Exports: triangles in VTKHDF and Gmsh (CGNS unstructured zones later).
 - Demo: NACA 0012 in a circular farfield (triangles), and a hybrid structured O-ring + triangles.
 
-## Phase 5b — Advancing-front triangulation (alternative generator).
+## Phase 5b — Advancing-front triangulation (alternative generator)
+- Same input/output contract as the Delaunay mesher: boundary nodes preserved, every boundary
+  segment present exactly once, exact area, no inverted triangles, deterministic output.
+- Min angle ≥ 25° on uniform and graded test domains; median edge/target size within 5% of 1
+  on a uniform disc.
+- Never fails silently: an edge the front cannot close is handed to the Delaunay mesher, with
+  a warning.
+- Selectable per domain (`generator.algorithm`) in the API, projects, journal and GUI.
 
 ## Phase 5c — Quad-dominant / all-quad, smoothing and edge swapping; CGNS unstructured zones.
 

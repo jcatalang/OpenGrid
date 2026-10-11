@@ -34,6 +34,7 @@
 #include "opengrid/core/structured/elliptic.hpp"
 #include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/topo/connector_nodes.hpp"
+#include "opengrid/core/unstructured/advancing_front.hpp"
 #include "opengrid/core/unstructured/triangulate.hpp"
 #include "opengrid/core/version.hpp"
 
@@ -491,7 +492,10 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
              segments,
          bool refine, double min_angle, double growth_rate, std::optional<double> max_size,
          const std::vector<std::tuple<double, double, double, double, double, double>>& sources,
-         std::int64_t max_points) {
+         std::int64_t max_points, const std::string& algorithm) {
+        if (algorithm != "delaunay" && algorithm != "advancing_front") {
+          throw std::invalid_argument("algorithm must be 'delaunay' or 'advancing_front'");
+        }
         og::TriangulationInput input;
         for (std::size_t k = 0; k < points.shape(0); ++k) {
           input.points.push_back({points(k, 0), points(k, 1)});
@@ -511,7 +515,11 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         og::TriangleMesh mesh;
         {
           const nb::gil_scoped_release release;
-          mesh = og::triangulate_domain(input, options);
+          if (algorithm == "advancing_front") {
+            mesh = og::advancing_front(input, options);
+          } else {
+            mesh = og::triangulate_domain(input, options);
+          }
         }
         auto* xy = new double[mesh.points.size() * 2];
         for (std::size_t k = 0; k < mesh.points.size(); ++k) {
@@ -537,7 +545,10 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       nb::arg("points"), nb::arg("segments"), nb::arg("refine") = true, nb::arg("min_angle") = 25.0,
       nb::arg("growth_rate") = 1.2, nb::arg("max_size") = nb::none(),
       nb::arg("sources") = nb::list(), nb::arg("max_points") = 20'000'000,
-      "Constrained Delaunay triangulation + refinement; segments oriented with the domain on the "
+      nb::arg("algorithm") = "delaunay",
+      "Triangulation of a domain bounded by oriented segments (domain on the left): "
+      "algorithm='delaunay' (constrained Delaunay + refinement) or 'advancing_front' (refine and "
+      "min_angle are ignored). Segments oriented with the domain on the "
       "left. sources: (x0, y0, x1, y1, size, radius). Returns (points (n, 2), triangles (m, 3), "
       "rejected, warnings).");
 

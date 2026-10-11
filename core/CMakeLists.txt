@@ -5,6 +5,7 @@ add_library(og_core STATIC
   src/util/predicates.cpp
   src/unstructured/size_field.cpp
   src/unstructured/triangulate.cpp
+  src/unstructured/advancing_front.cpp
   src/dist/distribution.cpp
   src/dist/geometric.cpp
   src/dist/vinokur.cpp

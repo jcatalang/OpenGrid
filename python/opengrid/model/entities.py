@@ -14,7 +14,7 @@ from opengrid import _core
 from opengrid.validation import Issue, ValidationError
 
 DATABASE_KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs")
-KINDS = (*DATABASE_KINDS, "connector", "domain")
+KINDS = (*DATABASE_KINDS, "connector", "domain", "patch", "zone")
 SPLINE_METHODS = ("natural", "clamped", "catmull_rom")
 
 _SPLINE_ENUM = {
@@ -185,6 +185,14 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
     malformed values, and geometric errors reported by the C++ constructors). Connectors
     reference other entities and need the ``store``.
     """
+    if kind in ("patch", "zone"):
+        from opengrid.model.patches import normalize_patch, normalize_zone
+
+        if store is None:
+            raise ValueError(f"{kind} parameters need the store")
+        if kind == "patch":
+            return normalize_patch(raw, store, where)
+        return normalize_zone(raw, store, where)
     if kind == "domain":
         from opengrid.model.domains import normalize_domain
 
@@ -234,7 +242,7 @@ def build_geometry(kind: str, params: dict):
     """Construct the C++ curve for canonical parameters (None for a point)."""
     if kind == "point":
         return None
-    if kind in ("connector", "domain"):
+    if kind in ("connector", "domain", "patch", "zone"):
         raise ValueError(f"{kind}s have no single curve")
     if kind == "line":
         return _core.Line(params["p0"], params["p1"])

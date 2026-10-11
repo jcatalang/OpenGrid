@@ -28,6 +28,7 @@
 #include "opengrid/core/geom/line.hpp"
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
+#include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality2d.hpp"
 #include "opengrid/core/structured/elliptic.hpp"
 #include "opengrid/core/structured/tfi.hpp"
@@ -433,6 +434,53 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         return out;
       },
       nb::arg("grid"), "Per-cell quality metrics, each of shape (nj - 1, ni - 1).");
+
+  m.def("cgns_available", &og::cgns_available, "True if built with the CGNS library.");
+  m.def(
+      "write_cgns_structured_2d",
+      [](const std::string& path, const std::string& base_name,
+         const std::vector<std::tuple<std::string, int, int, std::vector<double>,
+                                      std::vector<double>, std::string>>& zones,
+         const std::vector<std::tuple<std::string, std::string>>& families,
+         const std::vector<std::tuple<int, std::string, std::string, std::array<int, 4>>>& bcs,
+         const std::vector<std::tuple<int, std::string, int, std::array<int, 4>, std::array<int, 4>,
+                                      std::array<int, 2>, std::optional<std::array<double, 2>>>>&
+             connections) {
+        std::vector<og::CgnsZone> z;
+        z.reserve(zones.size());
+        for (const auto& [name, ni, nj, x, y, family] : zones) {
+          z.push_back({name, ni, nj, x, y, family});
+        }
+        std::vector<og::CgnsFamily> f;
+        f.reserve(families.size());
+        for (const auto& [name, bc_type] : families) {
+          f.push_back({name, bc_type});
+        }
+        std::vector<og::CgnsBoundary> b;
+        b.reserve(bcs.size());
+        for (const auto& [zone, name, family, range] : bcs) {
+          b.push_back({zone, name, family, range});
+        }
+        std::vector<og::CgnsConnection> c;
+        c.reserve(connections.size());
+        for (const auto& [zone, name, donor, range, donor_range, transform, translation] :
+             connections) {
+          og::CgnsConnection connection{zone, name, donor, range, donor_range, transform};
+          if (translation) {
+            connection.periodic = true;
+            connection.translation = *translation;
+          }
+          c.push_back(connection);
+        }
+        const nb::gil_scoped_release release;
+        og::write_cgns_structured_2d(path, base_name, z, f, b, c);
+      },
+      nb::arg("path"), nb::arg("base_name"), nb::arg("zones"), nb::arg("families"),
+      nb::arg("boundaries"), nb::arg("connections"),
+      "Write a structured 2D CGNS file. zones: (name, ni, nj, x, y, family); families: (name, "
+      "bc_type or ''); boundaries: (zone index, name, family, (imin, jmin, imax, jmax)); "
+      "connections: (zone, name, donor zone, range, donor range, transform, periodic translation "
+      "or None). 1-based ranges.");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

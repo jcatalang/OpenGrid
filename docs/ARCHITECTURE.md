@@ -187,9 +187,9 @@ UTF-8 JSON, describing intent, not meshes. Keys are sorted and floats written wi
      "size_field": {}}
   ],
   "blocks": [],
-  "patches": [{"name": "wall", "type": "wall",
-               "members": [{"kind": "connector", "id": 10}]}],
-  "zones": [{"name": "fluid", "members": [20, 21]}],
+  "patches": [{"id": 30, "name": "wall", "type": "patch", "patch_type": "wall",
+               "members": [{"connector": 10}]}],
+  "zones": [{"id": 31, "name": "fluid", "type": "zone", "members": [{"domain": 20}]}],
   "settings": {}
 }
 ```
@@ -301,6 +301,50 @@ segment, so derivative jumps at knots never cost accuracy.
   String field data must be variable-length *ASCII*; VTK fails to read UTF-8 there. **meshio
   5.3.5 has no VTKHDF (or Plot3D) reader**, so read-back is validated with VTK's
   `vtkHDFReader` plus h5py layout checks rather than with meshio as the spec asks.
+
+### Patches, zones and solver-ready export (Phase 4)
+- **Patch** entity: `patch_type` (wall, inlet, outlet, symmetry, farfield, periodic,
+  interface, user) and member connectors. **Zone** entity: member domains. Both are stored in
+  the `.ogp` `patches`/`zones` sections and journaled by name. *Bug found and fixed:* a patch
+  parameter was first called `type` and overwrote the record's entity `type` on save. The
+  writer now refuses any parameter that collides with `id`/`name`/`type`.
+- **Topology.** Every use of a connector in a domain edge is recorded with its index range.
+  - One use: a boundary connector, which must be in exactly one patch.
+  - Two uses: an interface, detected automatically, including cuts within one domain (O- and
+    C-grids). Interfaces must not be in a patch.
+  - More than two uses: non-manifold (an error).
+  - Each domain may be in at most one zone. Unzoned domains form an implicit zone `default`
+    in every export (the name is then reserved).
+- **1-to-1 connectivity** comes from the matched connector end nodes. PointRange is sorted,
+  PointRangeDonor holds the images of its ends, and the transform maps the running axes
+  (signed) and the face-normal axes (+ for min↔max faces, − for faces of the same kind).
+  Examples: O-cut i_min↔i_max gives [1, 2]; the C-grid wake cut on j_min↔j_min gives [−1, −2].
+- **Exports refuse to run** while the boundary does not validate (CGNS, Gmsh, and VTKHDF when
+  patches or zones exist). The issue list names each connector, domain and patch involved.
+- **CGNS** (C++ on the CGNS mid-level library 4.5, optional via `OG_WITH_CGNS`; zlib-like
+  license):
+  - One base (CellDimension 2, PhysicalDimension 2) with DataClass Dimensional and SI units.
+  - Coordinates carry their dimensional exponents.
+  - One structured zone per domain, with a zone FamilyName for its OpenGrid zone.
+  - One Family_t per patch with FamilyBC (wall → BCWall, inlet → BCInflow, outlet →
+    BCOutflow, symmetry → BCSymmetryPlane, farfield → BCFarfield, others →
+    BCTypeUserDefined). One BC_t (FamilySpecified + FamilyName) per boundary connector.
+  - GridConnectivity1to1_t in both directions for every interface.
+  - Names are limited to 32 characters; longer ones are reported, not truncated.
+  - `cgnscheck` reports no warnings on the demo files.
+  - Build note: the CGNS CMake package refers to HDF5's imported target, so HDF5's config is
+    loaded first; the conda `zlib` package is needed for the libz link.
+- **Gmsh MSH 4.1** (Python): one surface entity and 2D physical group per zone, one curve
+  entity and 1D physical group per patch. All nodes are merged and listed in one block. Read
+  back with meshio, the physical groups and face counts are verified.
+- **VTKHDF with patches**: a PartitionedDataSetCollection (format 2.1).
+  - One quad block per zone (`zone_id`, `block_id`, cell indices, quality) and one line block
+    per patch (`patch_id`), grouped in the Assembly as Volume/<zone> and Patches/<patch>
+    (soft links).
+  - *Found while testing:* VTK's reader iterates links in creation order and hangs on files
+    whose groups do not track it. All VTKHDF groups are now created with `track_order=True`,
+    as VTK's own writer does.
+  - Without any patch or zone, the Phase 3 single UnstructuredGrid is still written.
 
 ## 7. 3D tet backend decision
 

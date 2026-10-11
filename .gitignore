@@ -1,22 +1,22 @@
 # build
-build/
-_skbuild/
-*.egg-info/
-dist/
-*.so
-*.dylib
-compile_commands.json
+# editors / OS
+# large generated outputs (small demo outputs are committed)
 # python
-__pycache__/
+*.dylib
+*.egg-info/
 *.pyc
+*.so
+.DS_Store
+.idea/
 .pytest_cache/
 .ruff_cache/
-# editors / OS
-.DS_Store
 .vscode/
-.idea/
-# large generated outputs (small demo outputs are committed)
-examples/output/*.vtkhdf
+__pycache__/
+_skbuild/
+build/
+compile_commands.json
+dist/
 examples/output/*.cgns
 examples/output/*.msh
+examples/output/*.vtkhdf
 examples/output/*.xyz

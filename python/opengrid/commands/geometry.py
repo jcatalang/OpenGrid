@@ -38,6 +38,17 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
             edges.append(tuple(items))
         result["edges"] = tuple(edges)
         return result
+    if kind in ("patch", "zone"):
+        key = "connector"
+        if kind == "zone":
+            key = "domain"
+        result = dict(params)
+        result["members"] = tuple(store.get(item[key]).name for item in params["members"])
+        if kind == "patch" and params.get("periodic") is not None:
+            periodic = dict(params["periodic"])
+            periodic["partner"] = store.get(periodic["partner"]).name
+            result["periodic"] = periodic
+        return result
     return params
 
 

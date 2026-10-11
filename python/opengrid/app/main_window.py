@@ -20,6 +20,12 @@ from PySide6.QtWidgets import (
 
 import opengrid
 from opengrid.api import Session
+from opengrid.app.boundary_dock import (
+    INTERFACE_COLOR,
+    PATCH_PALETTE,
+    UNASSIGNED_COLOR,
+    BoundaryDock,
+)
 from opengrid.app.console import PythonConsole
 from opengrid.app.log_panel import LogPanel
 from opengrid.app.model_tree import ModelTree
@@ -80,7 +86,12 @@ class MainWindow(QMainWindow):
         self.smoother_dock_widget = self._add_dock(
             "Smoother", self.smoother_dock, Qt.DockWidgetArea.RightDockWidgetArea
         )
+        self.boundary_dock = BoundaryDock()
+        self.boundary_dock_widget = self._add_dock(
+            "Boundary", self.boundary_dock, Qt.DockWidgetArea.RightDockWidgetArea
+        )
         self.tabifyDockWidget(quality_dock, self.smoother_dock_widget)
+        self.tabifyDockWidget(quality_dock, self.boundary_dock_widget)
         quality_dock.raise_()
         self.quality_dock_widget = quality_dock
         self.tabifyDockWidget(log_dock, console_dock)
@@ -98,6 +109,11 @@ class MainWindow(QMainWindow):
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
         self.quality_dock.metric_changed.connect(self._on_metric_changed)
         self.quality_dock.locate_requested.connect(self.show_worst_cell)
+        self.boundary_dock.patch_requested.connect(self.create_patch_from_selection)
+        self.boundary_dock.add_requested.connect(self.add_selection_to_patch)
+        self.boundary_dock.remove_requested.connect(self.remove_selection_from_patch)
+        self.boundary_dock.zone_requested.connect(self.create_zone_from_selection)
+        self.boundary_dock.validate_requested.connect(self.validate_boundary)
         session.commands.add_listener(self._on_model_changed)
 
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
@@ -197,6 +213,11 @@ class MainWindow(QMainWindow):
         self.quality_action = QAction("Colour domains by quality", self)
         self.quality_action.setCheckable(True)
         self.quality_action.toggled.connect(self.set_quality_colouring)
+        self.patch_color_action = QAction("Colour connectors by patch", self)
+        self.patch_color_action.setCheckable(True)
+        self.patch_color_action.toggled.connect(self.set_patch_colouring)
+        self.export_cgns_action = self._action("Export CGNS…", self.export_cgns)
+        self.export_gmsh_action = self._action("Export Gmsh…", self.export_gmsh)
         self.export_vtkhdf_action = self._action("Export VTKHDF…", self.export_vtkhdf)
         self.export_plot3d_action = self._action("Export Plot3D…", self.export_plot3d)
 
@@ -231,6 +252,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.import_csv_action)
         file_menu.addSeparator()
         file_menu.addAction(self.export_vtkhdf_action)
+        file_menu.addAction(self.export_cgns_action)
+        file_menu.addAction(self.export_gmsh_action)
         file_menu.addAction(self.export_plot3d_action)
         file_menu.addSeparator()
         file_menu.addAction(self.save_journal_action)
@@ -261,6 +284,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.nodes_action)
         view_menu.addAction(self.threshold_action)
         view_menu.addAction(self.quality_action)
+        view_menu.addAction(self.patch_color_action)
 
     def _create_toolbars(self) -> None:
         toolbar = QToolBar("Tools", self)
@@ -430,6 +454,9 @@ class MainWindow(QMainWindow):
             self.scene.update_entities(change.ids())
             self._report_connector_warnings(change.ids())
         self.model_tree.populate(self.session)
+        if self.scene.patch_colors is not None:
+            self.scene.patch_colors = self._patch_colors()
+            self.scene.update_entities([])
         self.set_selection(self.selected_ids)
         self._update_edit_actions()
         if not had_geometry and len(self.session.store) > 0:
@@ -616,13 +643,7 @@ class MainWindow(QMainWindow):
                 return None
         summary = self._run(lambda: self.session.export_vtkhdf(path))
         if summary:
-            log.info(
-                "exported %s: %d cells, %d points (%d merged)",
-                path,
-                summary["cells"],
-                summary["points"],
-                summary["points_before_merge"] - summary["points"],
-            )
+            log.info("exported %s: %s", path, summary)
         return summary
 
     def export_plot3d(self, path: str | None = None, binary: bool = True) -> bool:
@@ -638,6 +659,99 @@ class MainWindow(QMainWindow):
         self._run(lambda: self.session.export_plot3d(path, binary=binary))
         log.info("exported %s", path)
         return True
+
+    # ------------------------------------------------------- patches and zones
+    def _selected_of_kind(self, kind: str) -> list[str]:
+        return [n for n in self.selected_names() if self.session.store.get(n).kind == kind]
+
+    def create_patch_from_selection(self, name: str, patch_type: str = "wall") -> str | None:
+        connectors = self._selected_of_kind("connector")
+        if not name:
+            self.statusBar().showMessage("Enter a patch name", 5000)
+            return None
+        created = self._run(lambda: self.session.create_patch(name, patch_type, connectors))
+        if created:
+            log.info(
+                "created patch %s (%s) with %d connector(s)", created, patch_type, len(connectors)
+            )
+            self.validate_boundary()
+        return created
+
+    def add_selection_to_patch(self, name: str) -> bool:
+        connectors = self._selected_of_kind("connector")
+        if not connectors:
+            self.statusBar().showMessage("Select connectors first", 5000)
+            return False
+        done = self._run(lambda: self.session.add_to_patch(name, connectors))
+        self.validate_boundary()
+        return bool(done)
+
+    def remove_selection_from_patch(self, name: str) -> bool:
+        connectors = self._selected_of_kind("connector")
+        done = self._run(lambda: self.session.remove_from_patch(name, connectors))
+        self.validate_boundary()
+        return bool(done)
+
+    def create_zone_from_selection(self, name: str) -> str | None:
+        domains = self._selected_of_kind("domain")
+        if not name:
+            self.statusBar().showMessage("Enter a zone name", 5000)
+            return None
+        created = self._run(lambda: self.session.create_zone(name, domains))
+        if created:
+            log.info("created zone %s with %d domain(s)", created, len(domains))
+            self.validate_boundary()
+        return created
+
+    def validate_boundary(self):
+        report = self.session.boundary_report()
+        self.boundary_dock.show_report(report)
+        if self.scene.patch_colors is not None:
+            self.scene.patch_colors = self._patch_colors(report)
+            self.scene.rebuild()
+        return report
+
+    def _patch_colors(self, report=None) -> dict[int, str]:
+        topology = self.session.topology()
+        colors = {}
+        for connector_id, uses in topology.uses.items():
+            if len(uses) == 2:
+                colors[connector_id] = INTERFACE_COLOR
+            elif len(uses) == 1:
+                colors[connector_id] = UNASSIGNED_COLOR
+        for index, patch in enumerate(self.session.store.entities("patch")):
+            for item in patch.params["members"]:
+                colors[item["connector"]] = PATCH_PALETTE[index % len(PATCH_PALETTE)]
+        return colors
+
+    def set_patch_colouring(self, enabled: bool) -> None:
+        if enabled:
+            self.scene.patch_colors = self._patch_colors()
+        else:
+            self.scene.patch_colors = None
+        self.scene.rebuild()
+
+    def export_cgns(self, path: str | None = None) -> dict | None:
+        if path is None:
+            path, _filter = QFileDialog.getSaveFileName(self, "Export CGNS", "", "CGNS (*.cgns)")
+            if not path:
+                return None
+        summary = self._run(lambda: self.session.export_cgns(path))
+        if summary:
+            log.info("exported %s: %s", path, summary)
+        self.validate_boundary()
+        return summary
+
+    def export_gmsh(self, path: str | None = None) -> dict | None:
+        if path is None:
+            path, _filter = QFileDialog.getSaveFileName(self, "Export Gmsh", "", "Gmsh (*.msh)")
+            if not path:
+                return None
+        summary = self._run(lambda: self.session.export_gmsh(path))
+        if summary:
+            log.info("exported %s: %s", path, summary)
+        self.validate_boundary()
+        return summary
 
     # -------------------------------------------------------------- connectors
     def _selected_curves(self) -> list[str]:

@@ -304,14 +304,142 @@ class Session:
             return [domains]
         return list(domains)
 
+    # ------------------------------------------------------ patches and zones
+    def create_patch(
+        self, name: str | None = None, patch_type: str = "wall", members=(), periodic=None
+    ) -> str:
+        """Named boundary-condition group of connectors; ``patch_type`` in PATCH_TYPES
+        (opengrid.model.patches). ``periodic`` is normally set with :meth:`pair_periodic`."""
+        params = {"patch_type": patch_type, "members": members, "periodic": periodic}
+        return self._create("patch", params, name)
+
+    def pair_periodic(
+        self,
+        source: str,
+        target: str,
+        translation=None,
+        rotation_angle: float = 0.0,
+        rotation_center=(0.0, 0.0, 0.0),
+    ) -> str:
+        """Pair two periodic patches: target = R(angle)(source - center) + center + translation.
+
+        Without a translation and with no rotation, the translation that maps the centroid of
+        the source nodes onto that of the target is computed and stored explicitly.
+        """
+        from opengrid.model.periodic import automatic_translation
+
+        if translation is None:
+            if rotation_angle != 0.0:
+                raise ValueError("give the translation explicitly together with a rotation")
+            translation = automatic_translation(self, self.entity(source), self.entity(target))
+        periodic = {
+            "partner": target,
+            "rotation_center": rotation_center,
+            "rotation_angle": rotation_angle,
+            "translation": translation,
+        }
+        return self.modify(source, periodic=periodic)
+
+    def unpair_periodic(self, source: str) -> str:
+        return self.modify(source, periodic=None)
+
+    def set_patch_type(self, name: str, patch_type: str) -> str:
+        return self.modify(name, patch_type=patch_type)
+
+    def add_to_patch(self, name: str, connectors) -> str:
+        return self._change_members(name, "connector", connectors, add=True)
+
+    def remove_from_patch(self, name: str, connectors) -> str:
+        return self._change_members(name, "connector", connectors, add=False)
+
+    def create_zone(self, name: str | None = None, members=()) -> str:
+        """Named group of domains (volume tag)."""
+        return self._create("zone", {"members": members}, name)
+
+    def add_to_zone(self, name: str, domains) -> str:
+        return self._change_members(name, "domain", domains, add=True)
+
+    def remove_from_zone(self, name: str, domains) -> str:
+        return self._change_members(name, "domain", domains, add=False)
+
+    def _change_members(self, name: str, key: str, refs, add: bool) -> str:
+        if isinstance(refs, (str, int)):
+            refs = [refs]
+        current = [self.store.get(item[key]).name for item in self.entity(name).params["members"]]
+        names = [self.store.get(ref).name for ref in refs]
+        if add:
+            members = current + [n for n in names if n not in current]
+        else:
+            missing = [n for n in names if n not in current]
+            if missing:
+                raise ValidationError([Issue(name, f"does not contain {', '.join(missing)}")])
+            members = [n for n in current if n not in names]
+        return self.modify(name, members=members)
+
+    def topology(self):
+        from opengrid.model.topology import analyze
+
+        return analyze(self.store, self)
+
+    def boundary_report(self):
+        """Boundary connectors, interfaces (detected automatically), unused connectors, boundary
+        connectors without a patch and all problems (opengrid.model.topology.BoundaryReport)."""
+        from opengrid.model.topology import validate_patches
+
+        return validate_patches(self.store, self.topology(), self)
+
+    def unassigned_boundary_connectors(self) -> list[str]:
+        return self.boundary_report().unassigned
+
+    def _require_valid_boundary(self):
+        report = self.boundary_report()
+        if not report.ok:
+            raise ValidationError(report.issues)
+        return report
+
     def export_vtkhdf(self, path, domains=None) -> dict:
-        """Write domains to a VTKHDF UnstructuredGrid (quads, shared points merged) with
-        ``block_id``, cell indices and all quality metrics as cell data."""
-        blocks = []
-        for name in self._export_names(domains):
-            grid = self.domain_grid(name)
-            blocks.append({"name": name, "grid": grid, "cell_data": _core.quality_2d(grid)})
-        return write_vtkhdf(path, blocks)
+        """Write domains to VTKHDF.
+
+        Without patches and zones: one UnstructuredGrid (quads, shared points merged) with
+        ``block_id``, cell indices and all quality metrics as cell data. With patches or zones
+        (the boundary must then validate): a PartitionedDataSetCollection with one quad block
+        per zone (``zone_id``, ``block_id``, quality) and one line block per patch
+        (``patch_id``), grouped in the assembly as Volume/<zone> and Patches/<patch>.
+        """
+        if not self.store.entities("patch") and not self.store.entities("zone"):
+            blocks = []
+            for name in self._export_names(domains):
+                grid = self.domain_grid(name)
+                blocks.append({"name": name, "grid": grid, "cell_data": _core.quality_2d(grid)})
+            return write_vtkhdf(path, blocks)
+        if domains is not None:
+            raise ValueError("with patches or zones the whole model is exported (domains=None)")
+        from opengrid.io.assembly import assemble
+        from opengrid.io.vtkhdf import write_vtkhdf_collection
+
+        report = self._require_valid_boundary()
+        return write_vtkhdf_collection(
+            path, assemble(self, self.topology(), periodic=report.periodic)
+        )
+
+    def export_gmsh(self, path) -> dict:
+        """Gmsh MSH 4.1 with physical groups (zones: 2D, patches: 1D); the boundary must
+        validate."""
+        from opengrid.io.assembly import assemble
+        from opengrid.io.gmsh import write_gmsh
+
+        report = self._require_valid_boundary()
+        return write_gmsh(
+            path, assemble(self, self.topology(), quality=False, periodic=report.periodic)
+        )
+
+    def export_cgns(self, path, base_name: str = "OpenGrid") -> dict:
+        """Structured CGNS: zones, families, BCs per patch and 1-to-1 connectivity; the boundary
+        must validate."""
+        from opengrid.io.cgns import write_cgns
+
+        report = self._require_valid_boundary()
+        return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
     def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:
         """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1)."""

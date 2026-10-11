@@ -31,6 +31,7 @@ from opengrid.model.domains import (
     SOLVERS,
 )
 from opengrid.model.entities import SPLINE_METHODS
+from opengrid.model.patches import PATCH_TYPES
 from opengrid.validation import ValidationError
 
 # Field editors per kind: (parameter, editor type). Types: vec3, opt_vec3, number, integer,
@@ -420,6 +421,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind in ("patch", "zone"):
+            self._group_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         for field, kind in FIELDS[entity.kind]:
             editor = self._make_editor(kind, entity.params[field])
             self._form.addRow(field, editor)
@@ -429,6 +435,21 @@ class PropertyPanel(QWidget):
             self._form.addRow("length", QLabel(f"{length:.10g}"))
         self.apply_button.setEnabled(True)
         self.revert_button.setEnabled(True)
+
+    def _group_rows(self, entity) -> None:
+        key = "domain"
+        if entity.kind == "patch":
+            key = "connector"
+            combo = QComboBox()
+            combo.addItems(list(PATCH_TYPES))
+            combo.setCurrentText(entity.params["patch_type"])
+            self._form.addRow("patch type", combo)
+            self._editors["patch_type"] = ("patch_type", combo)
+        names = [self.session.store.get(item[key]).name for item in entity.params["members"]]
+        members = QPlainTextEdit("\n".join(names))
+        members.setPlaceholderText(f"one {key} name per line")
+        self._form.addRow("members", members)
+        self._editors["members"] = (f"members:{key}", members)
 
     def _domain_rows(self, entity) -> None:
         lines = []
@@ -569,6 +590,17 @@ class PropertyPanel(QWidget):
         return new_name, changes
 
     def _read_editor(self, field: str, kind: str, editor: QWidget):
+        if kind == "patch_type":
+            return editor.currentText()
+        if kind.startswith("members:"):
+            key = kind.split(":", 1)[1]
+            names = [line.strip() for line in editor.toPlainText().splitlines() if line.strip()]
+            members = []
+            for name in names:
+                if name not in self.session.store:
+                    raise ParseError(f"members: no entity {name!r}")
+                members.append({key: self.session.store.get(name).id})
+            return tuple(members)
         if kind == "generator":
             return editor.value()
         if kind == "dimension":

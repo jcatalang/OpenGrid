@@ -221,3 +221,68 @@
 - Phase 1/2 bugs found and fixed while doing this phase:
   - With connectors present, snapping in the creation tools crashed (regression test added).
   - Line SOR was unstable with explicit sources.
+
+## Phase 4 — Patches, zones, solver-ready export (2026-10-11) — awaiting review
+- **Model**:
+  - `patch` and `zone` entities: validation, dependency protection, journal and `.ogp`
+    sections.
+  - Topology analysis and boundary validator: unassigned or multiply-assigned boundary
+    connectors, interfaces placed in patches, non-manifold connectors, domains in several
+    zones.
+  - Interfaces and cuts are detected automatically; 1-to-1 ranges and transforms are computed.
+- **API**: `create_patch`, `set_patch_type`, `add_to_patch`, `remove_from_patch`,
+  `create_zone`, `add_to_zone`, `remove_from_zone`, `boundary_report`,
+  `unassigned_boundary_connectors`, `export_cgns`, `export_gmsh`, and `export_vtkhdf` (now a
+  PartitionedDataSetCollection with patch blocks).
+- **C++**: CGNS structured writer (optional build), checked with `cgnscheck`.
+- **GUI**:
+  - Patches and zones in the tree.
+  - Property-panel editing of patch type and members, and of zone members.
+  - Boundary dock: create patches/zones from the selection, add/remove, validate, with a
+    summary plus an issue and interface list.
+  - "Colour connectors by patch" (patch palette, unassigned in red, interfaces in grey; domain
+    wireframes faded).
+  - File → Export CGNS / Gmsh.
+- **Demo**: `examples/04_solver_ready.py`, run on the backward-facing step (3 blocks, 2
+  interfaces, 2 zones) and the NACA 0012 C-grid (wake cut). Outputs: CGNS, Gmsh (git-ignored),
+  VTKHDF (git-ignored), `.ogp`, journals, and `phase4_main_window.png`.
+
+### Verified
+- `ctest`: 63/63 (`-Werror`); clang-tidy: 0 findings.
+- `pytest`: 182/182. Covered:
+  - Boundary report and interfaces (step, O-grid cut, C-grid cut), validator messages, the
+    non-manifold case.
+  - Entity dependency/rename/undo, round trip and replay.
+  - Gmsh read by meshio: correct physical group names, tags and dimensions; patch face counts
+    and zone cell counts exact; conforming node count.
+  - VTKHDF read by `vtkHDFReader`: block names, assembly, per-block cell counts, zone ids.
+  - CGNS: `cgnscheck` with no warnings or errors; zones, families and BC counts read back with
+    h5py; transforms [1, 2] (step, O-cut) and [−1, −2] (C-wake); PointRange/PointRangeDonor
+    end points coincide in the grid; 32-character name limit.
+  - GUI patch workflow, invalid export reported, patch colouring, property-panel editing.
+- Demo: for both cases the patch face counts agree between the model, Gmsh/meshio and
+  VTKHDF/VTK, cgnscheck is clean, and the journals replay.
+
+### Not verified / known limitations
+- **meshio cannot read CGNS here** (no reader in 5.3.5). CGNS is checked with cgnscheck and
+  h5py instead.
+- **No solver was run** on the exported files.
+- **Patches hold whole connectors.** A connector shared by a wall and a symmetry boundary has
+  to be split (connector splitting is not implemented yet).
+- **CGNS 2D** is written with PhysicalDimension 2 (x, y only). Some solvers expect 3D data with
+  one cell in z (the Phase 7 extrusion will provide that).
+- **Gmsh** classifies all nodes in one surface entity block; meshio reads it, but Gmsh itself
+  was not run (not installed).
+- CI not run (environment.yml now also lists `zlib`).
+
+### Phase 4 addendum (after review): periodic pairing and Gmsh check
+- Periodic patches are paired from one side (`og.pair_periodic(source, target, translation=None |
+  vector, rotation_angle, rotation_center)`; automatic centroid translation when none given).
+  Validator: each periodic patch paired exactly once, node-by-node connector matching (either
+  direction), mismatch distances reported.
+- Exports: CGNS periodic GridConnectivity1to1 (both directions, inverse translation, exponents;
+  cgnscheck clean; rotational periodicity rejected in 2D); Gmsh `$Periodic` (affine + node
+  correspondences, verified via meshio); VTKHDF field data `periodic_partner` / `periodic_affine` /
+  `periodic_source`. Project load handles pairings in a second pass.
+- Gmsh 4.12 (/Applications/Gmsh.app, or $OPENGRID_GMSH) reads all exported meshes without errors or
+  warnings, with matching node/element counts (tests skip if Gmsh is absent).

@@ -15,14 +15,24 @@ FORMAT = "opengrid-project"
 VERSION = 1
 
 # Sections reserved for later phases; written empty so the schema is stable.
-_FUTURE_SECTIONS = ("blocks", "patches", "zones")
-_SECTIONS = {"database": DATABASE_KINDS, "connectors": ("connector",), "domains": ("domain",)}
+_FUTURE_SECTIONS = ("blocks",)
+_SECTIONS = {
+    "database": DATABASE_KINDS,
+    "connectors": ("connector",),
+    "domains": ("domain",),
+    "patches": ("patch",),
+    "zones": ("zone",),
+}
 _RECORD_KEYS = ("id", "name", "type")
 
 
 def _record(entity: Entity) -> dict:
     record = {"id": entity.id, "name": entity.name, "type": entity.kind}
     for key, value in entity.params.items():
+        if key in record:
+            # Would silently overwrite the record header (a Phase 4 bug stored the patch type
+            # under "type"); parameters must never use the reserved keys.
+            raise ValueError(f"{entity.kind} parameter {key!r} clashes with a project record key")
         record[key] = value
     return record
 
@@ -123,12 +133,19 @@ def from_json(text: str, source: str = "<project>") -> Store:
     if issues:
         raise ValidationError(issues)
 
-    # Database entities first; connectors are validated against them.
+    # Database entities first; connectors are validated against them. Periodic pairings refer
+    # to other patches of the same section, so patches are added without them first and the
+    # pairings applied in a second pass.
     store = Store()
+    deferred = []
     for section in _SECTIONS:
         entities = []
         for _where, record in records[section]:
             raw = {key: value for key, value in record.items() if key not in _RECORD_KEYS}
+            if record["type"] == "patch" and raw.get("periodic") is not None:
+                deferred.append((record, raw))
+                raw = dict(raw)
+                raw["periodic"] = None
             try:
                 params = normalize_params(record["type"], raw, f"{source}: {record['name']}", store)
             except ValidationError as error:
@@ -142,6 +159,18 @@ def from_json(text: str, source: str = "<project>") -> Store:
             store.next_id = entity.id
             store.add(entity.kind, entity.params, entity.name)
         store.commit()
+    if deferred:
+        store.begin()
+        for record, raw in deferred:
+            try:
+                params = normalize_params("patch", raw, f"{source}: {record['name']}", store)
+            except ValidationError as error:
+                issues.extend(error.issues)
+                continue
+            store.update(record["id"], params=params)
+        store.commit()
+        if issues:
+            raise ValidationError(issues)
     store.next_id = next_id
     store.name_counters = dict(data.get("name_counters", {}))
     return store

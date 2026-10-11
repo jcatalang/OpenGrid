@@ -37,6 +37,7 @@ class Scene:
         self.color_by_stretching = True
         self.show_nodes = True
         self.quality_metric: str | None = None  # colour domains by this metric when set
+        self.patch_colors: dict[int, str] | None = None  # connector id -> colour (patch mode)
 
     # --------------------------------------------------------------- rendering
     def rebuild(self) -> None:
@@ -115,8 +116,10 @@ class Scene:
         selected = entity.id in self.selected_ids
         line_name = f"entity-{entity.id}"
         mesh = _polyline(nodes.points)
-        if selected or not self.color_by_stretching:
+        if selected or not self.color_by_stretching or self.patch_colors is not None:
             color = CONNECTOR_COLOR
+            if self.patch_colors is not None:
+                color = self.patch_colors.get(entity.id, CONNECTOR_COLOR)
             if selected:
                 color = SELECTED_COLOR
             self.plotter.add_mesh(
@@ -182,11 +185,15 @@ class Scene:
             if selected:
                 color = SELECTED_COLOR
                 width = 1.5
+            opacity = 1.0
+            if self.patch_colors is not None:
+                opacity = 0.25  # let the patch colours of the boundary connectors stand out
             self.plotter.add_mesh(
                 mesh,
                 style="wireframe",
                 color=color,
                 line_width=width,
+                opacity=opacity,
                 name=name,
                 pickable=False,
                 reset_camera=False,
@@ -227,6 +234,8 @@ class Scene:
         if entity.kind == "domain":
             self._add_domain_actor(entity)
             return
+        if entity.kind not in CURVE_KINDS and entity.kind != "point":
+            return  # patches and zones are shown through their members
         if entity.kind == "point":
             color = POINT_COLOR
             if selected:

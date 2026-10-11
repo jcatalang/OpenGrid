@@ -63,18 +63,28 @@ class ModelTree(QTreeWidget):
         database = self._category_items["Database"]
         connectors = self._category_items["Connectors"]
         domains = self._category_items["Domains"]
-        for category in (database, connectors, domains):
+        patches = self._category_items["Patches"]
+        zones = self._category_items["Zones"]
+        for category in (database, connectors, domains, patches, zones):
             category.takeChildren()
         for entity in session.store:
             if entity.kind == "connector":
                 item = QTreeWidgetItem(connectors, [entity.name, connector_info(session, entity)])
             elif entity.kind == "domain":
                 item = QTreeWidgetItem(domains, [entity.name, domain_info(session, entity)])
+            elif entity.kind == "patch":
+                count = len(entity.params["members"])
+                item = QTreeWidgetItem(
+                    patches, [entity.name, f"{entity.params['patch_type']}, {count}"]
+                )
+            elif entity.kind == "zone":
+                count = len(entity.params["members"])
+                item = QTreeWidgetItem(zones, [entity.name, f"{count} domain(s)"])
             else:
                 item = QTreeWidgetItem(database, [entity.name, entity.kind])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
-        for category in (database, connectors, domains):
+        for category in (database, connectors, domains, patches, zones):
             category.setText(1, f"{category.childCount()}")
         self.resizeColumnToContents(0)
         self.blockSignals(False)

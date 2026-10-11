@@ -18,6 +18,7 @@ dependencies:
   - eigen
   - hdf5
   - cgns
+  - zlib  # development link needed by the CGNS CMake config
   # GUI / visualization
   - pyside6>=6.6
   - vtk>=9.3

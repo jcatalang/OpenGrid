@@ -1,0 +1,42 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "opengrid"
+version = "0.0.1"
+description = "Interactive structured / unstructured / hybrid mesh generator"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6", "vtk>=9.3", "pyvista>=0.43", "pyvistaqt>=0.11", "qtpy"]
+test = ["pytest", "pytest-qt", "meshio>=5.3", "h5py"]
+
+[project.scripts]
+opengrid = "opengrid.__main__:main"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/opengrid"]
+cmake.build-type = "Release"
+
+[tool.scikit-build.cmake.define]
+OG_BUILD_TESTS = "OFF"
+OG_BUILD_PYTHON = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+qt_api = "pyside6"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["python", "tests", "examples", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+# SIM108 would *suggest* ternaries; our convention forbids them.
+ignore = ["SIM108"]

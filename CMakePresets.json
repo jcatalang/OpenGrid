@@ -1,0 +1,35 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 28, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}",
+        "Python_ROOT_DIR": "$env{CONDA_PREFIX}",
+        "Python_FIND_STRATEGY": "LOCATION",
+        "OG_BUILD_TESTS": "ON",
+        "OG_BUILD_PYTHON": "ON"
+      }
+    },
+    {"name": "debug", "inherits": "base", "displayName": "Debug",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
+    {"name": "release", "inherits": "base", "displayName": "Release",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
+    {"name": "ci", "inherits": "base", "displayName": "CI (Release, warnings as errors)",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "OG_WARNINGS_AS_ERRORS": "ON"}}
+  ],
+  "buildPresets": [
+    {"name": "debug", "configurePreset": "debug"},
+    {"name": "release", "configurePreset": "release"},
+    {"name": "ci", "configurePreset": "ci"}
+  ],
+  "testPresets": [
+    {"name": "debug", "configurePreset": "debug", "output": {"outputOnFailure": true}},
+    {"name": "release", "configurePreset": "release", "output": {"outputOnFailure": true}},
+    {"name": "ci", "configurePreset": "ci", "output": {"outputOnFailure": true}}
+  ]
+}

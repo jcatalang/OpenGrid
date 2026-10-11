@@ -1,0 +1,83 @@
+# OpenGrid — Roadmap
+
+Each phase ends with passing tests, a demo under `examples/`, an output under
+`examples/output/`, an entry in `docs/PROGRESS.md`, and a stop for review.
+Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(manual)*.
+
+---
+
+## Phase 0 — Kickoff and scaffold
+- `cmake --preset release` + build + `ctest` pass; the GoogleTest suite has ≥1 test.
+- `pip install --no-build-isolation -e .` succeeds; `import opengrid._core` works and `add(2, 3) == 5`.
+- GUI smoke test (pytest-qt, offscreen): the main window builds; the model tree has the top-level nodes
+  Database, Connectors, Domains, Blocks, Patches, Zones; the console evaluates `1+1`.
+- `ruff check`, `clang-format --dry-run --Werror`, `tools/check_no_ternary.py` are clean.
+- CI workflow exists for macos-14 and ubuntu-latest. *(Running it needs a remote.)*
+
+## Phase 1 — 2D geometry kernel + project I/O
+- Curves: point, line, arc, polyline, cubic spline (natural/clamped/Catmull-Rom), NURBS.
+- The arc length of a circle arc and a spline is within 1e-10 relative of the reference (analytic / adaptive Gauss–Kronrod at tight tolerance).
+- After arc-length reparametrization, `|s(t_k) - k·L/N|/L < 1e-10`.
+- Closest-point projection: the distance error is < 1e-12·L for points on and off curves, including near endpoints and high curvature.
+- Every command has an undo/redo test: apply → undo gives a store equal to the initial one; redo gives a store equal to the applied one.
+- Project round trip: save → load → save is byte-identical. Journal replay reproduces the same `.ogp`.
+- Airfoil `.dat` (Selig and Lednicer) and CSV import. Malformed files produce reports with line numbers.
+- Demo `examples/01_geometry.py`: NACA 0012 + farfield circle → `examples/output/01_geometry.ogp`.
+
+## Phase 2 — Connectors and distributions
+- Distributions: uniform, geometric, tanh and sine with one- and two-sided spacing (Vinokur), breakpoints/sub-connectors, arc-length vs parametric mode.
+- Achieved end spacings vs requested: relative error < 1e-8 over a parameter sweep.
+- Node positions are strictly monotone. The max stretching ratio is reported and checked against a threshold.
+- Extreme ratios (e.g. spacing 1e-12·L, or impossible requests) fall back with a warning and never produce NaN/Inf. This is fuzz-tested.
+- Spacing propagation across shared nodes: changing one connector updates its flagged neighbours, and undo restores them.
+- Demo: airfoil connectors with LE/TE clustering.
+
+## Phase 3 — Structured 2D domains + first export
+- Domains from 4 connector-chain edges, with auto-assembly from a selection and orientation handling. A count mismatch produces a report naming the edges and counts.
+- Linear TFI is exact on the quarter annulus (interior nodes vs analytic polar grid when edges are arcs/lines with matching distributions, error < 1e-12). Hermite TFI is also provided.
+- Elliptic: Winslow and Poisson (TTM) with Steger–Sorenson wall control. The residual drops ≥ 6 orders on the golden cases. Wall spacing is achieved within 5% and wall orthogonality to within 2°.
+- Worker-thread run with progress and cancel. Cancel returns within 0.5 s.
+- Quality metrics (2D set). All Jacobians are > 0 on golden cases.
+- VTKHDF export read back by `vtk` and `meshio` with matching cell counts and coordinates. Plot3D 2D multiblock round trip.
+- Demos: NACA 0012 C-grid and O-grid with prescribed wall spacing; backward-facing step multiblock.
+
+## Phase 4 — Patches, zones, solver-ready export
+- Validator: every boundary connector is in exactly one patch, interfaces are auto-detected, and violations are reported by name.
+- Structured 1-to-1 connectivity detection between domains, with point-range transforms verified.
+- VTKHDF with patches (collection or fallback), CGNS (zones, 1-to-1, BC_t) validated by `cgnscheck` if available, and Gmsh 4.1 read by meshio with the correct physical groups.
+- The patch face counts in exported files equal the model counts.
+
+## Phase 5 — Unstructured 2D *(proposed split: 5a CDT+refinement, 5b advancing front, 5c quads+smoothing)*
+- Constrained Delaunay (Bowyer–Watson, robust predicates, edge recovery) and Ruppert/Chew refinement with a size field.
+- Boundary conformity: every boundary segment appears exactly once. The total area matches the geometry to 1e-12 relative. There are no inverted cells.
+- The minimum angle bound is met where theory allows (e.g. ≥ 20.7° away from small input angles).
+- Determinism: two runs give byte-identical output.
+- Advancing-front alternative, quad-dominant and all-quad options, Laplacian/angle-based smoothing, and edge swapping.
+- Structured + unstructured domains that share connectors are conforming.
+- Demo: an airfoil in a circular farfield, as triangles and as quad-dominant.
+
+## Phase 6 — 2D inflation (hybrid)
+- First-cell height and growth rate achieved (relative error < 1e-6 on straight walls, < 2% on curved walls).
+- No overlaps (exact segment-intersection checks), positive Jacobians, and sharp and blunt TE handled.
+- Proximity/collision termination works (two-element airfoil gap). The last-layer size matches the core size field within 20%.
+- Demos: NACA 0012 hybrid; two-element airfoil.
+
+## Phase 7 — 3D structured
+- Surfaces: planar, ruled, revolved, extruded, NURBS, with projection accuracy < 1e-10·L.
+- Blocks from 6 faces, 3D TFI, 3D elliptic smoothing with wall control, hyperbolic extrusion, and translate/rotate/normal extrusion.
+- Block volume vs analytic (annular sector) within 1e-6 relative for fine grids. Positive Jacobians. Consistent 1-to-1 interfaces.
+- Export VTKHDF (hexes), CGNS 3D structured, Plot3D 3D.
+- Demos: annular sector duct; extruded wing section; 3D cylinder O-grid.
+
+## Phase 8 — 3D unstructured and hybrid *(proposed split: 8a surface mesh + shell + backend, 8b inflation, 8c optimisation + mixed blocks)*
+- Surface meshing on parametric surfaces, a watertight shell check (each edge shared by exactly 2 faces, consistent orientation).
+- `TetBackend` with Netgen first and mmg for optimisation.
+- Prism/hex inflation with ridge/corner handling, pyramids at quad faces.
+- Element-type counts as expected, no negative volumes, volume vs analytic within 1e-6, inflation height/growth achieved.
+- Demos: sphere in a box with prism layers; wing stub hybrid. Export VTKHDF, CGNS (mixed sections + BCs), Gmsh.
+
+## Phase 9 — CAD import, scripting polish, performance
+- Optional STEP/IGES import via OCCT, with healing tolerances and automatic connector/domain creation.
+- All golden cases are reproduced from scripts alone (tested).
+- Performance targets from SPEC.md measured by a benchmark script in Release on M1. OpenMP/TBB for hot loops, with determinism preserved.
+- Packaging: macOS arm64 app bundle; AppImage or conda package for Linux.

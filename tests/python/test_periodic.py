@@ -147,7 +147,7 @@ def test_cgns_periodic(tmp_path):
     found = 0
     with h5py.File(path) as f:
         for zone_name, zone in _cgns_nodes(f["OpenGrid"], "Zone_t").items():
-            for name, conn in _cgns_nodes(
+            for _name, conn in _cgns_nodes(
                 zone["ZoneGridConnectivity"], "GridConnectivity1to1_t"
             ).items():
                 if "Periodic" not in conn.get("GridConnectivityProperty", {}):

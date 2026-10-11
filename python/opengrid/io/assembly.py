@@ -166,7 +166,7 @@ def assemble(session, topology, quality: bool = True, periodic=()) -> MeshAssemb
 def _connector_point_ids(use, grids, offsets, session, inverse) -> np.ndarray:
     """Merged point ids of a boundary connector's nodes, in the connector's own direction."""
     domain = session.store.get(use.domain).name
-    nj, ni, _ = grids[domain].shape
+    _nj, ni, _ = grids[domain].shape
     return inverse[_node_run(use.first, use.last, ni) + offsets[domain]]
 
 

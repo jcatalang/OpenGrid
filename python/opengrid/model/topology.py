@@ -178,7 +178,8 @@ def _check_periodic(store, session, issues: list[Issue]) -> list:
             issues.append(
                 Issue(
                     patch.name,
-                    f"partner {partner.name} is a {partner.params['patch_type']} patch, not periodic",
+                    f"partner {partner.name} is a {partner.params['patch_type']} patch, "
+                    "not periodic",
                 )
             )
             continue

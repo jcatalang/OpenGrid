@@ -37,7 +37,8 @@ def write_cgns(path, session, topology, base_name: str = "OpenGrid", periodic=()
             issues.append(
                 Issue(
                     source.name,
-                    "rotational periodicity cannot be written to a 2D CGNS base (translations only)",
+                    "rotational periodicity cannot be written to a 2D CGNS base "
+                    "(translations only)",
                 )
             )
     for name in [d.name for d in domains] + [f[0] for f in families]:

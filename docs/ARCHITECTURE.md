@@ -319,6 +319,15 @@ segment, so derivative jumps at knots never cost accuracy.
   PointRangeDonor holds the images of its ends, and the transform maps the running axes
   (signed) and the face-normal axes (+ for min↔max faces, − for faces of the same kind).
   Examples: O-cut i_min↔i_max gives [1, 2]; the C-grid wake cut on j_min↔j_min gives [−1, −2].
+- **Periodic pairing** (added after the Phase 4 review): stored once, on the source patch,
+  as `periodic = {partner, rotation_center, rotation_angle, translation}` with the CGNS
+  convention x_target = R(angle)(x − c) + c + t. The validator requires every periodic patch
+  to be paired exactly once and every source connector to map node by node (either direction)
+  onto a distinct target connector. Exports: CGNS periodic GridConnectivity1to1 in both
+  directions (inverse transform on the reverse side; translations only in 2D), Gmsh
+  `$Periodic` (affine matrix + node correspondences), VTKHDF field data on the patch blocks.
+  Paired periodic faces are connectivity, never BCs. Projects load pairings in a second pass
+  because they reference other patches of the same section.
 - **Exports refuse to run** while the boundary does not validate (CGNS, Gmsh, and VTKHDF when
   patches or zones exist). The issue list names each connector, domain and patch involved.
 - **CGNS** (C++ on the CGNS mid-level library 4.5, optional via `OG_WITH_CGNS`; zlib-like

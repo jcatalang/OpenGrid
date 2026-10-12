@@ -131,9 +131,12 @@ def _domain_ref(ref, label, store, issues):
 
 def normalize_block(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
-    for key in sorted(set(raw) - {"faces", "extrusion", "smoothing"}):
+    from opengrid.model.quality_floor import normalize_quality_floor
+
+    for key in sorted(set(raw) - {"faces", "extrusion", "smoothing", "quality_floor"}):
         issues.append(Issue(f"{where}: {key}", "unexpected parameter for a block"))
     smoothing = _normalize_smoothing(raw.get("smoothing"), f"{where}: smoothing", issues)
+    floor = normalize_quality_floor(raw.get("quality_floor"), f"{where}: quality_floor", issues)
     faces_raw = raw.get("faces")
     extrusion_raw = raw.get("extrusion")
     if (faces_raw is None) == (extrusion_raw is None):
@@ -156,7 +159,7 @@ def normalize_block(raw: dict, store, where: str) -> dict:
         extrusion = _normalize_extrusion(extrusion_raw, f"{where}: extrusion", store, issues)
     if issues:
         raise ValidationError(issues)
-    return {"faces": faces, "extrusion": extrusion, "smoothing": smoothing}
+    return {"faces": faces, "extrusion": extrusion, "smoothing": smoothing, "quality_floor": floor}
 
 
 def _normalize_smoothing(raw, label, issues) -> dict | None:

@@ -45,6 +45,8 @@
 #include <string>
 #include <vector>
 
+#include "opengrid/core/quality/quality_cells3d.hpp"
+
 namespace og {
 
 struct Inflation3DOptions {
@@ -63,6 +65,7 @@ struct Inflation3DOptions {
   double min_visibility = 0.2;
   double fan_threshold_deg = 60.0;  // ridges: convex edges turning more than this (>= 180: none)
   double fan_step_deg = 30.0;       // largest turn between consecutive fan columns
+  QualityFloor floor;               // every layer cell must meet it (quality_cells3d.hpp)
 };
 
 struct Inflation3DInput {

@@ -146,6 +146,21 @@ history). Phase tags show where each item came from.
   normal scale cap 2, slope 0.5, proximity 1, visibility 0.2, 5 smoothing sweeps, fan threshold
   60°, fan step 30°.
 
+## 3D quality floor
+- **Layers lost to the floor** [8c addendum]:
+  - Thin layers over stretched wall cells can't step down within the floor, so stops spread:
+    a wall ending at fixed nodes (a non-sliding neighbouring face) keeps no layers, and ridge
+    ends (with a threshold above 60°) stop their neighbours too.
+  - The demo wing needed 61 instead of 25 spanwise points (with 25: mean 11 of 20 layers and one
+    core cell below the floor).
+  - Lowering `quality_floor` trades this back.
+- **Core cells** [8c addendum]: cells on a thin triangle of the layer front can only be improved
+  through their free node; when none moves enough the volume is reported (it can't be
+  exported) rather than repaired.
+- **2D has no floor** [8c addendum]: only 3D cells are checked.
+- **GUI** [8c addendum]: the floor is editable for volumes; for blocks only through the API.
+- **Boundary report cost** [8c addendum]: it now meshes every volume (cached) to check the floor.
+
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**
   - Phase 5 → 5a (Delaunay), 5b (advancing front), 5c (quads, smoothing, CGNS unstructured).

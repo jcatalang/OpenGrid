@@ -28,6 +28,7 @@ add_library(og_core STATIC
   src/quality/quality2d.cpp
   src/quality/quality_tri.cpp
   src/quality/quality_cells.cpp
+  src/quality/quality_cells3d.cpp
   src/quality/quality3d.cpp
   src/geom/surface.cpp
   src/structured/tfi3d.cpp

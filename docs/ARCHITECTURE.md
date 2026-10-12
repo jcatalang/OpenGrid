@@ -758,6 +758,29 @@ segment, so derivative jumps at knots never cost accuracy.
   connectivity (Abutting1to1, Vertex) in both directions: (i, j, k) triples on the block side,
   vertex numbers on the volume side, matched by identical coordinates.
 
+### Quality floor for 3D cells (Phase 8c addendum)
+- **Metrics** (`quality/quality_cells3d.cpp`, identical to `volume_quality` to round-off):
+  scaled Jacobian (normalised, capped at 1) and equiangle skewness of the dihedral angles, for
+  tetrahedra, pyramids, prisms and hexahedra. Blocks use `quality_3d`'s hexahedron metrics.
+- **The floor:** scaled Jacobian >= 0.05 and skewness <= 0.95 by default (`quality_floor`, in the
+  volume generator and in block parameters; validated, journaled).
+- **Enforced while building volumes:**
+  - Inflation checks every layer cell against it (transition, fan and corner cells included).
+    A cell that misses it first cancels the soft stops (size transition, slope) made in that
+    layer by the face's columns, so they keep growing; otherwise the face's worst column stops.
+    The probe showed why: without cancelling, the tip cap's early size stops left steps that
+    cascaded into stopping the whole wing at about 8 layers.
+  - The optimiser rescues the movable nodes of core cells below it (max-min of the floor
+    margin).
+- **Reported, never silently kept:** `mesh["quality"]` (floor, cells, below_floor, worst values,
+  failing cell indices), the volume / block status, a warning, and a boundary-report issue per
+  failing block or volume, so every export refuses such a model.
+- **Consequence:** a step in thin layers (height h over wall cells of width w) has cells of
+  quality about h / w. Where a column has to stop at a low layer (a fixed node against a
+  non-sliding face, a ridge end, a collision), its neighbours stop too, possibly over the whole
+  face; walls ending at fixed nodes keep no layers. Stretched wall meshes lose layers (the demo
+  wing went from 25 to 61 spanwise points).
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

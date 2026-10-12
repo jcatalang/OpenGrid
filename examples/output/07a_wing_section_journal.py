@@ -18,7 +18,7 @@ og.create_patch(patch_type='farfield', members=('c-farfield',), periodic=None, n
 og.create_zone(members=('ring', 'outside'), name='fluid')
 og.delete(['outside', 'far', 'fluid'])
 og.delete(['airfoil'])
-og.create_block(faces=None, extrusion={'domain': 'ring', 'mode': 'translate', 'vector': (0.0, 0.0, 2.0), 'axis_point': (0.0, 0.0, 0.0), 'angle': 0.0, 'distance': 0.0, 'dimension': 21, 'distribution': {'type': 'tanh', 'begin_spacing': 0.02, 'end_spacing': None, 'growth_ratio': None}, 'edges': ('free', 'free', 'free', 'free'), 'dissipation': 0.2}, smoothing=None, name='wing')
+og.create_block(faces=None, extrusion={'domain': 'ring', 'mode': 'translate', 'vector': (0.0, 0.0, 2.0), 'axis_point': (0.0, 0.0, 0.0), 'angle': 0.0, 'distance': 0.0, 'dimension': 21, 'distribution': {'type': 'tanh', 'begin_spacing': 0.02, 'end_spacing': None, 'growth_ratio': None}, 'edges': ('free', 'free', 'free', 'free'), 'dissipation': 0.2}, smoothing=None, quality_floor={'min_jacobian': 0.05, 'max_skewness': 0.95}, name='wing')
 og.create_patch(patch_type='wall', members=({'block': 'wing', 'face': 'jmin'},), periodic=None, name='airfoil')
 og.create_patch(patch_type='farfield', members=({'block': 'wing', 'face': 'jmax'},), periodic=None, name='outer')
 og.create_patch(patch_type='symmetry', members=('ring',), periodic=None, name='root')

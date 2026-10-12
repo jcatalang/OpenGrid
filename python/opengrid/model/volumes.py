@@ -36,6 +36,7 @@ from collections import OrderedDict
 import numpy as np
 
 from opengrid import _core
+from opengrid.model.quality_floor import normalize_quality_floor, volume_floor
 from opengrid.validation import Issue, ValidationError
 
 BACKENDS = ("netgen",)
@@ -46,6 +47,7 @@ DEFAULT_VOLUME_GENERATOR = {
     "pyramids": "auto",
     "inflation": None,
     "optimize": True,
+    "quality_floor": None,
 }
 PYRAMID_MODES = ("auto", "always", "never")
 # Internal settings of the 3D inflation (opengrid._core.inflate_3d; not in projects).
@@ -180,6 +182,9 @@ def normalize_volume(raw: dict, store, where: str) -> dict:
         issues.append(
             Issue(f"{where}: generator.pyramids", f"must be one of {', '.join(PYRAMID_MODES)}")
         )
+    generator["quality_floor"] = normalize_quality_floor(
+        generator["quality_floor"], f"{where}: generator.quality_floor", issues
+    )
     if not isinstance(generator["optimize"], bool):
         issues.append(Issue(f"{where}: generator.optimize", "must be True or False"))
     generator["inflation"] = normalize_volume_inflation(
@@ -621,6 +626,8 @@ class VolumeEvaluator:
                 movable.tolist(),
                 n_fixed_tets=len(layer["tets"]),
                 **OPTIMIZATION_INTERNALS,
+                floor_jacobian=generator["quality_floor"]["min_jacobian"],
+                floor_skewness=generator["quality_floor"]["max_skewness"],
             )
             points = out["points"]
             cells["tets"] = out["tets"]
@@ -634,6 +641,8 @@ class VolumeEvaluator:
                     "worst_after",
                     "below_before",
                     "below_after",
+                    "below_floor_before",
+                    "below_floor_after",
                 )
             }
             if out["inverted_after"]:
@@ -680,6 +689,14 @@ class VolumeEvaluator:
             "optimization": optimization,
             "warnings": warnings,
         }
+        # The quality floor: cells that still miss it are reported (never silently kept).
+        result["quality"] = volume_floor(result, generator["quality_floor"])
+        if result["quality"]["below_floor"]:
+            warnings.append(
+                f"{result['quality']['below_floor']} cells miss the quality floor (worst scaled "
+                f"Jacobian {result['quality']['worst_jacobian']:.3g}, skewness "
+                f"{result['quality']['worst_skewness']:.3g})"
+            )
         filled = total_volume(result)
         if abs(filled - shell["volume"]) > 1e-9 * abs(shell["volume"]):
             warnings.append(
@@ -750,6 +767,8 @@ class VolumeEvaluator:
                 inflation["transition"],
                 generator["max_size"],
                 **INFLATION_INTERNALS,
+                floor_jacobian=generator["quality_floor"]["min_jacobian"],
+                floor_skewness=generator["quality_floor"]["max_skewness"],
             )
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None

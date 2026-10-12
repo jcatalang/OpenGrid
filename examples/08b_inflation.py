@@ -6,7 +6,9 @@ outside the patch. Prism layers (first height 2e-3, growth 1.2, at most 15 layer
 core size) and Netgen tetrahedra in the core.
 
 Case "wing": a NACA 0012 wing stub (root chord 1, tip chord 0.6, LE sweep 0.3 over a span of 1.5)
-on a symmetry plane, in a box [-2, 4] x [-2.5, 2.5] x [0, 3]:
+on a symmetry plane, in a box [-2, 4] x [-2.5, 2.5] x [0, 3]; 41 x 61 points on each surface
+(61 spanwise since the quality floor: steps in thin layers over long spanwise cells cannot meet
+it, so with 25 the layers stopped early):
   * the upper and lower surfaces are structured domains on ruled surfaces: hexahedral layers;
   * the tip cap is a planar unstructured domain: prism layers;
   * the symmetry plane is a planar unstructured domain with the root section as a hole: the
@@ -175,9 +177,9 @@ def wing_case() -> opengrid.Session:
             }
             og.create_connector(f"{tag}_{side}", 41, distribution, name=f"c_{tag}_{side}")
     og.create_line((0, 0, 0), (sweep, 0, span), name="le")
-    og.create_connector("le", 25, name="c_le")
+    og.create_connector("le", 61, name="c_le")
     og.create_line((1, 0, 0), (sweep + tip, 0, span), name="te")
-    og.create_connector("te", 25, name="c_te")
+    og.create_connector("te", 61, name="c_te")
     for side in ("upper", "lower"):
         og.create_ruled_surface(f"root_{side}", f"tip_{side}", name=f"surface_{side}")
         og.create_domain(

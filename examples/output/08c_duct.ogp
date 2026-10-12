@@ -1,7 +1,7 @@
 {
  "blocks": [
-  {"extrusion": null, "faces": [9, 18, 23, 28, 29, 30], "id": 31, "name": "inlet_block", "smoothing": null, "type": "block"},
-  {"faces": [18, 40, 45, 50, 51, 52, 61, 70, 75, 80, 81, 82], "generator": {"backend": "netgen", "grading": 0.3, "inflation": {"faces": [61, 70, 75, 80, 81, 82], "first_height": 0.002, "growth_rate": 1.2, "layers": 10, "slide": true, "total_thickness": null, "transition": true}, "max_size": 0.08, "optimize": true, "pyramids": "auto"}, "id": 83, "name": "fluid", "type": "volume"}
+  {"extrusion": null, "faces": [9, 18, 23, 28, 29, 30], "id": 31, "name": "inlet_block", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}, "smoothing": null, "type": "block"},
+  {"faces": [18, 40, 45, 50, 51, 52, 61, 70, 75, 80, 81, 82], "generator": {"backend": "netgen", "grading": 0.3, "inflation": {"faces": [61, 70, 75, 80, 81, 82], "first_height": 0.002, "growth_rate": 1.2, "layers": 10, "slide": true, "total_thickness": null, "transition": true}, "max_size": 0.08, "optimize": true, "pyramids": "auto", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}}, "id": 83, "name": "fluid", "type": "volume"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 2, "mode": "arc_length", "name": "c_inlet_e0", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},

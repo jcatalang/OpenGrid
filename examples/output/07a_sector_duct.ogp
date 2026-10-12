@@ -1,7 +1,7 @@
 {
  "blocks": [
-  {"extrusion": null, "faces": [29, 30, 31, 32, 17, 26], "id": 33, "name": "duct-a", "smoothing": null, "type": "block"},
-  {"extrusion": null, "faces": [53, 54, 55, 56, 26, 50], "id": 57, "name": "duct-b", "smoothing": null, "type": "block"}
+  {"extrusion": null, "faces": [29, 30, 31, 32, 17, 26], "id": 33, "name": "duct-a", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}, "smoothing": null, "type": "block"},
+  {"extrusion": null, "faces": [53, 54, 55, 56, 26, 50], "id": 57, "name": "duct-b", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}, "smoothing": null, "type": "block"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 3, "mode": "arc_length", "name": "c-inner0-a", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},

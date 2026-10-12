@@ -24,6 +24,7 @@
 #include "opengrid/core/geom/surface.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality3d.hpp"
+#include "opengrid/core/quality/quality_cells3d.hpp"
 #include "opengrid/core/structured/elliptic3d.hpp"
 #include "opengrid/core/structured/extrude.hpp"
 #include "opengrid/core/structured/hyperbolic.hpp"
@@ -508,7 +509,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::int64_t>& face_group, const std::vector<std::int64_t>& node_group,
          double first_height, double growth_rate, int layers, std::optional<double> total_thickness,
          bool transition, std::optional<double> max_size, double min_jacobian, double max_scale,
-         double max_slope, double proximity, double fan_threshold, double fan_step) {
+         double max_slope, double proximity, double fan_threshold, double fan_step,
+         double floor_jacobian, double floor_skewness) {
         og::Inflation3DInput input;
         input.points.resize(points.shape(0));
         const double* d = points.data();
@@ -532,6 +534,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         options.proximity = proximity;
         options.fan_threshold_deg = fan_threshold;
         options.fan_step_deg = fan_step;
+        options.floor.min_jacobian = floor_jacobian;
+        options.floor.max_skewness = floor_skewness;
         og::Inflation3DResult r;
         {
           const nb::gil_scoped_release release;
@@ -569,6 +573,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("total_thickness").none(), nb::arg("transition"), nb::arg("max_size").none(),
       nb::arg("min_jacobian") = 0.2, nb::arg("max_scale") = 2.0, nb::arg("max_slope") = 0.5,
       nb::arg("proximity") = 1.0, nb::arg("fan_threshold") = 60.0, nb::arg("fan_step") = 30.0,
+      nb::arg("floor_jacobian") = 0.05, nb::arg("floor_skewness") = 0.95,
       "3D boundary-layer inflation (see inflation3d.hpp). faces: closed surface oriented out of "
       "the region; wall / face_group per face; node_group per point (plane group a wall node "
       "may slide in, or -1). Returns a dict: points (input first), tets, pyramids, prisms, "
@@ -579,7 +584,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "optimize_3d",
       [](const Points& points, const Cells<4>& tets, const Cells<5>& pyramids,
          const Cells<6>& prisms, const Cells<8>& hexes, const std::vector<bool>& movable,
-         std::int64_t n_fixed_tets, double threshold, int passes, bool move_nodes, bool swap) {
+         std::int64_t n_fixed_tets, double threshold, int passes, bool move_nodes, bool swap,
+         double floor_jacobian, double floor_skewness) {
         og::Optimize3DInput input;
         input.points.resize(points.shape(0));
         const double* d = points.data();
@@ -597,6 +603,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         options.passes = passes;
         options.move_nodes = move_nodes;
         options.swap = swap;
+        options.floor.min_jacobian = floor_jacobian;
+        options.floor.max_skewness = floor_skewness;
         og::Optimize3DResult r;
         {
           const nb::gil_scoped_release release;
@@ -620,11 +628,14 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         out["below_before"] = r.below_before;
         out["below_after"] = r.below_after;
         out["inverted_after"] = r.inverted_after;
+        out["below_floor_before"] = r.below_floor_before;
+        out["below_floor_after"] = r.below_floor_after;
         return out;
       },
       nb::arg("points"), nb::arg("tets"), nb::arg("pyramids"), nb::arg("prisms"), nb::arg("hexes"),
       nb::arg("movable"), nb::arg("n_fixed_tets") = 0, nb::arg("threshold") = 0.3,
       nb::arg("passes") = 4, nb::arg("move_nodes") = true, nb::arg("swap") = true,
+      nb::arg("floor_jacobian") = 0.05, nb::arg("floor_skewness") = 0.95,
       "Quality optimisation of a mixed 3D mesh (see optimize3d.hpp): node moves of movable points "
       "and 2-3 / 3-2 swaps of the tetrahedra after the first n_fixed_tets. Cell arrays are "
       "int64 (n, 4 / 5 / 6 / 8). Returns a dict: points, tets (fixed ones first), moved, "
@@ -648,4 +659,61 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       },
       nb::arg("points"), nb::arg("nodes"),
       "Signed scaled Jacobian of one cell (4, 5, 6 or 8 nodes; see optimize3d.hpp).");
+
+  m.def(
+      "quality_cells_3d",
+      [](const Points& points, const Cells<4>& tets, const Cells<5>& pyramids,
+         const Cells<6>& prisms, const Cells<8>& hexes) {
+        std::vector<std::array<double, 3>> p(points.shape(0));
+        const double* d = points.data();
+        for (std::size_t i = 0; i < p.size(); ++i) {
+          p[i] = {d[3 * i], d[3 * i + 1], d[3 * i + 2]};
+        }
+        const std::size_t n = tets.shape(0) + pyramids.shape(0) + prisms.shape(0) + hexes.shape(0);
+        std::array<double*, 4> out{};
+        for (double*& a : out) {
+          a = new double[n];
+        }
+        auto run = [&](const std::int64_t* cells, std::size_t count, int size, std::size_t& k) {
+          for (std::size_t c = 0; c < count; ++c, ++k) {
+            const std::int64_t* nodes = cells + c * static_cast<std::size_t>(size);
+            for (int j = 0; j < size; ++j) {
+              if (nodes[j] < 0 || std::cmp_greater_equal(nodes[j], p.size())) {
+                throw std::invalid_argument("quality_cells_3d: node out of range");
+              }
+            }
+            const og::CellQuality3D q = og::cell_quality_3d_full(p, nodes, size);
+            out[0][k] = q.scaled_jacobian;
+            out[1][k] = q.skewness;
+            out[2][k] = q.min_angle;
+            out[3][k] = q.max_angle;
+          }
+        };
+        std::size_t k = 0;
+        try {
+          const nb::gil_scoped_release release;
+          run(tets.data(), tets.shape(0), 4, k);
+          run(pyramids.data(), pyramids.shape(0), 5, k);
+          run(prisms.data(), prisms.shape(0), 6, k);
+          run(hexes.data(), hexes.shape(0), 8, k);
+        } catch (...) {
+          for (const double* a : out) {
+            delete[] a;
+          }
+          throw;
+        }
+        nb::dict result;
+        const std::array<const char*, 4> names = {"scaled_jacobian", "skewness", "min_angle",
+                                                  "max_angle"};
+        for (std::size_t i = 0; i < 4; ++i) {
+          const nb::capsule own(out[i],
+                                [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+          result[names[i]] = nb::ndarray<nb::numpy, double, nb::ndim<1>>(out[i], {n}, own);
+        }
+        return result;
+      },
+      nb::arg("points"), nb::arg("tets"), nb::arg("pyramids"), nb::arg("prisms"), nb::arg("hexes"),
+      "Per-cell scaled Jacobian, equiangle skewness and smallest / largest dihedral angle "
+      "(degrees) of a mixed 3D mesh, cells in the order tets, pyramids, prisms, hexes (see "
+      "quality_cells3d.hpp).");
 }

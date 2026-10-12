@@ -6,6 +6,9 @@ columns from each ridge node, joined by faces of zero area at the wall (prisms l
 side in the first layer, hexahedra above); where the trailing edge meets the tip rim a cap around
 a centre column closes the corner. The core is then optimised (node moves of interior nodes and
 pyramid apexes, 2-3 / 3-2 swaps of tetrahedra); the comparison without optimisation is printed.
+Every cell meets the quality floor (scaled Jacobian >= 0.05, skewness <= 0.95): layer cells that
+would miss it are never made, core cells below it are rescued by the optimiser, and anything left
+would be reported and block the exports.
 
 Case "duct": a structured block (hexahedra, x in [0, 1]) feeds an unstructured volume (x in
 [1, 3]) through a shared structured face (pyramids on the volume side). The volume holds a cube
@@ -160,17 +163,24 @@ def wing_report(og):
     layers = info["layers"][:n_surface][wall]
     points = mesh["points"][:n_surface][wall]
     print(
-        f"  wall nodes: {np.mean(layers == info['max_layers']) * 100:.0f}% with all "
-        f"{info['max_layers']} layers (Phase 8b: 43%), mean {layers.mean():.1f}"
+        f"  wall nodes: mean {layers.mean():.1f} of {info['max_layers']} layers; most stop where "
+        "their cells reach the core size (transition)"
     )
     # Trailing edge: the line from (1, 0, 0) to (0.9, 0, 1.5).
     a = np.array([1.0, 0.0, 0.0])
     d = np.array([-0.1, 0.0, 1.5])
     t = np.clip((points - a) @ d / (d @ d), 0.0, 1.0)
     on_edge = np.linalg.norm(points - (a + t[:, None] * d), axis=1) < 1e-9
+    reasons = dict(zip(*np.unique(reason[wall][on_edge], return_counts=True), strict=True))
     print(
-        f"  trailing-edge nodes: {np.sum(layers[on_edge] == info['max_layers'])} of "
-        f"{on_edge.sum()} with all layers (Phase 8b: none)"
+        f"  trailing-edge nodes: {on_edge.sum()}, mean {layers[on_edge].mean():.1f} layers "
+        f"(Phase 8b: none); stops { ({str(k): int(v) for k, v in reasons.items()}) }"
+    )
+    quality = mesh["quality"]
+    print(
+        f"  quality floor {quality['floor']}: {quality['below_floor']} of {quality['cells']} "
+        f"cells below it; worst scaled Jacobian {quality['worst_jacobian']:.3f}, skewness "
+        f"{quality['worst_skewness']:.3f}"
     )
     print(
         f"  volume {total_volume(mesh):.9f} = enclosed by the boundary "
@@ -194,21 +204,28 @@ def wing_report(og):
     return mesh
 
 
-def duct_report(og):
+def duct_report(duct):
     start = time.perf_counter()
-    mesh = og.volume_mesh("fluid")
+    mesh = duct.volume_mesh("fluid")
     elapsed = time.perf_counter() - start
     info = mesh["inflation"]
-    print(f"duct: block inlet_block {og.block_status('inlet_block')}")
-    print(f"  volume fluid: {og.volume_status('fluid')} ({elapsed:.1f} s)")
+    print(f"duct: block inlet_block {duct.block_status('inlet_block')}")
+    print(f"  volume fluid: {duct.volume_status('fluid')} ({elapsed:.1f} s)")
     print(f"  fan columns {info['fan_columns']}; column stops {info['stops'] or 'none'}")
+    quality = mesh["quality"]
+    print(
+        f"  quality floor: {quality['below_floor']} of {quality['cells']} cells below it; worst "
+        f"scaled Jacobian {quality['worst_jacobian']:.3f}, skewness {quality['worst_skewness']:.3f}"
+    )
+    block = duct.block_floor("inlet_block")
+    print(f"  block quality floor: {block['below_floor']} of {block['cells']} cells below it")
     print(f"  optimisation {mesh['optimization']}")
     print_quality(quality_table(mesh))
     expected = 2.0 - 0.3**3
     print(f"  volume {total_volume(mesh):.12f} (analytic {expected:.12f})")
     for key, cells, _ in volume_cells(mesh):
         assert np.all(cell_volumes(mesh["points"], key, cells) > 0), key
-    report = og.boundary_report()
+    report = duct.boundary_report()
     assert report.ok, report.issues
     print(f"  interfaces: {report.interfaces}")
     return mesh

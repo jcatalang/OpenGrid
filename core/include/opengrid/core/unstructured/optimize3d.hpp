@@ -25,12 +25,18 @@
 //    and an interior edge with exactly three tetrahedra and no other cell around it is removed
 //    (3-2), when the worst quality of the tetrahedra involved improves.
 //  * Passes of both steps alternate until a pass changes nothing or `passes` is reached.
+//  * Rescue: the movable nodes of cells still missing the quality floor (quality_cells3d.hpp)
+//    maximise the smallest floor margin min(SJ - min_jacobian, max_skewness - skewness) of their
+//    cells by the same compass search (a pure max-min objective, right for a cell that must
+//    reach the floor; it never takes a cell around the node below the floor).
 // Deterministic: nodes and swaps are processed in a fixed order (worst quality, then index).
 #pragma once
 
 #include <array>
 #include <cstdint>
 #include <vector>
+
+#include "opengrid/core/quality/quality_cells3d.hpp"  // cell_quality_3d
 
 namespace og {
 
@@ -39,6 +45,7 @@ struct Optimize3DOptions {
   int passes = 4;
   bool move_nodes = true;
   bool swap = true;
+  QualityFloor floor;  // cells below it get a final rescue pass (see above)
 };
 
 struct Optimize3DInput {
@@ -61,13 +68,10 @@ struct Optimize3DResult {
   double worst_after = 1.0;
   std::int64_t below_before = 0;  // cells below the threshold
   std::int64_t below_after = 0;
-  std::int64_t inverted_after = 0;  // cells with quality <= 0
+  std::int64_t inverted_after = 0;      // cells with quality <= 0
+  std::int64_t below_floor_before = 0;  // cells missing the quality floor
+  std::int64_t below_floor_after = 0;
 };
-
-// Signed scaled Jacobian of a cell with n = 4 (tetrahedron), 5 (pyramid), 6 (prism) or 8
-// (hexahedron) nodes.
-double cell_quality_3d(const std::vector<std::array<double, 3>>& points, const std::int64_t* nodes,
-                       int n);
 
 // Throws std::invalid_argument for out-of-range node ids or sizes that do not match.
 Optimize3DResult optimize_3d(const Optimize3DInput& input, const Optimize3DOptions& options);

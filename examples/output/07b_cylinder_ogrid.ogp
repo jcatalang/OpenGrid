@@ -1,6 +1,6 @@
 {
  "blocks": [
-  {"extrusion": {"angle": 0.0, "axis_point": [0.0, 0.0, 0.0], "dimension": 61, "dissipation": 0.2, "distance": 10.0, "distribution": {"begin_spacing": 0.0001, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "domain": 7, "edges": ["periodic", "periodic", "constant_z", "constant_z"], "mode": "hyperbolic", "vector": [0.0, 0.0, 1.0]}, "faces": null, "id": 8, "name": "ogrid", "smoothing": null, "type": "block"}
+  {"extrusion": {"angle": 0.0, "axis_point": [0.0, 0.0, 0.0], "dimension": 61, "dissipation": 0.2, "distance": 10.0, "distribution": {"begin_spacing": 0.0001, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "domain": 7, "edges": ["periodic", "periodic", "constant_z", "constant_z"], "mode": "hyperbolic", "vector": [0.0, 0.0, 1.0]}, "faces": null, "id": 8, "name": "ogrid", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}, "smoothing": null, "type": "block"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 129, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 4, "mode": "arc_length", "name": "c-circle0", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},

@@ -507,7 +507,12 @@ class Session:
 
     # ---------------------------------------------------------------- blocks
     def create_block(
-        self, faces=None, extrusion=None, name: str | None = None, smoothing=None
+        self,
+        faces=None,
+        extrusion=None,
+        name: str | None = None,
+        smoothing=None,
+        quality_floor=None,
     ) -> str:
         """Structured block from six structured domains (``faces``, any order and orientation)
         or from an ``extrusion`` of a domain: ``{"domain", "mode": "translate" | "rotate" |
@@ -517,8 +522,15 @@ class Session:
         jmax) conditions of hyperbolic extrusion ("free", "constant_x", "constant_y",
         "constant_z", "periodic"), "dissipation"}``. ``smoothing``: 3D elliptic smoothing
         ``{"control": "laplace" | "thomas_middlecoff", "walls": [{"face": "kmin", "spacing",
-        "decay", "relaxation", "max_source"}], "omega", "max_iterations", "tolerance"}``."""
-        params = {"faces": faces, "extrusion": extrusion, "smoothing": smoothing}
+        "decay", "relaxation", "max_source"}], "omega", "max_iterations", "tolerance"}``.
+        ``quality_floor``: ``{"min_jacobian": 0.05, "max_skewness": 0.95}`` (None: the default);
+        cells missing it are reported by the boundary report, and exports refuse the model."""
+        params = {
+            "faces": faces,
+            "extrusion": extrusion,
+            "smoothing": smoothing,
+            "quality_floor": quality_floor,
+        }
         return self._create("block", params, name)
 
     def set_block_smoothing(self, name: str, smoothing) -> str:
@@ -531,12 +543,23 @@ class Session:
         mode: str = "translate",
         name: str | None = None,
         smoothing=None,
+        quality_floor=None,
         **settings,
     ) -> str:
         """Shorthand for create_block(extrusion={"domain": domain, "mode": mode, **settings})."""
         return self.create_block(
-            extrusion={"domain": domain, "mode": mode, **settings}, name=name, smoothing=smoothing
+            extrusion={"domain": domain, "mode": mode, **settings},
+            name=name,
+            smoothing=smoothing,
+            quality_floor=quality_floor,
         )
+
+    def block_floor(self, name: str) -> dict:
+        """Quality-floor check of a block: {"floor", "cells", "below_floor", "worst_jacobian",
+        "worst_skewness", "failing" (flat cell indices, i fastest)}."""
+        from opengrid.model.quality_floor import block_floor
+
+        return block_floor(self.block_grid(name), self.store.get(name).params["quality_floor"])
 
     def block_grid(self, name: str) -> np.ndarray:
         """Block grid, shape (nk, nj, ni, 3)."""
@@ -563,6 +586,12 @@ class Session:
             )
         if result["warnings"]:
             text += "; " + "; ".join(result["warnings"])
+        floor = self.block_floor(name)
+        if floor["below_floor"]:
+            text += (
+                f"; {floor['below_floor']} cells miss the quality floor (worst scaled Jacobian "
+                f"{floor['worst_jacobian']:.3g}, skewness {floor['worst_skewness']:.3g})"
+            )
         return text
 
     def create_patch(
@@ -674,11 +703,25 @@ class Session:
         boundary entities without a patch and all problems
         (opengrid.model.topology.BoundaryReport)."""
         if self.is_3d():
+            from opengrid.model.quality_floor import floor_issue
             from opengrid.model.topology import BoundaryReport
             from opengrid.model.volumes import analyze_3d
 
             result = analyze_3d(self)
-            issues = result["issues"]
+            issues = list(result["issues"])
+            # The quality floor of every block and volume.
+            for entity in self.store.entities("block") + self.store.entities("volume"):
+                try:
+                    if entity.kind == "block":
+                        summary = self.block_floor(entity.name)
+                    else:
+                        summary = self.volume_mesh(entity.name)["quality"]
+                except (ValidationError, ValueError, RuntimeError) as error:
+                    issues.append(Issue(entity.name, f"cannot be meshed: {error}"))
+                    continue
+                issue = floor_issue(entity.name, summary)
+                if issue is not None:
+                    issues.append(issue)
             boundary = [e["label"] for e in result["entries"]]
             unassigned = [e["label"] for e in result["entries"] if e["patch"] is None]
             return BoundaryReport(boundary, result["interfaces"], [], unassigned, issues, [])

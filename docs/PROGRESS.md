@@ -745,3 +745,40 @@
 - Optimisation trades pyramid quality for tetrahedra (wing: worst core pyramid 0.34 → 0.23).
 - Near the wing tip the layers still taper: the tip cap reaches the core size first.
 - See `OPEN_ISSUES.md` (3D inflation, optimisation).
+
+## Phase 8c addendum — quality floor for 3D cells (2026-10-12) — approved
+Requested at the 8c review: very distorted or skewed 3D cells must not exist, and quality must be
+tracked.
+
+### Built
+- `quality/quality_cells3d.cpp`: scaled Jacobian, dihedral angles and equiangle skewness of all
+  3D cell types (the optimiser's metric moved here); `_core.quality_cells_3d`, equal to
+  `volume_quality` to 1e-15.
+- `quality_floor` (default scaled Jacobian >= 0.05, skewness <= 0.95) in the volume generator and
+  block parameters; GUI rows for volumes.
+- Inflation:
+  - every layer cell must meet the floor;
+  - soft stops (size transition, slope) are cancelled when their cells would miss it.
+- Optimiser: a rescue pass (max-min of the floor margin) for core cells below the floor.
+- Reporting: `mesh["quality"]`, `og.block_floor()`, status texts, warnings, boundary-report
+  issues (exports refuse).
+- Demo wing refined to 61 spanwise points.
+
+### Results
+- **Wing:** 0 of 210 980 cells below the floor (worst scaled Jacobian 0.050, skewness 0.936).
+  Mean 17.9 of 20 layers, mostly stopping on reaching the core size; trailing-edge nodes mean
+  17.2.
+- **Without the floor** (the 8c wing, 25 spanwise points): 447 cells below a scaled Jacobian
+  of 0.05, down to 0.003.
+- **Sphere, duct, 08a, blocks:** unchanged and above the floor.
+
+### Verified
+- `ctest` +2 (rescue, metrics); every default-floor inflation test now checks all cells against
+  the floor. The taper and ridge-end mechanics are tested without it, and with it (all cells
+  pass, columns stop instead).
+- `pytest` +3:
+  - floor tracked and matching `volume_quality`;
+  - unmet floor → status, report issue, export refused;
+  - validation and journal;
+  - block floor (sheared extrusion).
+- All demos run with their exports, so every demo mesh meets the floor.

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "opengrid/core/geom/vec3.hpp"
+#include "opengrid/core/quality/quality_cells3d.hpp"
 
 namespace og {
 namespace {
@@ -303,6 +304,8 @@ struct Column {
   std::vector<Index> faces;  // incident wall faces
   std::vector<Index> nbrs;   // neighbouring columns (front edges)
   bool fan = false;          // a fan column at a ridge (several columns share its base node)
+  int stopped_at = -1;       // layer in which it stopped
+  bool pinned = false;       // a soft stop was cancelled in this layer: no soft stop again
   Vec3 start_normal;         // fan columns: the normal of the first layer; others: their sector's
 };
 
@@ -346,6 +349,7 @@ class Inflator {
       if (!any_active()) {
         break;
       }
+      layer_ = k;
       march(h);
       validate(h);
       commit(h);
@@ -359,6 +363,32 @@ class Inflator {
     stops_[reason] += 1;
   }
 
+  // Soft stops (the size transition and the slope rule) are cancelled when the cells they would
+  // create miss the quality floor: the column keeps growing in this layer.
+  [[nodiscard]] bool soft_stop_now(const Column& col) const {
+    return !col.active && col.stopped_at == layer_ &&
+           (col.reason == "transition" || col.reason == "slope");
+  }
+
+  void resume(Index c) {
+    for (const Index d : node_cols_[u(cols_[u(c)].base)]) {
+      Column& col = cols_[u(d)];
+      if (!soft_stop_now(col)) {
+        continue;
+      }
+      auto it = stops_.find(col.reason);
+      it->second -= 1;
+      if (it->second == 0) {
+        stops_.erase(it);
+      }
+      col.active = true;
+      col.reason.clear();
+      col.stopped_at = -1;
+      col.pinned = true;
+      col.next = points_[u(col.cur)] + col.normal * (h_ * col.scale);
+    }
+  }
+
   void stop(Index c, const std::string& reason) {
     Column& col = cols_[u(c)];
     if (!col.active) {
@@ -367,6 +397,7 @@ class Inflator {
     col.active = false;
     col.next = points_[u(col.cur)];
     col.reason = reason;
+    col.stopped_at = layer_;
     count(reason);
     // Columns sharing a node (fans) stop together in their first layer: a part of a fan left on
     // the wall would pinch the front against the ridge edge.
@@ -996,6 +1027,10 @@ class Inflator {
   }
 
   void march(double h) {
+    h_ = h;
+    for (Column& col : cols_) {
+      col.pinned = false;
+    }
     // Inward normals of the current front faces.
     for (WallFace& w : walls_) {
       std::vector<Vec3> p;
@@ -1526,7 +1561,33 @@ class Inflator {
     return extra[k - pending_.size()];
   }
 
+  // A cell is valid when every corner is positive (full prisms / hexahedra: at least
+  // min_jacobian) and it meets the quality floor (scaled Jacobian and skewness).
   [[nodiscard]] bool element_ok(const Element& e, const std::vector<Index>& top_id,
+                                const std::vector<Vec3>& extra) const {
+    return corners_ok(e, top_id, extra) && floor_ok(e, top_id, extra);
+  }
+
+  [[nodiscard]] bool floor_ok(const Element& e, const std::vector<Index>& top_id,
+                              const std::vector<Vec3>& extra) const {
+    int n = 8;
+    if (e.kind == Kind::tet) {
+      n = 4;
+    } else if (e.kind == Kind::pyramid) {
+      n = 5;
+    } else if (e.kind == Kind::prism) {
+      n = 6;
+    }
+    std::vector<std::array<double, 3>> local(static_cast<std::size_t>(n));
+    std::array<Index, 8> ids{};
+    for (int i = 0; i < n; ++i) {
+      local[u(i)] = position(e.v[u(i)], top_id, extra).to_array();
+      ids[u(i)] = i;
+    }
+    return opt_.floor.passes(cell_quality_3d_full(local, ids.data(), n));
+  }
+
+  [[nodiscard]] bool corners_ok(const Element& e, const std::vector<Index>& top_id,
                                 const std::vector<Vec3>& extra) const {
     auto p = [&](int i) { return position(e.v[u(i)], top_id, extra); };
     constexpr double kMin = 1e-9;
@@ -1580,7 +1641,7 @@ class Inflator {
       stopped = false;
       for (std::size_t c = 0; c < cols_.size(); ++c) {
         const Column& col = cols_[c];
-        if (!col.active) {
+        if (!col.active || col.pinned) {
           continue;
         }
         const Vec3 here = cur_pos(sz(c));
@@ -1624,8 +1685,20 @@ class Inflator {
           ok = ok && element_ok(e, top_id, extra);
         }
         if (!ok) {
-          // Stop the face's worst column(s): the most tilted marching normals (those cells are
+          // Cancel the soft stops of the face's columns made in this layer; failing that, stop
+          // the face's worst column(s): the most tilted marching normals (those cells are
           // re-checked in the next round).
+          bool resumed = false;
+          for (const Index c : walls_[w].cols) {
+            if (soft_stop_now(cols_[u(c)])) {
+              resume(c);
+              resumed = true;
+            }
+          }
+          if (resumed) {
+            changed = true;
+            break;  // rebuild the cells with the resumed columns' new nodes
+          }
           double worst = std::numeric_limits<double>::infinity();
           for (const Index c : walls_[w].cols) {
             const Column& col = cols_[u(c)];
@@ -1892,6 +1965,7 @@ class Inflator {
   std::unique_ptr<TriTree> current_;
   std::vector<Vec3> pending_;
   double h_ = 0.0;
+  int layer_ = 0;  // the layer being built
   std::vector<std::array<Index, 4>> tets_;
   std::vector<std::array<Index, 5>> pyramids_;
   std::vector<std::array<Index, 6>> prisms_;

@@ -141,7 +141,12 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   - one 3D CGNS writer for blocks and volumes (structured + unstructured zones, vertex
     connectivity between them).
 
-  Criteria: optimisation never lowers the worst cell and reduces cells below the threshold;
+  - (addendum) quality floor for every 3D cell (scaled Jacobian >= 0.05, skewness <= 0.95 by
+    default): enforced in inflation, rescued by the optimiser, reported otherwise (exports
+    refuse).
+
+  Criteria: no generated layer cell misses the floor; optimisation never lowers the worst cell
+  and reduces cells below the threshold;
   boundary and layer nodes unchanged; fans give every node on interior ridges all layers, a
   closed front and layer volume equal to the volume between wall and front; mixed CGNS passes
   cgnscheck with matching connection coordinates. Demo: wing with fans and optimisation,

@@ -118,6 +118,29 @@ void expect_positive(const og::Inflation3DResult& r) {
   }
 }
 
+// Every cell meets the quality floor (scaled Jacobian and skewness).
+void expect_floor(const og::Inflation3DResult& r, const og::QualityFloor& floor = {}) {
+  auto check = [&](const auto& cells, int n) {
+    for (const auto& c : cells) {
+      const og::CellQuality3D q = og::cell_quality_3d_full(r.points, c.data(), n);
+      EXPECT_TRUE(floor.passes(q)) << "cell of " << n << " nodes: scaled Jacobian "
+                                   << q.scaled_jacobian << ", skewness " << q.skewness;
+    }
+  };
+  check(r.tets, 4);
+  check(r.pyramids, 5);
+  check(r.prisms, 6);
+  check(r.hexes, 8);
+}
+
+// No floor beyond valid cells (to test the stopping mechanics on their own).
+og::QualityFloor no_floor() {
+  og::QualityFloor f;
+  f.min_jacobian = -1.0;
+  f.max_skewness = 1.0;
+  return f;
+}
+
 double dist(const P3& a, const P3& b) {
   return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
@@ -281,6 +304,7 @@ TEST(Inflation3D, PrismLayersOnClosedBody) {
   EXPECT_EQ(r.max_layers, 4);
   EXPECT_EQ(r.front.size(), walls);
   expect_positive(r);
+  expect_floor(r);
   expect_closed_layers(b.in, r);
   // With fans at the 90-degree edges (two fan columns each) and caps at the corners: every wall
   // node gets all layers (also with the transition to the core size, which must not stop a
@@ -290,6 +314,7 @@ TEST(Inflation3D, PrismLayersOnClosedBody) {
   const auto fans = og::inflate_3d(b.in, with_transition);
   EXPECT_TRUE(fans.stops.empty());
   expect_positive(fans);
+  expect_floor(fans);
   expect_closed_layers(b.in, fans);
   EXPECT_EQ(fans.fan_columns, 12 * 11 * 2 + 8 * (3 * 2 + 1));
   for (std::size_t i = 0; i < b.in.points.size(); ++i) {
@@ -332,6 +357,7 @@ TEST(Inflation3D, HexLayersOnQuads) {
   EXPECT_EQ(r.hexes.size(), 3U * 6U * 25U);
   EXPECT_TRUE(r.prisms.empty());
   expect_positive(r);
+  expect_floor(r);
   for (const auto& f : r.front) {
     EXPECT_EQ(f.size(), 4U);
   }
@@ -346,12 +372,17 @@ TEST(Inflation3D, FixedNodesTaperAndTransitionCells) {
   for (const std::size_t f : faces[5]) {  // axis z, side max
     b.in.wall[f] = true;
   }
-  const auto r = og::inflate_3d(b.in, options(6));
+  // The taper mechanics without the quality floor (its transition cells are thin: one layer of
+  // height 0.01 over cells 0.125 wide).
+  auto o = options(6);
+  o.floor = no_floor();
+  const auto r = og::inflate_3d(b.in, o);
   EXPECT_GT(r.stops.at("fixed"), 0);
   EXPECT_GT(r.stops.at("slope"), 0);
   EXPECT_FALSE(r.hexes.empty());
   EXPECT_FALSE(r.pyramids.empty() && r.tets.empty());
   expect_positive(r);
+  expect_floor(r, no_floor());
   for (std::size_t i = 0; i < b.in.points.size(); ++i) {
     const P3& p = b.in.points[i];
     if (p[2] == 2.5 && (p[0] == 1.5 || p[0] == 2.5 || p[1] == 1.5 || p[1] == 2.5)) {
@@ -359,6 +390,13 @@ TEST(Inflation3D, FixedNodesTaperAndTransitionCells) {
       EXPECT_EQ(r.reason[i], "fixed");
     }
   }
+  // With the quality floor (the default) no cell misses it: a column whose cells would miss it
+  // stops instead. Here every step towards the fixed rim does (one layer of 0.01 over 0.125),
+  // so the columns stop and the face keeps no layers.
+  const auto strict = og::inflate_3d(b.in, options(6));
+  expect_positive(strict);
+  expect_floor(strict);
+  EXPECT_GT(strict.stops.at("quality"), 0);
 }
 
 TEST(Inflation3D, SlidingNodesStayInTheirPlane) {
@@ -392,6 +430,7 @@ TEST(Inflation3D, SlidingNodesStayInTheirPlane) {
     }
   }
   expect_positive(r);
+  expect_floor(r);
 }
 
 TEST(Inflation3D, ProximityStopsFacingFronts) {
@@ -404,6 +443,7 @@ TEST(Inflation3D, ProximityStopsFacingFronts) {
   const auto r = og::inflate_3d(b.in, o);
   EXPECT_GT(r.stops.at("proximity"), 0);
   expect_positive(r);
+  expect_floor(r);
   for (std::size_t i = 0; i < b.in.points.size(); ++i) {
     const P3& p = b.in.points[i];
     if ((p[0] == 2.0 || p[0] == 2.1) && p[1] > 1 && p[1] < 2 && p[2] > 1 && p[2] < 2) {
@@ -437,6 +477,7 @@ TEST(Inflation3D, FansAtSharpRidges) {
   // Every wall node gets all layers.
   const auto r = og::inflate_3d(b.in, o);
   expect_positive(r);
+  expect_floor(r);
   expect_closed_layers(b.in, r);
   EXPECT_GT(r.fan_columns, 5 * 2 * 5);
   EXPECT_TRUE(r.stops.empty());
@@ -448,10 +489,13 @@ TEST(Inflation3D, FansAtSharpRidges) {
   // The first layer of a fan is made of prisms lying on their sides; hexahedra above.
   EXPECT_GT(r.prisms.size(), 0U);
   // Fans only at the sharp edges: the four ridge ends (where they meet the end caps) do not
-  // grow and the fans narrow to them; the interior ridge nodes still get all layers.
+  // grow and the fans narrow to them; the interior ridge nodes still get all layers (without
+  // the quality floor: the steps towards the ridge ends are thin).
   o.fan_threshold_deg = 120.0;
+  o.floor = no_floor();
   const auto ends = og::inflate_3d(b.in, o);
   expect_positive(ends);
+  expect_floor(ends, no_floor());
   expect_closed_layers(b.in, ends);
   EXPECT_EQ(ends.fan_columns, 5 * 2 * 3);
   EXPECT_EQ(ends.stops.at("ridge end"), 4);
@@ -464,6 +508,10 @@ TEST(Inflation3D, FansAtSharpRidges) {
     }
   }
   EXPECT_EQ(ridge_nodes, 6);
+  o.floor = {};
+  const auto strict_ends = og::inflate_3d(b.in, o);
+  expect_positive(strict_ends);
+  expect_floor(strict_ends);
   // Without fans the sharp edges stop at once (their normals are not visible from both sides).
   o.fan_threshold_deg = 180.0;
   const auto none = og::inflate_3d(b.in, o);

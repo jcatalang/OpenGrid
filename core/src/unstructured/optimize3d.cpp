@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "opengrid/core/geom/vec3.hpp"
+#include "opengrid/core/quality/quality_cells3d.hpp"
 
 namespace og {
 
@@ -30,45 +31,6 @@ Index sz(std::size_t n) {
 Vec3 at(const std::vector<std::array<double, 3>>& points, Index i) {
   const auto& p = points[u(i)];
   return {p[0], p[1], p[2]};
-}
-
-// Corners (node, three neighbours, positive triple product for a valid cell) and the factor
-// scaling the ideal cell's corner value to 1, per cell size (as CELL_CORNERS in volumes.py).
-struct CornerTable {
-  std::vector<std::array<int, 4>> corners;
-  double factor = 1.0;
-};
-
-const CornerTable& corner_table(int n) {
-  static const CornerTable tet{{{0, 1, 2, 3}, {1, 2, 0, 3}, {2, 0, 1, 3}, {3, 0, 2, 1}},
-                               std::numbers::sqrt2};
-  static const CornerTable pyramid{{{0, 1, 3, 4}, {1, 2, 0, 4}, {2, 3, 1, 4}, {3, 0, 2, 4}},
-                                   std::numbers::sqrt2};
-  static const CornerTable prism{
-      {{0, 1, 2, 3}, {1, 2, 0, 4}, {2, 0, 1, 5}, {3, 5, 4, 0}, {4, 3, 5, 1}, {5, 4, 3, 2}},
-      2.0 / std::numbers::sqrt3};
-  static const CornerTable hex{{{0, 1, 3, 4},
-                                {1, 2, 0, 5},
-                                {2, 3, 1, 6},
-                                {3, 0, 2, 7},
-                                {4, 7, 5, 0},
-                                {5, 4, 6, 1},
-                                {6, 5, 7, 2},
-                                {7, 6, 4, 3}},
-                               1.0};
-  if (n == 4) {
-    return tet;
-  }
-  if (n == 5) {
-    return pyramid;
-  }
-  if (n == 6) {
-    return prism;
-  }
-  if (n == 8) {
-    return hex;
-  }
-  throw std::invalid_argument("cell_quality_3d: a cell has 4, 5, 6 or 8 nodes");
 }
 
 // Edges of each cell size (local node pairs).
@@ -183,6 +145,11 @@ class Optimizer {
         break;
       }
     }
+    r.below_floor_before = below_floor();
+    if (opt_.move_nodes && r.below_floor_before > 0) {
+      r.moved += rescue();
+    }
+    r.below_floor_after = below_floor();
     std::tie(r.worst_after, r.below_after, r.inverted_after) = summary();
     r.points = points_;
     for (const Cell& cell : cells_) {
@@ -197,6 +164,93 @@ class Optimizer {
  private:
   [[nodiscard]] double quality(const Cell& cell) const {
     return cell_quality_3d(points_, cell.v.data(), cell.n);
+  }
+
+  // Floor margin of a cell: >= 0 when it meets the quality floor.
+  [[nodiscard]] double margin(const Cell& cell) const {
+    const CellQuality3D q = cell_quality_3d_full(points_, cell.v.data(), cell.n);
+    return std::min(q.scaled_jacobian - opt_.floor.min_jacobian,
+                    opt_.floor.max_skewness - q.skewness);
+  }
+
+  [[nodiscard]] Index below_floor() const {
+    Index count = 0;
+    for (const Cell& cell : cells_) {
+      if (cell.alive && margin(cell) < 0.0) {
+        ++count;
+      }
+    }
+    return count;
+  }
+
+  [[nodiscard]] double worst_margin(std::size_t v) const {
+    double worst = std::numeric_limits<double>::infinity();
+    for (Index k = start_[v]; k < start_[v + 1]; ++k) {
+      worst = std::min(worst, margin(cells_[u(node_cells_[u(k)])]));
+    }
+    return worst;
+  }
+
+  Index rescue() {
+    build_node_cells();
+    std::vector<std::pair<double, std::size_t>> order;
+    for (std::size_t v = 0; v < points_.size(); ++v) {
+      if (movable_[v] && start_[v] != start_[v + 1]) {
+        const double worst = worst_margin(v);
+        if (worst < 0.0) {
+          order.emplace_back(worst, v);
+        }
+      }
+    }
+    std::sort(order.begin(), order.end());
+    Index moved = 0;
+    for (const auto& [initial, v] : order) {
+      double current = worst_margin(v);
+      if (current >= 0.0) {
+        continue;
+      }
+      double mean = 0.0;
+      int count = 0;
+      const Vec3 origin = at(points_, sz(v));
+      for (Index k = start_[v]; k < start_[v + 1]; ++k) {
+        const Cell& cell = cells_[u(node_cells_[u(k)])];
+        for (int j = 0; j < cell.n; ++j) {
+          const Index w = cell.v[static_cast<std::size_t>(j)];
+          if (u(w) != v) {
+            mean += distance(at(points_, w), origin);
+            ++count;
+          }
+        }
+      }
+      mean /= std::max(count, 1);
+      bool improved = false;
+      double step = 0.2 * mean;
+      for (int iteration = 0; iteration < 80 && step > 1e-7 * mean; ++iteration) {
+        const Vec3 here = at(points_, sz(v));
+        Vec3 best_point = here;
+        double best = current;
+        for (const auto& d : kDirections) {
+          const Vec3 p = here + Vec3{d[0], d[1], d[2]} * step;
+          points_[v] = {p.x, p.y, p.z};
+          const double value = worst_margin(v);
+          if (value > best) {
+            best = value;
+            best_point = p;
+          }
+        }
+        points_[v] = {best_point.x, best_point.y, best_point.z};
+        if (best > current) {
+          current = best;
+          improved = true;
+        } else {
+          step *= 0.5;
+        }
+      }
+      if (improved) {
+        ++moved;
+      }
+    }
+    return moved;
   }
 
   [[nodiscard]] std::tuple<double, Index, Index> summary() const {
@@ -609,24 +663,6 @@ class Optimizer {
 };
 
 }  // namespace
-
-double cell_quality_3d(const std::vector<std::array<double, 3>>& points, const std::int64_t* nodes,
-                       int n) {
-  const CornerTable& table = corner_table(n);
-  double worst = 1.0;
-  for (const auto& c : table.corners) {
-    const Vec3 o = at(points, nodes[c[0]]);
-    const Vec3 e1 = at(points, nodes[c[1]]) - o;
-    const Vec3 e2 = at(points, nodes[c[2]]) - o;
-    const Vec3 e3 = at(points, nodes[c[3]]) - o;
-    const double lengths = norm(e1) * norm(e2) * norm(e3);
-    if (lengths <= 0.0) {
-      return -1.0;
-    }
-    worst = std::min(worst, dot(cross(e1, e2), e3) / lengths * table.factor);
-  }
-  return worst;
-}
 
 Optimize3DResult optimize_3d(const Optimize3DInput& input, const Optimize3DOptions& options) {
   if (input.movable.size() != input.points.size()) {

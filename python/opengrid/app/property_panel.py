@@ -147,7 +147,7 @@ class ExtrusionEditor(QWidget):
 
 class VolumeEditor(QWidget):
     """Volume generator: backend, max size (empty: none), grading, pyramids, quality
-    optimisation, and boundary layers (wall faces; empty: none)."""
+    optimisation and floor, and boundary layers (wall faces; empty: none)."""
 
     def __init__(self, value: dict, store=None, parent=None):
         super().__init__(parent)
@@ -170,6 +170,11 @@ class VolumeEditor(QWidget):
         self.optimize = QCheckBox("optimise quality")
         self.optimize.setChecked(value["optimize"])
         layout.addRow(self.optimize)
+        floor = value["quality_floor"]
+        self.floor_jacobian = QLineEdit(format_number(floor["min_jacobian"]))
+        self.floor_skewness = QLineEdit(format_number(floor["max_skewness"]))
+        layout.addRow("min scaled Jacobian", self.floor_jacobian)
+        layout.addRow("max skewness", self.floor_skewness)
         inflation = value["inflation"]
         if inflation is None:
             inflation = dict(DEFAULT_VOLUME_INFLATION)
@@ -209,7 +214,18 @@ class VolumeEditor(QWidget):
             "pyramids": self.pyramids.currentText(),
             "inflation": self._inflation(),
             "optimize": self.optimize.isChecked(),
+            "quality_floor": {
+                "min_jacobian": self._one(self.floor_jacobian, "min scaled Jacobian"),
+                "max_skewness": self._one(self.floor_skewness, "max skewness"),
+            },
         }
+
+    @staticmethod
+    def _one(field, label):
+        values = parse_numbers(field.text(), label)
+        if len(values) != 1:
+            raise ParseError(f"{label}: expected one number")
+        return values[0]
 
     def _inflation(self):
         names = [n.strip() for n in self.walls.text().replace(";", ",").split(",") if n.strip()]

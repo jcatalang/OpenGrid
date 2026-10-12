@@ -133,6 +133,44 @@ TEST(Optimize3D, OtherCellsOnTheEdgeBlockEdgeRemoval) {
   EXPECT_EQ(r.tets.size(), 3U);
 }
 
+TEST(Optimize3D, RescueLiftsCellsToTheFloor) {
+  // The centre node next to the bottom face: the bottom tetrahedra are flat (valid but far below
+  // the floor). With threshold 0 the main passes only untangle, so the rescue does the work.
+  og::Optimize3DInput in = cube_around_centre({0.5, 0.5, 0.01});
+  og::Optimize3DOptions opt;
+  opt.threshold = 0.0;
+  opt.swap = false;
+  const og::Optimize3DResult r = og::optimize_3d(in, opt);
+  EXPECT_GT(r.below_floor_before, 0);
+  EXPECT_EQ(r.below_floor_after, 0);
+  EXPECT_GE(r.moved, 1);
+  for (const auto& t : r.tets) {
+    EXPECT_TRUE(opt.floor.passes(og::cell_quality_3d_full(r.points, t.data(), 4)));
+  }
+}
+
+TEST(Optimize3D, QualityOfCells) {
+  // Regular tetrahedron: skewness 0, dihedral 70.53 degrees; cube: 90 degrees everywhere; a flat
+  // tetrahedron misses the floor.
+  const double s3 = std::numbers::sqrt3 / 2.0;
+  const Points tet = {{0, 0, 0}, {1, 0, 0}, {0.5, s3, 0}, {0.5, s3 / 3.0, std::sqrt(2.0 / 3.0)}};
+  const std::array<Index, 4> t = {0, 1, 2, 3};
+  const og::CellQuality3D q = og::cell_quality_3d_full(tet, t.data(), 4);
+  EXPECT_NEAR(q.skewness, 0.0, 1e-12);
+  EXPECT_NEAR(q.min_angle, 70.528779365509, 1e-9);
+  EXPECT_NEAR(q.max_angle, 70.528779365509, 1e-9);
+  const Points cube = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
+                       {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+  const std::array<Index, 8> h = {0, 1, 2, 3, 4, 5, 6, 7};
+  const og::CellQuality3D c = og::cell_quality_3d_full(cube, h.data(), 8);
+  EXPECT_NEAR(c.skewness, 0.0, 1e-12);
+  EXPECT_NEAR(c.min_angle, 90.0, 1e-12);
+  const Points flat = {{0, 0, 0}, {1, 0, 0}, {0.5, s3, 0}, {0.5, s3 / 3.0, 0.01}};
+  const og::CellQuality3D f = og::cell_quality_3d_full(flat, t.data(), 4);
+  EXPECT_FALSE(og::QualityFloor{}.passes(f));
+  EXPECT_GT(f.skewness, 0.95);
+}
+
 TEST(Optimize3D, InvalidInput) {
   og::Optimize3DInput in = two_tets(0.5);
   in.movable.pop_back();

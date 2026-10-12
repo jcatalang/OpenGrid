@@ -782,3 +782,38 @@ tracked.
   - validation and journal;
   - block floor (sheared extrusion).
 - All demos run with their exports, so every demo mesh meets the floor.
+
+## Phase 9a — STEP / IGES import through OpenCASCADE (2026-10-12) — approved
+Phase 9 split into 9a (CAD import), 9b (scripting polish, golden cases from scripts, split / join
+and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at the 8c review) and
+9c (performance, packaging).
+
+### Built
+- `backends/occt` (`og_occt`, option `OG_WITH_OCCT`) and module `opengrid._occt.read_cad`: STEP /
+  IGES read, ShapeFix, sewing (when free edges exist; at the larger of the requested and the
+  file's tolerances), small-edge removal, splitting of periodic faces and closed edges; B-spline
+  curves (ends set to the vertices) and trimmed B-spline surfaces; topology with wires, edge use
+  counts and a healing log.
+- `og.import_cad(path, spacing, max_turn_angle, domains, ...)` → `CadImport`: curves, surfaces,
+  connectors, domains ("unstructured" / "auto" / "none"), skipped faces with reasons, free and
+  non-manifold edges, `report()`. One undo step; the journal holds explicit `create_*` calls.
+- `CreateEntities(optional_kinds=...)`: invalid domains are skipped and reported instead of
+  failing the import.
+- GUI: File → Import CAD (STEP / IGES), report in the log.
+
+### Results (demo `09a_cad_import.py`)
+- Bracket (block with four filleted edges and a hole, written by OCCT): 30 curves, 6 surfaces,
+  12 domains (10 structured with "auto"), 0.05 s import.
+- Solid: 12 441 tetrahedra; volume within +3.3e-4 of the CAD volume (faceting).
+- Fluid around it: 12 layers at every wall node, 115 979 cells, 0 below the quality floor
+  (worst scaled Jacobian 0.082, skewness 0.917), 6.8 s; CGNS passes cgnscheck.
+- IGES of unsewn faces: 30 free edges sewn at 1e-5 to a closed shell (34 free edges without
+  sewing).
+
+### Verified
+- `ctest` +4 (STEP topology and geometry to 1e-9, end poles = vertices, lengths; IGES sewing;
+  no splitting; scale and errors) → 125.
+- `pytest` +9 (model; entities on the CAD geometry; turning-angle dimensions; "auto" structured
+  faces; option checks; IGES sewing; sphere faces reported; imported solid volume; GUI) → 263.
+- Strict CI build, clang-tidy on the new files, ruff, clang-format, ternary check; all demos
+  01–09a run and earlier outputs are unchanged.

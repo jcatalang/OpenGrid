@@ -5,7 +5,7 @@ when the project is complete. Items fixed in a later phase are removed (see `PRO
 history). Phase tags show where each item came from.
 
 ## Not verified
-- **CI and other platforms** [0–8c]:
+- **CI and other platforms** [0–9a]:
   - GitHub Actions has never run (no remote).
   - The Linux build and the uv-based setup are untested.
 - **Real input devices** [1–3]: real mouse and trackpad interaction is untested (handlers are
@@ -161,11 +161,32 @@ history). Phase tags show where each item came from.
 - **GUI** [8c addendum]: the floor is editable for volumes; for blocks only through the API.
 - **Boundary report cost** [8c addendum]: it now meshes every volume (cached) to check the floor.
 
+## CAD import
+- **Faces with poles or apexes get no domain** [9a]: spheres, cones and similar faces have a
+  degenerate edge, and meshing in their (u, v) parameters breaks at the pole. They are reported;
+  the user builds those domains by hand (e.g. a cubed-sphere layout as in the 08b demo).
+- **Surface frames use a constant metric** [8a, 9a]: unstructured domains on curved CAD faces
+  are meshed in (u, v) scaled by mean tangent lengths; strongly non-uniform parametrisations
+  (some B-spline faces from real CAD) give stretched triangles. Not tested on industrial files.
+- **Only test parts were imported** [9a]: OCCT-written STEP / IGES and a netgen.occ part. Real
+  CAD exports (assemblies, units other than mm, many tiny faces, sliver faces) are untested; no
+  face merging (virtual topology) exists, so every CAD face becomes a domain.
+- **Units** [9a]: coordinates arrive in OCCT's session unit (millimetres); use `scale` to
+  convert. Names, colours and assembly structure (XDE) are not read.
+- **"auto" structured faces** [9a]: only single-wire faces with exactly four edges; a side made
+  of several CAD edges is not recognised, and the propagated dimensions can raise counts on
+  distant faces.
+- **Build-time option** [9a]: `OG_WITH_OCCT` is ON and silently becomes a no-op without
+  OpenCASCADE (a configure message says so); `occt` comes into the conda env as a Netgen
+  dependency and is now listed explicitly.
+
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**
   - Phase 5 → 5a (Delaunay), 5b (advancing front), 5c (quads, smoothing, CGNS unstructured).
   - Phase 7 → 7a (foundation), 7b (smoothing, hyperbolic extrusion).
   - Phase 8 → 8a (volumes), 8b (3D inflation), 8c (optimisation, ridge fans, mixed models).
+  - Phase 9 → 9a (CAD import), 9b (scripting, topology helpers incl. O-grid / butterfly for
+    multi-block hexahedral meshes), 9c (performance, packaging).
 - **Inflation scope** [6]: inflation is part of the unstructured domain generator, not a separate
   entity.
 - **Hyperbolic extrusion** [7b]: explicit marching scheme (see above).

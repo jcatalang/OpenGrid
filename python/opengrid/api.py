@@ -27,6 +27,7 @@ from opengrid.commands import (
 )
 from opengrid.commands.base import JOURNAL_HEADER
 from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d
+from opengrid.io.cad import CadImport, cad_entities, check_options, read_cad_model
 from opengrid.model.blocks import BlockEvaluator
 from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
@@ -917,6 +918,62 @@ class Session:
             [item], label=f"Import {Path(path).name}", comment=f"imported from {Path(path).name}"
         )
         return self.commands.run(command)
+
+    def import_cad(
+        self,
+        path,
+        name: str | None = None,
+        spacing: float | None = None,
+        max_turn_angle: float = 15.0,
+        domains: str = "unstructured",
+        domain_generator: dict | None = None,
+        tolerance: float = 1e-6,
+        scale: float = 1.0,
+        heal: bool = True,
+        sew: bool = True,
+        split_closed: bool = True,
+    ) -> CadImport:
+        """Import a STEP (.step / .stp) or IGES (.iges / .igs) file (needs the OpenCASCADE
+        module, see opengrid.io.cad).
+
+        Creates one ``nurbs`` curve and one connector per CAD edge, and one domain per face
+        (``domains``: "unstructured", "auto" = structured for four-sided faces, or "none"),
+        on a ``nurbs_surface`` for curved faces. Connector dimensions follow ``spacing``
+        (default: 1/40 of the bounding-box diagonal) and ``max_turn_angle`` (degrees of
+        tangent turning per segment). ``tolerance`` is the healing / sewing precision (the
+        file's own tolerances are used when larger) and ``scale`` multiplies the coordinates
+        (OCCT reads lengths in millimetres). ``heal``, ``sew`` and ``split_closed`` (split
+        periodic faces and closed edges) switch the healing steps. ``domain_generator`` is
+        passed to every unstructured domain. Faces that cannot be meshed are skipped and
+        reported in the result (``CadImport.report()``); one undo step undoes the import.
+        """
+        check_options(spacing, max_turn_angle, domains, tolerance, scale)
+        model = read_cad_model(path, tolerance, scale, heal, sew, split_closed)
+        base = name
+        if base is None:
+            base = _sanitize(Path(path).stem)
+        items, result = cad_entities(
+            model, base, spacing, max_turn_angle, domains, domain_generator, Path(path).name
+        )
+        comment = (
+            f"imported from {Path(path).name} (tolerance {tolerance!r}, scale {scale!r}, "
+            f"heal {heal}, sew {sew}, split_closed {split_closed})"
+        )
+        command = CreateEntities(
+            items,
+            label=f"Import {Path(path).name}",
+            comment=comment,
+            optional_kinds=("domain", "unstructured_domain"),
+        )
+        self.commands.run(command)
+        failed = {where: reason for where, reason in command.failed}
+        result.domains = [d for d in result.domains if d not in failed]
+        result.structured = [d for d in result.structured if d not in failed]
+        for where, reason in command.failed:
+            number = int(where.rsplit("-", 1)[1])
+            result.skipped_faces.append((number, f"invalid domain: {reason}"))
+        result.skipped_faces.sort()
+        return result
 
     # -------------------------------------------------------------- queries
     def entity(self, name: str) -> Entity:

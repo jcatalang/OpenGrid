@@ -69,7 +69,7 @@ will be decided then.
 | pytest, pytest-qt, ruff, clang-format/tidy | dev tools | MIT / MIT / MIT / Apache-2.0 | — | dev only |
 | **Netgen** | 3D volume tet generation | LGPL-2.1 | dynamic, optional plugin | Phase 8 |
 | **mmg** (mmg3d/mmgs) | 3D tet optimisation / adaptation | LGPL-3.0 | dynamic, optional plugin | Phase 8 |
-| OpenCASCADE | STEP/IGES import | LGPL-2.1 + exception | dynamic, optional plugin | Phase 9 |
+| OpenCASCADE (OCCT 8) | STEP/IGES import | LGPL-2.1 + exception | dynamic, optional plugin | Phase 9a |
 
 **Not used by default (license incompatible with closed in-house use):** TetGen (AGPL-3),
 Shewchuk's *Triangle* program (non-free for commercial use — note: only his *predicates* are
@@ -99,8 +99,9 @@ must keep Qt and backend libraries as separate replaceable shared libraries).
 - Compile flags: `-Wall -Wextra -Wpedantic -Wshadow -Wconversion` (warnings as errors in CI),
   and **`-ffp-contract=off`** everywhere to keep floating-point results identical between
   debug/release and independent of FMA contraction decisions (determinism requirement).
-- Options: `OG_BUILD_TESTS` (ON), `OG_BUILD_PYTHON` (ON), `OG_WITH_NETGEN`, `OG_WITH_MMG`,
-  `OG_WITH_OCCT` (OFF).
+- Options: `OG_BUILD_TESTS` (ON), `OG_BUILD_PYTHON` (ON), `OG_WITH_CGNS` (ON), `OG_WITH_OCCT`
+  (ON; skipped with a message when OpenCASCADE is not found). Netgen is a run-time Python
+  dependency, not a build option (Phase 8a); mmg is not used (Phase 8c).
 
 ## 4. C++ / Python boundary
 
@@ -780,6 +781,34 @@ segment, so derivative jumps at knots never cost accuracy.
   non-sliding face, a ridge end, a collision), its neighbours stop too, possibly over the whole
   face; walls ending at fixed nodes keep no layers. Stretched wall meshes lose layers (the demo
   wing went from 25 to 61 spanwise points).
+
+### CAD import (Phase 9a)
+- **Isolation:** `backends/occt` builds the static library `og_occt` (OCCT headers as system
+  includes, linked to the TK* toolkits dynamically) and the separate module `opengrid._occt`.
+  `og_core` and `_core` never see OCCT; without OpenCASCADE the build skips both and
+  `og.import_cad` raises a clear error. OCCT's console messages are muted during a read.
+- **Pipeline** (`cad_import.cpp`): read (STEP / IGES by extension) → optional scale →
+  ShapeFix_Shape → sewing (only when there are free edges, so solids stay solids; at the larger of
+  `tolerance` and the file's own edge / vertex tolerances, since IGES commonly declares 1e-5) →
+  ShapeFix_Wireframe (wire gaps, edges below the tolerance) → split periodic faces and closed
+  edges (the meshers need simply parametrised faces and open connectors) → topology maps.
+- **Geometry:** each edge's 3D curve trimmed to its range becomes a clamped B-spline
+  (`GeomConvert`, approximation as fallback); its end poles are set to the vertex points, so
+  curves of adjacent edges meet bitwise (the connector-end canonicalisation then merges them
+  exactly). Each face's surface trimmed to its (u, v) bounds becomes a B-spline surface. Both
+  become ordinary `nurbs` / `nurbs_surface` entities, so projects and journals do not need OCCT.
+- **Entities** (`opengrid/io/cad.py`, `Session.import_cad`): one curve and connector per edge
+  (dimension = max(length / spacing, turning / max_turn_angle) + 1, spacing defaulting to 1/40 of
+  the bounding-box diagonal); one domain per face: none for planar faces' surfaces (the meshers'
+  plane frame is exact), a NURBS surface otherwise. `domains="auto"` makes four-sided single-wire
+  faces structured and unifies opposite sides' dimensions by union-find (chains of four-sided
+  faces share one count). Loops come from the wires (outer first); faces in a plane z = const
+  are re-oriented to the 2D convention, other frames orient themselves.
+- **Reporting, not guessing:** faces with degenerate edges (sphere poles, cone apexes) get no
+  domain and are listed; a domain that fails validation is skipped (`CreateEntities`'
+  `optional_kinds`) and listed with the reason; free (one face) and non-manifold (> 2 faces)
+  edges are listed by connector. `CadImport.report()` gives the whole account, including the
+  healing log.
 
 ## 7. 3D tet backend decision
 

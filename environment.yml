@@ -31,6 +31,8 @@ dependencies:
   - h5py
   # 3D tetrahedral backend (LGPL-2.1, dynamic, optional at runtime; Phase 8)
   - netgen
+  # STEP / IGES import (OCCT, LGPL-2.1 + exception, dynamic, optional at build time; Phase 9a)
+  - occt
   # test / lint
   - pytest
   - pytest-qt

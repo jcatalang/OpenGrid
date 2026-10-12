@@ -160,6 +160,7 @@ class MainWindow(QMainWindow):
         )
         self.import_dat_action = self._action("Import &airfoil (.dat)…", self.import_airfoil)
         self.import_csv_action = self._action("Import &points (CSV)…", self.import_csv)
+        self.import_cad_action = self._action("Import &CAD (STEP / IGES)…", self.import_cad)
         self.save_journal_action = self._action("Save &journal…", self.save_journal)
         self.quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
 
@@ -276,6 +277,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.import_dat_action)
         file_menu.addAction(self.import_csv_action)
+        file_menu.addAction(self.import_cad_action)
         file_menu.addSeparator()
         file_menu.addAction(self.export_vtkhdf_action)
         file_menu.addAction(self.export_cgns_action)
@@ -1064,6 +1066,39 @@ class MainWindow(QMainWindow):
         log.info("imported %s as %s", Path(path).name, ", ".join(names))
         self.scene.fit()
         return names
+
+    def import_cad(self, path: str | None = None, domains: str | None = None):
+        """Import a STEP / IGES file (Session.import_cad); the report goes to the log."""
+        if path is None:
+            path, _filter = QFileDialog.getOpenFileName(
+                self,
+                "Import CAD",
+                "",
+                "CAD files (*.step *.stp *.iges *.igs);;All files (*)",
+            )
+            if not path:
+                return None
+        if domains is None:
+            domains, ok = QInputDialog.getItem(
+                self,
+                "Import CAD",
+                "Create faces as domains:",
+                ["unstructured", "auto (structured if four-sided)", "none"],
+                0,
+                False,
+            )
+            if not ok:
+                return None
+            domains = domains.split(" ")[0]
+        try:
+            result = self.session.import_cad(path, domains=domains)
+        except (ValidationError, RuntimeError) as error:
+            self._report_error("Cannot import CAD", error)
+            return None
+        for line in result.report().splitlines():
+            log.info("%s", line)
+        self.scene.fit()
+        return result
 
     def import_csv(self, path: str | None = None, mode: str | None = None) -> list[str]:
         if path is None:

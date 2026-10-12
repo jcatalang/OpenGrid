@@ -140,10 +140,20 @@ class CreateEntities(Command):
     file still existing or being unchanged.
     """
 
-    def __init__(self, items: list[tuple[str, dict, str | None]], label: str, comment: str = ""):
+    def __init__(
+        self,
+        items: list[tuple[str, dict, str | None]],
+        label: str,
+        comment: str = "",
+        optional_kinds: tuple[str, ...] = (),
+    ):
         self.items = items
         self.label = label
         self.comment = comment
+        # Items of these kinds that fail validation are skipped and listed in ``failed``
+        # (name, reason) instead of failing the whole command (e.g. one unmeshable CAD face).
+        self.optional_kinds = optional_kinds
+        self.failed: list[tuple[str, str]] = []
         self._script = ""
 
     def execute(self, store: Store) -> list[str]:
@@ -151,11 +161,20 @@ class CreateEntities(Command):
         if self.comment:
             lines.append(f"# {self.comment}")
         names = []
+        self.failed = []
         for kind, raw_params, name in self.items:
             where = name
             if where is None:
                 where = f"new {kind}"
-            params = normalize_params(kind, raw_params, where, store)
+            if kind in self.optional_kinds:
+                try:
+                    params = normalize_params(kind, raw_params, where, store)
+                except ValidationError as error:
+                    reason = "; ".join(issue.message for issue in error.issues)
+                    self.failed.append((where, reason))
+                    continue
+            else:
+                params = normalize_params(kind, raw_params, where, store)
             entity = store.add(kind, params, name)
             names.append(entity.name)
             lines.append(create_call(kind, params, entity.name, store))

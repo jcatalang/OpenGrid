@@ -157,8 +157,31 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Element-type counts as expected, no negative volumes, volume vs analytic within 1e-6, inflation height/growth achieved.
 - Demos: sphere in a box with prism layers; wing stub hybrid. Export VTKHDF, CGNS (mixed sections + BCs), Gmsh.
 
-## Phase 9 — CAD import, scripting polish, performance
-- Optional STEP/IGES import via OCCT, with healing tolerances and automatic connector/domain creation.
-- All golden cases are reproduced from scripts alone (tested).
-- Performance targets from SPEC.md measured by a benchmark script in Release on M1. OpenMP/TBB for hot loops, with determinism preserved.
+## Phase 9 — CAD import, scripting polish, performance *(split: 9a CAD import, 9b scripting + topology helpers, 9c performance + packaging)*
+
+### 9a — STEP / IGES import (OCCT)
+- Optional backend `backends/occt` (`OG_WITH_OCCT`, skipped when OpenCASCADE is not found) and
+  module `opengrid._occt`; `og_core` does not depend on it.
+- STEP and IGES read; healing (ShapeFix), sewing at the larger of the requested and the file's
+  tolerances, small-edge removal, splitting of periodic faces and closed edges; each step logged.
+- Edges → B-spline curves whose ends are bitwise the vertices; converted curves match OCCT's
+  edge lengths to 1e-9 and lie on the part's surfaces to 1e-9. Faces → B-spline surfaces trimmed
+  to the face's (u, v) bounds.
+- `og.import_cad`: one `nurbs` curve + connector per edge (dimension from spacing and turning
+  angle), one domain per face (unstructured, or structured for four-sided faces with shared
+  opposite dimensions), one undo step, journal replays without the file. Faces that cannot be
+  meshed (poles), free and non-manifold edges are reported.
+- Tested: STEP solid, unsewn IGES sewn into a closed shell, sphere faces reported, imported
+  solid filled with tetrahedra; GUI action. Demo: filleted bracket with a hole — solid and
+  external flow with boundary layers, exported.
+
+### 9b — Scripting polish, topology helpers
+- Python scripting API documentation and examples reproducing all golden cases from scripts only
+  (tested).
+- Domain/block splitting and joining at given indices; O-grid / butterfly topology helpers for
+  multi-block hexahedral meshes.
+
+### 9c — Performance and packaging
+- Performance targets from SPEC.md measured by a benchmark script in Release on M1. OpenMP/TBB
+  for hot loops, with determinism preserved.
 - Packaging: macOS arm64 app bundle; AppImage or conda package for Linux.

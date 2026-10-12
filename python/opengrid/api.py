@@ -464,8 +464,11 @@ class Session:
         """Unstructured 3D volume (tetrahedra, pyramids on quad faces) enclosed by the given
         domains (one or more closed shells). ``generator``: ``{"backend": "netgen",
         "max_size": None, "grading": 0.3, "pyramids": "auto" | "always" | "never",
-        "inflation": None}``. ``inflation``: boundary layers (prisms on triangles, hexahedra on
-        quads) from wall faces, ``{"faces": [domains], "first_height", "growth_rate": 1.2,
+        "inflation": None, "optimize": True}``. ``optimize``: improve cells with a scaled
+        Jacobian below 0.3 by moving interior nodes and pyramid apexes and swapping tetrahedra
+        (boundary and layer nodes never move). ``inflation``: boundary layers (prisms on
+        triangles, hexahedra on quads, fans at convex edges turning more than 60 degrees) from
+        wall faces, ``{"faces": [domains], "first_height", "growth_rate": 1.2,
         "layers": 30, "total_thickness": None, "transition": True, "slide": True}``; with
         ``slide`` the layers slide along planar unstructured faces that meet the walls and are
         used by this volume only (those faces are re-meshed around the layers)."""
@@ -479,8 +482,9 @@ class Session:
     def volume_mesh(self, name: str) -> dict:
         """``{"points", "tets" (m, 4), "pyramids" (k, 5), "prisms" (k, 6), "hexes" (k, 8),
         "faces" {domain id: boundary cells}, "inflation" (None or {"max_layers", "layers",
-        "height", "stops", ...}), "warnings", ...}`` (boundary nodes first, identical to the face
-        meshes)."""
+        "height", "stops", ...}), "optimization" (None or {"moved", "swaps_23", "swaps_32",
+        "worst_before", "worst_after", "below_before", "below_after"}), "warnings", ...}``
+        (boundary nodes first, identical to the face meshes)."""
         return self.volumes.mesh(self.store.get(name).id)
 
     def volume_quality(self, name: str) -> dict:
@@ -740,17 +744,14 @@ class Session:
         )
 
     def export_cgns(self, path, base_name: str = "OpenGrid") -> dict:
-        """Structured CGNS: zones, families, BCs per patch and 1-to-1 connectivity; the boundary
-        must validate."""
-        from opengrid.io.cgns import write_cgns, write_cgns_blocks
+        """CGNS: structured zones (domains / blocks) and unstructured zones (unstructured domains /
+        volumes) in one base, families, BCs per patch and connectivity; the boundary must
+        validate."""
+        from opengrid.io.cgns import write_cgns, write_cgns_3d
 
         report = self._require_valid_boundary()
         if self.is_3d():
-            if self.store.entities("volume"):
-                from opengrid.io.cgns import write_cgns_volumes
-
-                return write_cgns_volumes(path, self, base_name)
-            return write_cgns_blocks(path, self, self.topology(), base_name)
+            return write_cgns_3d(path, self, base_name)
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
     def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:

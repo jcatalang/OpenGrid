@@ -1,6 +1,6 @@
-// CGNS export of 2D grids: one base (cell and physical dimension 2) with structured zones (one
-// per block) and unstructured zones (one per unstructured domain), Family_t nodes, boundary
-// conditions (BC_t, FamilySpecified + FamilyName) and connectivity.
+// CGNS export of 2D grids (3D: see write_cgns_3d below): one base (cell and physical dimension 2)
+// with structured zones (one per block) and unstructured zones (one per unstructured domain),
+// Family_t nodes, boundary conditions (BC_t, FamilySpecified + FamilyName) and connectivity.
 //  * Structured zones: BCs as PointRange; 1-to-1 connectivity (GridConnectivity1to1_t). Index
 //    ranges are 1-based (CGNS convention): {imin, jmin, imax, jmax}.
 //  * Unstructured zones: element sections "Triangles" (TRI_3) and "Quadrilaterals" (QUAD_4),
@@ -164,5 +164,17 @@ void write_cgns_unstructured_3d(const std::string& path, const std::string& base
                                 const std::vector<CgnsUnstructuredZone3D>& zones,
                                 const std::vector<CgnsFamily>& families,
                                 const std::vector<CgnsVertexConnection>& vertex_connections);
+
+// Mixed 3D models: structured zones (blocks) first, then unstructured zones, numbered globally.
+// Boundaries and 1-to-1 connections refer to structured zones; vertex connections may join any
+// two zones (points: (i, j, k) triples on structured zones, vertex numbers on unstructured ones,
+// all 1-based), as in write_cgns_2d.
+void write_cgns_3d(const std::string& path, const std::string& base_name,
+                   const std::vector<CgnsBlock>& blocks,
+                   const std::vector<CgnsUnstructuredZone3D>& unstructured_zones,
+                   const std::vector<CgnsFamily>& families,
+                   const std::vector<CgnsBoundary3D>& boundaries,
+                   const std::vector<CgnsConnection3D>& connections,
+                   const std::vector<CgnsVertexConnection>& vertex_connections);
 
 }  // namespace og

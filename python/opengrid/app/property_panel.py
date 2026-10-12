@@ -146,8 +146,8 @@ class ExtrusionEditor(QWidget):
 
 
 class VolumeEditor(QWidget):
-    """Volume generator: backend, max size (empty: none), grading, pyramids, and boundary layers
-    (wall faces; empty: none)."""
+    """Volume generator: backend, max size (empty: none), grading, pyramids, quality
+    optimisation, and boundary layers (wall faces; empty: none)."""
 
     def __init__(self, value: dict, store=None, parent=None):
         super().__init__(parent)
@@ -167,6 +167,9 @@ class VolumeEditor(QWidget):
         layout.addRow("max size", self.max_size)
         layout.addRow("grading", self.grading)
         layout.addRow("pyramids", self.pyramids)
+        self.optimize = QCheckBox("optimise quality")
+        self.optimize.setChecked(value["optimize"])
+        layout.addRow(self.optimize)
         inflation = value["inflation"]
         if inflation is None:
             inflation = dict(DEFAULT_VOLUME_INFLATION)
@@ -205,6 +208,7 @@ class VolumeEditor(QWidget):
             "grading": grading[0],
             "pyramids": self.pyramids.currentText(),
             "inflation": self._inflation(),
+            "optimize": self.optimize.isChecked(),
         }
 
     def _inflation(self):

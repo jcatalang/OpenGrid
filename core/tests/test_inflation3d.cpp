@@ -131,11 +131,146 @@ og::Inflation3DOptions options(int layers) {
   return o;
 }
 
+// A prism of diamond section (sharp edges at x = 0 and x = 2, wedge half angle atan(t / 1)) from
+// z = 0 to z = 1, all of it wall, faces oriented into the body (out of the region).
+void diamond(Builder& b, double t, int nx, int nz) {
+  auto y_of = [&](int i, double sign) {
+    return sign * t * (1.0 - std::abs(i - nx) / static_cast<double>(nx));
+  };
+  // Section loop counter-clockwise seen from +z: lower chain x = 0..2, then upper chain back.
+  std::vector<std::array<double, 2>> loop;
+  loop.reserve(4 * static_cast<std::size_t>(nx));
+  for (int i = 0; i < 2 * nx; ++i) {
+    loop.push_back({static_cast<double>(i) / nx, y_of(i, -1.0)});
+  }
+  for (int i = 2 * nx; i > 0; --i) {
+    loop.push_back({static_cast<double>(i) / nx, y_of(i, 1.0)});
+  }
+  const std::size_t n = loop.size();
+  auto add = [&](const std::vector<Index>& cell) {
+    b.in.faces.push_back(cell);
+    b.in.wall.push_back(true);
+    b.in.face_group.push_back(100);
+  };
+  for (int k = 0; k < nz; ++k) {
+    const double z0 = static_cast<double>(k) / nz;
+    const double z1 = static_cast<double>(k + 1) / nz;
+    for (std::size_t i = 0; i < n; ++i) {
+      const auto& p = loop[i];
+      const auto& q = loop[(i + 1) % n];
+      // Outward (out of the body) is (q - p) x z for a counter-clockwise loop; into the body:
+      // reverse.
+      add({b.point({p[0], p[1], z0}), b.point({p[0], p[1], z1}), b.point({q[0], q[1], z1}),
+           b.point({q[0], q[1], z0})});
+    }
+  }
+  // End caps: strips between the lower and upper chains, as triangles.
+  for (const double z : {0.0, 1.0}) {
+    for (int i = 0; i < 2 * nx; ++i) {
+      const Index l0 = b.point({static_cast<double>(i) / nx, y_of(i, -1.0), z});
+      const Index l1 = b.point({static_cast<double>(i + 1) / nx, y_of(i + 1, -1.0), z});
+      const Index u0 = b.point({static_cast<double>(i) / nx, y_of(i, 1.0), z});
+      const Index u1 = b.point({static_cast<double>(i + 1) / nx, y_of(i + 1, 1.0), z});
+      std::vector<std::vector<Index>> cells;
+      if (i == 0) {
+        cells = {{l0, l1, u1}};
+      } else if (i == 2 * nx - 1) {
+        cells = {{l0, l1, u0}};
+      } else {
+        cells = {{l0, l1, u1}, {l0, u1, u0}};
+      }
+      for (auto cell : cells) {
+        // Counter-clockwise seen from +z points out at z = 1 and in at z = 0.
+        if (z > 0.5) {
+          std::reverse(cell.begin(), cell.end());
+        }
+        add(cell);
+      }
+    }
+  }
+}
+
+// Signed volume (divergence theorem) of polygons, quads split from their centroid.
+double signed_volume(const std::vector<P3>& p, const std::vector<std::vector<Index>>& polys) {
+  double v = 0.0;
+  for (const auto& poly : polys) {
+    P3 c{};
+    for (const Index i : poly) {
+      for (std::size_t k = 0; k < 3; ++k) {
+        c[k] += p[u(i)][k] / static_cast<double>(poly.size());
+      }
+    }
+    for (std::size_t i = 0; i < poly.size(); ++i) {
+      v += det({0, 0, 0}, c, p[u(poly[i])], p[u(poly[(i + 1) % poly.size()])]) / 6.0;
+    }
+  }
+  return v;
+}
+
+// Total volume of the cells (each from its outward faces).
+double cell_volume(const og::Inflation3DResult& r) {
+  double v = 0.0;
+  for (const auto& t : r.tets) {
+    v += signed_volume(
+        r.points, {{t[0], t[2], t[1]}, {t[0], t[1], t[3]}, {t[1], t[2], t[3]}, {t[0], t[3], t[2]}});
+  }
+  for (const auto& y : r.pyramids) {
+    v += signed_volume(r.points, {{y[0], y[3], y[2], y[1]},
+                                  {y[0], y[1], y[4]},
+                                  {y[1], y[2], y[4]},
+                                  {y[2], y[3], y[4]},
+                                  {y[3], y[0], y[4]}});
+  }
+  for (const auto& w : r.prisms) {
+    v += signed_volume(r.points, {{w[0], w[2], w[1]},
+                                  {w[3], w[4], w[5]},
+                                  {w[0], w[1], w[4], w[3]},
+                                  {w[1], w[2], w[5], w[4]},
+                                  {w[2], w[0], w[3], w[5]}});
+  }
+  for (const auto& h : r.hexes) {
+    v += signed_volume(r.points, {{h[0], h[3], h[2], h[1]},
+                                  {h[4], h[5], h[6], h[7]},
+                                  {h[0], h[1], h[5], h[4]},
+                                  {h[1], h[2], h[6], h[5]},
+                                  {h[2], h[3], h[7], h[6]},
+                                  {h[3], h[0], h[4], h[7]}});
+  }
+  return v;
+}
+
+// Every edge of the front is used once in each direction (a closed, consistently oriented
+// surface), and the layer cells fill the space between the wall and the front exactly.
+void expect_closed_layers(const og::Inflation3DInput& in, const og::Inflation3DResult& r) {
+  std::map<std::pair<Index, Index>, int> uses;
+  for (const auto& poly : r.front) {
+    for (std::size_t i = 0; i < poly.size(); ++i) {
+      uses[{poly[i], poly[(i + 1) % poly.size()]}] += 1;
+    }
+  }
+  for (const auto& [e, k] : uses) {
+    EXPECT_EQ(k, 1);
+    EXPECT_EQ(uses.count({e.second, e.first}), 1U);
+  }
+  std::vector<std::vector<Index>> wall;
+  for (std::size_t f = 0; f < in.faces.size(); ++f) {
+    if (in.wall[f]) {
+      wall.push_back(in.faces[f]);
+    }
+  }
+  const double between = signed_volume(r.points, wall) - signed_volume(r.points, r.front);
+  EXPECT_GT(between, 0.0);
+  EXPECT_NEAR(cell_volume(r), between, 1e-12 * std::abs(between) + 1e-15);
+}
+
 TEST(Inflation3D, PrismLayersOnClosedBody) {
   Builder b;
   b.box({0, 0, 0}, {4, 4, 4}, 4, 1.0, true, false);
   b.box({1.5, 1.5, 1.5}, {2.5, 2.5, 2.5}, 12, -1.0, true, true);
-  const auto r = og::inflate_3d(b.in, options(4));
+  // Without fans first: one prism per wall face and layer.
+  auto plain = options(4);
+  plain.fan_threshold_deg = 180.0;
+  const auto r = og::inflate_3d(b.in, plain);
   std::size_t walls = 0;
   for (const bool w : b.in.wall) {
     walls += static_cast<std::size_t>(w);
@@ -146,6 +281,22 @@ TEST(Inflation3D, PrismLayersOnClosedBody) {
   EXPECT_EQ(r.max_layers, 4);
   EXPECT_EQ(r.front.size(), walls);
   expect_positive(r);
+  expect_closed_layers(b.in, r);
+  // With fans at the 90-degree edges (two fan columns each) and caps at the corners: every wall
+  // node gets all layers (also with the transition to the core size, which must not stop a
+  // corner's centre column for want of neighbours on other nodes).
+  auto with_transition = options(4);
+  with_transition.transition = true;
+  const auto fans = og::inflate_3d(b.in, with_transition);
+  EXPECT_TRUE(fans.stops.empty());
+  expect_positive(fans);
+  expect_closed_layers(b.in, fans);
+  EXPECT_EQ(fans.fan_columns, 12 * 11 * 2 + 8 * (3 * 2 + 1));
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    if (!fans.reason[i].empty()) {
+      EXPECT_EQ(fans.layers[i], 4);
+    }
+  }
   // One layer: every face-interior node rises exactly first_height normal to its face (the
   // marching normal is scaled by 1 / (n . n_face)). Four layers: the central node (normal
   // untouched by the edges) rise first_height * (1.2^4 - 1) / 0.2 straight up.
@@ -175,7 +326,9 @@ TEST(Inflation3D, HexLayersOnQuads) {
   Builder b;
   b.box({0, 0, 0}, {4, 4, 4}, 4, 1.0, false, false);
   b.box({1.5, 1.5, 1.5}, {2.5, 2.5, 2.5}, 5, -1.0, false, true);
-  const auto r = og::inflate_3d(b.in, options(3));
+  auto o = options(3);
+  o.fan_threshold_deg = 180.0;  // the box's edges without fans: one hexahedron per face and layer
+  const auto r = og::inflate_3d(b.in, o);
   EXPECT_EQ(r.hexes.size(), 3U * 6U * 25U);
   EXPECT_TRUE(r.prisms.empty());
   expect_positive(r);
@@ -270,6 +423,57 @@ TEST(Inflation3D, InvalidInput) {
   o = options(3);
   b.in.faces[0] = {0, 1};
   EXPECT_THROW(og::inflate_3d(b.in, o), std::invalid_argument);
+}
+
+TEST(Inflation3D, FansAtSharpRidges) {
+  Builder b;
+  b.box({-2, -2, -2}, {4, 2, 3}, 3, 1.0, true, false);
+  diamond(b, 0.2, 8, 4);
+  auto o = options(5);
+  o.first_height = 0.005;
+  // Default: fans at every edge turning more than 60 degrees: the sharp edges (turning 180 -
+  // 2 atan(0.2) = 157.4 degrees: five fan columns in 30-degree steps) and the 90-degree rims of
+  // the end caps (two each); where they meet, a cap around a centre column closes the corner.
+  // Every wall node gets all layers.
+  const auto r = og::inflate_3d(b.in, o);
+  expect_positive(r);
+  expect_closed_layers(b.in, r);
+  EXPECT_GT(r.fan_columns, 5 * 2 * 5);
+  EXPECT_TRUE(r.stops.empty());
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    if (!r.reason[i].empty()) {
+      EXPECT_EQ(r.layers[i], 5) << "node " << i << " stopped: " << r.reason[i];
+    }
+  }
+  // The first layer of a fan is made of prisms lying on their sides; hexahedra above.
+  EXPECT_GT(r.prisms.size(), 0U);
+  // Fans only at the sharp edges: the four ridge ends (where they meet the end caps) do not
+  // grow and the fans narrow to them; the interior ridge nodes still get all layers.
+  o.fan_threshold_deg = 120.0;
+  const auto ends = og::inflate_3d(b.in, o);
+  expect_positive(ends);
+  expect_closed_layers(b.in, ends);
+  EXPECT_EQ(ends.fan_columns, 5 * 2 * 3);
+  EXPECT_EQ(ends.stops.at("ridge end"), 4);
+  int ridge_nodes = 0;
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    const P3& p = b.in.points[i];
+    if ((p[0] == 0.0 || p[0] == 2.0) && p[2] > 0.0 && p[2] < 1.0) {
+      ++ridge_nodes;
+      EXPECT_EQ(ends.layers[i], 5) << "ridge node " << i << " stopped: " << ends.reason[i];
+    }
+  }
+  EXPECT_EQ(ridge_nodes, 6);
+  // Without fans the sharp edges stop at once (their normals are not visible from both sides).
+  o.fan_threshold_deg = 180.0;
+  const auto none = og::inflate_3d(b.in, o);
+  EXPECT_EQ(none.fan_columns, 0);
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    const P3& p = b.in.points[i];
+    if ((p[0] == 0.0 || p[0] == 2.0) && p[2] > 0.0 && p[2] < 1.0) {
+      EXPECT_LT(none.layers[i], 5);
+    }
+  }
 }
 
 }  // namespace

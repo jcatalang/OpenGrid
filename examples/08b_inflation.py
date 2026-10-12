@@ -11,8 +11,8 @@ on a symmetry plane, in a box [-2, 4] x [-2.5, 2.5] x [0, 3]:
   * the tip cap is a planar unstructured domain: prism layers;
   * the symmetry plane is a planar unstructured domain with the root section as a hole: the
     layers slide along it and it is re-meshed around them;
-  * at the sharp trailing edge a single marching normal is not valid: those columns stop and
-    the layers taper towards them (pyramids and tetrahedra at the steps).
+  * at the sharp trailing edge and the tip rim the layers grow in fans (Phase 8c; in Phase 8b
+    those columns stopped and the layers tapered towards them).
 Both cases: exports CGNS (mixed element sections and BCs; cgnscheck when available), VTKHDF and
 Gmsh 4.1; writes 08b_inflation.png, projects and journals.
 
@@ -331,8 +331,7 @@ def main() -> int:
     layers = mesh["inflation"]["layers"][nodes]
     print(
         f"  wing nodes: {np.mean(layers == mesh['inflation']['max_layers']) * 100:.0f}% with all "
-        f"{mesh['inflation']['max_layers']} layers, {np.sum(layers == 0)} without (the sharp "
-        "trailing edge; the layers taper towards it)"
+        f"{mesh['inflation']['max_layers']} layers, {np.sum(layers == 0)} without"
     )
     export(wing, "08b_wing")
     render(cases, OUTPUT / "08b_inflation.png")

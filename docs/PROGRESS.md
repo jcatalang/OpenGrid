@@ -688,3 +688,60 @@
 - **Sliding:** only on planar unstructured faces used by one volume. The volume's view of such a
   face differs from the face's own mesh.
 - **Not in 8b (8c):** mixed blocks + volumes in CGNS; optimisation.
+
+## Phase 8c — Optimisation, ridge fans, mixed models (2026-10-12) — approved
+
+### Built
+- **Mixed models in CGNS:**
+  - One C++ writer `write_cgns_3d` (the structured-only and unstructured-only writers are now
+    wrappers): structured zones first, then unstructured ones.
+  - Faces shared by a block and a volume (or two volumes) get vertex connectivity both ways,
+    with (i, j, k) triples on the block side.
+  - Python `write_cgns_3d` replaces `write_cgns_blocks` / `write_cgns_volumes`; BCs come from
+    `analyze_3d`.
+- **Optimisation** (`unstructured/optimize3d.cpp`, own implementation, not mmg — see
+  ARCHITECTURE §7):
+  - Signed scaled Jacobian for all cell types.
+  - Node moves of interior nodes and pyramid apexes (deficit-sum objective, worst-cell guard).
+  - 2-3 / 3-2 swaps of core tetrahedra.
+  - Generator key `optimize` (default on), stats in `mesh["optimization"]`, GUI checkbox.
+- **Ridge fans in 3D inflation:**
+  - Sectors per node, fan columns along convex edges turning more than 60°, zero-area fan quads,
+    corner caps around centre columns, ridge ends.
+  - Collapsed-bottom cells built from their faces (sideways prisms in a fan's first layer).
+  - Sliding planes re-meshed from cancelled edge chains.
+  - `fan_columns` reported; fan threshold and step are internal settings.
+- **Demo** `examples/08c_optimisation_mixed.py`:
+  - **Wing** (the 08b case): 82 % of wall nodes with all 20 layers (8b: 43 %); 18 of 25
+    trailing-edge nodes (8b: none). 42 894 hexahedra, 3 668 prisms, 3 364 pyramids, 55 236
+    tetrahedra. Optimisation: core tetrahedra below 0.3 from 4 745 to 3 691, below 0.1 from 640
+    to 336.
+  - **Duct:** structured block (512 hexahedra) + unstructured volume around a structured cube
+    with 10 hexahedral layers, edge fans and corner caps; no column stops; worst hexahedron
+    0.966; volume equal to analytic to 1e-12. CGNS has 2 zones joined by vertex connectivity;
+    cgnscheck is clean.
+  - Outputs: `08c_optimisation_mixed.png`, `phase8c_main_window.png`, CGNS / VTKHDF / msh,
+    projects, journals.
+- **08a/08b outputs regenerated:** new generator key; the 08b wing now has fans (85 % of its
+  wing-surface nodes with all layers).
+
+### Verified
+- `ctest`: 119/119 (+5 `Optimize3D`, +1 `Inflation3D.FansAtSharpRidges`; the box-body test now
+  also checks fans). Covered:
+  - ideal cells score 1;
+  - untangling an interior node;
+  - 2-3 and 3-2 swaps, and their blocking by fixed or non-tetrahedral cells;
+  - fans with all layers on interior ridges, ridge ends, a closed front and exact layer volume.
+- Strict CI build and clang-tidy clean.
+- `pytest`: 251/251 (+5):
+  - mixed CGNS (cgnscheck, connection coordinates matched through h5py), VTKHDF and Gmsh;
+  - optimisation (boundary and layer nodes unchanged, volume kept, stats consistent);
+  - validation and journals.
+- All demos 01–08c run.
+
+### Not verified / known limitations
+- The worst cell of a mesh with layers is usually a layer transition cell, which optimisation
+  doesn't touch.
+- Optimisation trades pyramid quality for tetrahedra (wing: worst core pyramid 0.34 → 0.23).
+- Near the wing tip the layers still taper: the tip cap reaches the core size first.
+- See `OPEN_ISSUES.md` (3D inflation, optimisation).

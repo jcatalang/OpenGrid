@@ -715,6 +715,49 @@ segment, so derivative jumps at knots never cost accuracy.
     and the layers taper over about (total height / 0.5) of the wall. There are no 3D fans.
   - Transition cells in anisotropic wall cells are thin; their volumes are positive.
 
+### Optimisation, ridge fans and mixed models (Phase 8c)
+- **Optimisation** (`unstructured/optimize3d.cpp`, Freitag & Ollivier-Gooch 1997; Freitag &
+  Plassmann 2000):
+  - Quality is the signed scaled Jacobian of every cell type (corners as `CELL_CORNERS`).
+  - Node moves: movable nodes (the backend's interior nodes and pyramid apexes; never boundary
+    or layer nodes) of cells below 0.3, worst first. Each tries the centre of its cells' other
+    nodes, then a 14-direction compass search. A move is accepted if it lowers the sum of squared
+    deficits below the threshold and does not lower the worst cell around the node.
+  - A pure max-min objective was tried first: on the wing it raised the worst cell slightly and
+    pulled more cells below 0.3. Moving the centres of layer transition cells only traded their
+    tetrahedra against their pyramids, so they stay fixed.
+  - Swaps: 2-3 (face of two core tetrahedra) and 3-2 (interior edge with exactly three core
+    tetrahedra and no other cell), when the worst of the involved tetrahedra improves. Layer
+    tetrahedra are never swapped.
+  - Volume generator key `optimize` (default on); `mesh["optimization"]` reports moves, swaps
+    and worst / below-threshold counts before and after.
+- **Ridge fans** (`inflation3d.cpp`, 3D counterpart of the 2D fans):
+  - Ridges: convex wall edges whose fluid-side normals turn by more than 60°.
+  - Sectors: the wall faces around a node, connected across non-ridge edges; one column per
+    sector. A fan keyed by (node, the two sectors) holds k columns with slerped normals (k from
+    the largest turn along the ridge chain, 30° steps), so consecutive ridge edges share it.
+  - Fan quads (zero area at the wall) join the fans of a ridge edge's two nodes. At interior
+    corner nodes the fan quads leave a cycle of open edges, closed by triangles around a new
+    centre column (or around the sector column where a ridge ends, with fewer fans).
+  - A ridge ending in a single sector (threshold above the neighbouring edges' turn) cannot be
+    served by one column: it stops from the start ("ridge end") and the fan narrows to it.
+  - Cells over faces whose bottom repeats a node are built from their de-duplicated faces:
+    tetrahedron, pyramid and prism are recognised (fan quads give prisms on their side in the
+    first layer), otherwise a centroid split. Corner-cap cells need only be valid (no
+    min_jacobian).
+  - Lessons from the wing: fan columns keep their direction (recomputed from faces, neighbours
+    converged and folded the front); fan faces never enter normals or visibility (sector columns
+    rotated into the fan); the first-layer columns of a node stop together (a partly stopped fan
+    pinched the front onto the ridge edge); a corner's centre column takes its node's spacing
+    (otherwise the transition rule stopped it at once).
+  - Sliding planes are re-meshed from the cancelled chain "plane boundary minus layer sides",
+    which allows several columns per node.
+- **Mixed models in CGNS** (`write_cgns_3d`): one base; structured zones (blocks: PointRange BCs,
+  1-to-1 connectivity) first, then unstructured zones (volumes: element sections, boundary
+  sections with BCs). Faces shared by a volume and a block or another volume get general
+  connectivity (Abutting1to1, Vertex) in both directions: (i, j, k) triples on the block side,
+  vertex numbers on the volume side, matched by identical coordinates.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface
@@ -726,7 +769,10 @@ faces), with boundary faces preserved bit-for-bit.
   dynamically.
 - **Second backend: mmg (LGPL-3.0)** for *optimisation and adaptation* (mmg3d with
   boundary frozen). mmg cannot create a volume mesh from a bare surface on its own, so it cannot
-  be the only backend; it complements Netgen.
+  be the only backend; it complements Netgen. *Phase 8c decision:* optimisation is our own
+  (`unstructured/optimize3d.cpp`): mmg3d works on tetrahedra only, while our meshes mix prisms,
+  hexahedra and pyramids whose shared faces must stay untouched, and mmg is not packaged for
+  osx-arm64. mmg remains an option for adaptation.
 - **Later: own 3D Delaunay** (Bowyer–Watson + boundary recovery) behind the same interface,
   removing the external dependency once mature.
 - TetGen (AGPL) is excluded; it may only ever appear as an off-by-default isolated plugin.

@@ -102,8 +102,12 @@ def test_prism_layers_on_a_body():
     info = mesh["inflation"]
     assert info["max_layers"] == 6
     assert info["stops"] == {}
-    assert len(mesh["prisms"]) == 6 * n_wall
-    assert len(mesh["hexes"]) == 0
+    # One prism per wall triangle and layer, plus the fans at the cube's 90-degree edges (two fan
+    # columns each: prisms on their sides in the first layer, hexahedra above) and the caps
+    # at its top corners.
+    assert info["fan_columns"] > 0
+    assert len(mesh["prisms"]) > 6 * n_wall
+    assert len(mesh["hexes"]) > 0
     assert total_volume(mesh) == pytest.approx(35.0, rel=1e-12)
     for key, cells, _ in volume_cells(mesh):
         assert np.all(cell_volumes(mesh["points"], key, cells) > 0), key
@@ -122,9 +126,12 @@ def test_prism_layers_on_a_body():
 def test_hexahedral_layers_on_structured_walls():
     og, _outer, _inner = body_in_box(kind="structured", n=9, layers=4)
     mesh = og.volume_mesh("fluid")
-    assert len(mesh["hexes"]) == 4 * 6 * 64
-    assert len(mesh["prisms"]) == 0
-    # The front is quads: capped by pyramids towards the tetrahedra.
+    # One hexahedron per wall quad and layer, plus those of the fans at the cube's edges (whose
+    # first layer, and the caps at the corners, are prisms).
+    assert mesh["inflation"]["stops"] == {}
+    assert len(mesh["hexes"]) > 4 * 6 * 64
+    assert len(mesh["prisms"]) > 0
+    # The front is mostly quads: capped by pyramids towards the tetrahedra.
     assert len(mesh["pyramids"]) >= 6 * 64
     assert total_volume(mesh) == pytest.approx(35.0, rel=1e-12)
     q = og.volume_quality("fluid")
@@ -270,7 +277,9 @@ def test_gui_volume_inflation_editor(qtbot):
     editor.walls.setText(", ".join(inner))
     editor.first_height.setText("0.02")
     editor.layers.setValue(3)
+    editor.optimize.setChecked(False)
     assert window.property_panel.apply()
+    assert og.entity("fluid").params["generator"]["optimize"] is False
     inflation = og.entity("fluid").params["generator"]["inflation"]
     assert inflation["layers"] == 3 and inflation["first_height"] == 0.02
     window.set_selection([og.entity("fluid").id])

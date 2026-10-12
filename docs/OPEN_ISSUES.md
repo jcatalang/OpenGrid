@@ -5,7 +5,7 @@ when the project is complete. Items fixed in a later phase are removed (see `PRO
 history). Phase tags show where each item came from.
 
 ## Not verified
-- **CI and other platforms** [0–8a]:
+- **CI and other platforms** [0–8c]:
   - GitHub Actions has never run (no remote).
   - The Linux build and the uv-based setup are untested.
 - **Real input devices** [1–3]: real mouse and trackpad interaction is untested (handlers are
@@ -55,8 +55,6 @@ history). Phase tags show where each item came from.
 - **Periodicity** [4, 7a]:
   - 2D periodic pairs support translation only in CGNS.
   - Periodic pairing of 3D faces is not supported.
-- **Mixed models in CGNS** [8a]: models with both structured blocks and unstructured volumes
-  can't be written to CGNS yet (8c). VTKHDF and Gmsh handle them.
 
 ## Unstructured 2D
 - **Delaunay quality near abrupt boundary-spacing jumps** [5a]: not guaranteed (boundary nodes
@@ -106,19 +104,35 @@ history). Phase tags show where each item came from.
     other quads are split into triangles.
 - **Faces on surfaces** [8a]: meshed in a parameter plane with a constant metric correction;
   strongly varying surface metrics are only approximated.
-- **mmg** [8a]: not packaged on conda-forge for osx-arm64; optimisation is planned for 8c (source
-  build or own implementation).
+- **Optimisation** [8c]:
+  - Only interior nodes and pyramid apexes move, and only core tetrahedra are swapped; layer
+    cells and boundary nodes are never touched. So the worst cell of a mesh with layers (a thin
+    layer transition cell) is usually unchanged.
+  - The objective trades cells: on the wing, core tetrahedra below 0.3 drop from 4 745 to 3 691,
+    but the worst core pyramid drops from 0.34 to 0.23 (apexes move to help their tetrahedra).
+  - Only 2-3 / 3-2 swaps (no general edge removal or 4-4 swaps); compass search, not a
+    gradient method. Settings (threshold 0.3, 4 passes) are internal.
+  - Netgen's own optimisation still runs first.
 
 ## 3D inflation
-- **Sharp ridges** [8b]:
-  - There are no 3D fans: columns on sharp convex ridges such as wing trailing edges can't use
-    a single normal, so they stop.
-  - The layers then taper towards the ridge at slope 0.5. On the demo wing only 43 % of the wall
-    nodes keep all 20 layers.
-  - In the probe, loosening the quality floor instead made the upper and lower fronts cross.
-- **Thin transition cells** [8b]:
+- **Ridge fans** [8c]:
+  - Fans start at a 60° turn (as in 2D), so 90° body edges and box corners now get fans and
+    corner caps too. This changed Phase 8b results: the 8b wing went from 43 % to 82 % of wall
+    nodes with all 20 layers.
+  - A ridge that ends inside a single sector (possible only with a higher threshold than the
+    turn of its neighbouring edges) does not grow at its end node ("ridge end"); the layers
+    taper there.
+  - Corner-cap cells are only checked for positive volume, not for the 0.2 Jacobian floor.
+  - Fan columns keep a fixed (radial) direction for all layers.
+  - Fans need the turn to be below about 180°; cusps (zero-angle edges) are untested.
+- **Thin transition cells** [8b, 8c]:
   - Where columns stop inside anisotropic wall cells, the transition tetrahedra and pyramids
-    are thin (dihedral angles near 0° / 180° on the demo wing; volumes positive).
+    are thin; a quad split from its centroid gives cells whose quality is bounded by layer
+    height / cell width wherever the centre is. On the wing (with fans) 830 layer tetrahedra
+    and 39 layer pyramids have a scaled Jacobian below 0.1 (Phase 8b: 3 215 and 715), mostly
+    where the layers taper near the tip.
+  - Near the wing tip the layers still taper: the tip cap's small triangles reach the core size
+    after about 15 layers (transition stop) and the slope rule spreads that onto the wing.
   - Netgen's tetrahedra next to such steps can be poor too.
 - **Collision tests** [8b]:
   - Floating point with a 1e-9 tolerance, not exact predicates.
@@ -128,14 +142,15 @@ history). Phase tags show where each item came from.
   - Only along planar unstructured faces used by this volume alone.
   - The volume re-meshes such a face, so its view of the face differs from the face's own mesh,
     which is what the GUI shows.
-- **Internal settings** [8b]: not exposed in projects (as in 2D): minimum Jacobian 0.2, normal
-  scale cap 2, slope 0.5, proximity 1, visibility 0.2, 5 smoothing sweeps.
+- **Internal settings** [8b, 8c]: not exposed in projects (as in 2D): minimum Jacobian 0.2,
+  normal scale cap 2, slope 0.5, proximity 1, visibility 0.2, 5 smoothing sweeps, fan threshold
+  60°, fan step 30°.
 
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**
   - Phase 5 → 5a (Delaunay), 5b (advancing front), 5c (quads, smoothing, CGNS unstructured).
   - Phase 7 → 7a (foundation), 7b (smoothing, hyperbolic extrusion).
-  - Phase 8 → 8a (volumes), 8b (3D inflation), 8c (optimisation, mixed models).
+  - Phase 8 → 8a (volumes), 8b (3D inflation), 8c (optimisation, ridge fans, mixed models).
 - **Inflation scope** [6]: inflation is part of the unstructured domain generator, not a separate
   entity.
 - **Hyperbolic extrusion** [7b]: explicit marching scheme (see above).
@@ -146,5 +161,8 @@ history). Phase tags show where each item came from.
   - `netgen` was added to `environment.yml`.
 - **3D inflation is a volume generator setting** [8b], like 2D inflation, not a separate
   entity. Walls are given as faces (domains); the spec says "wall patches".
+- **Optimisation is our own, not mmg** [8c]: mmg3d handles tetrahedra only (our meshes mix
+  prisms, hexahedra and pyramids) and isn't packaged for osx-arm64. Spec and ARCHITECTURE had
+  planned mmg for optimisation.
 - **Environment** [8a]: Netgen installed into the `opengrid` conda env (VTK, PySide6, pyvista
   and NumPy unchanged).

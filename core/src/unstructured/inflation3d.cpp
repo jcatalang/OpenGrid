@@ -5,10 +5,12 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numbers>
 #include <numeric>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -42,6 +44,25 @@ Vec3 newell(const std::vector<Vec3>& p) {
     n += cross(p[i], p[(i + 1) % p.size()]);
   }
   return n;
+}
+
+constexpr double kDegree = std::numbers::pi / 180.0;
+
+double angle_between(const Vec3& a, const Vec3& b) {
+  return std::atan2(norm(cross(a, b)), dot(a, b));
+}
+
+// Spherical interpolation between unit vectors (normalised linear interpolation when they are
+// (nearly) opposite).
+Vec3 slerp(const Vec3& a, const Vec3& b, double t) {
+  const double w = angle_between(a, b);
+  if (w < 1e-12) {
+    return a;
+  }
+  if (std::sin(w) < 1e-6) {
+    return normalized(a * (1.0 - t) + b * t);
+  }
+  return a * (std::sin((1.0 - t) * w) / std::sin(w)) + b * (std::sin(t * w) / std::sin(w));
 }
 
 Vec3 min3(const Vec3& a, const Vec3& b) {
@@ -281,6 +302,8 @@ struct Column {
   std::string reason;
   std::vector<Index> faces;  // incident wall faces
   std::vector<Index> nbrs;   // neighbouring columns (front edges)
+  bool fan = false;          // a fan column at a ridge (several columns share its base node)
+  Vec3 start_normal;         // fan columns: the normal of the first layer; others: their sector's
 };
 
 struct WallFace {
@@ -288,8 +311,10 @@ struct WallFace {
   std::vector<Index> cols;
   bool split = false;         // a quad continuing as two triangles
   int diag = 0;               // 0: diagonal (0, 2); 1: (1, 3)
-  std::vector<Index> across;  // per edge (i, i + 1): the face across it
+  std::vector<Index> across;  // per edge (i, i + 1): the non-wall face across it, or -1
   Vec3 inward;
+  bool virt = false;  // a fan / cap face (zero area at the wall)
+  bool cap = false;   // a cap triangle at a ridge corner: its cells need only be valid
 };
 
 class Inflator {
@@ -343,6 +368,13 @@ class Inflator {
     col.next = points_[u(col.cur)];
     col.reason = reason;
     count(reason);
+    // Columns sharing a node (fans) stop together in their first layer: a part of a fan left on
+    // the wall would pinch the front against the ridge edge.
+    if (col.layers == 0) {
+      for (const Index d : node_cols_[u(col.base)]) {
+        stop(d, reason);
+      }
+    }
   }
 
   [[nodiscard]] bool any_active() const {
@@ -370,37 +402,20 @@ class Inflator {
         edges[{std::min(a, b), std::max(a, b)}].push_back(sz(f));
       }
     }
-    std::vector<Index> col_of(points_.size(), -1);
+    // Directed wall edges -> the wall face traversing them.
+    std::map<std::pair<Index, Index>, Index> directed;
+    std::vector<bool> wall_node(points_.size(), false);
     for (std::size_t f = 0; f < nf; ++f) {
       if (!in_.wall[f]) {
         continue;
       }
-      WallFace w;
-      w.face = sz(f);
       const auto& face = in_.faces[f];
       for (std::size_t i = 0; i < face.size(); ++i) {
-        const Index p = face[i];
-        if (col_of[u(p)] < 0) {
-          col_of[u(p)] = sz(cols_.size());
-          Column c;
-          c.base = p;
-          c.cur = p;
-          cols_.push_back(c);
-        }
-        w.cols.push_back(col_of[u(p)]);
-        cols_[u(col_of[u(p)])].faces.push_back(sz(walls_.size()));
-        const Index b = face[(i + 1) % face.size()];
-        Index other = -1;
-        for (const Index g : edges[{std::min(p, b), std::max(p, b)}]) {
-          if (g != sz(f)) {
-            other = g;
-          }
-        }
-        w.across.push_back(other);
+        directed[{face[i], face[(i + 1) % face.size()]}] = sz(f);
+        wall_node[u(face[i])] = true;
       }
-      walls_.push_back(w);
     }
-    if (walls_.empty()) {
+    if (directed.empty()) {
       throw std::invalid_argument("inflate_3d: no wall face");
     }
     // Node kinds from the non-wall faces around each wall node.
@@ -410,20 +425,21 @@ class Inflator {
         continue;
       }
       for (const Index p : in_.faces[f]) {
-        if (col_of[u(p)] >= 0) {
+        if (wall_node[u(p)]) {
           nonwall[u(p)].push_back(sz(f));
         }
       }
     }
+    std::vector<int> kind(points_.size(), 0);
+    std::vector<Vec3> plane(points_.size());
     std::int64_t not_coplanar = 0;
-    for (Column& c : cols_) {
-      const auto& around = nonwall[u(c.base)];
+    for (std::size_t p = 0; p < points_.size(); ++p) {
+      const auto& around = nonwall[p];
       if (around.empty()) {
         continue;
       }
-      const Index group = in_.node_group[u(c.base)];
+      const Index group = in_.node_group[p];
       bool slide = group >= 0;
-      Vec3 plane;
       for (const Index f : around) {
         if (in_.face_group[u(f)] != group) {
           slide = false;
@@ -432,9 +448,9 @@ class Inflator {
       if (slide) {
         for (const Index f : around) {
           const Vec3 n = normalized(face_normal(f));
-          if (norm(plane) == 0.0) {
-            plane = n;
-          } else if (norm(cross(plane, n)) > 1e-6) {
+          if (norm(plane[p]) == 0.0) {
+            plane[p] = n;
+          } else if (norm(cross(plane[p], n)) > 1e-6) {
             slide = false;
           }
         }
@@ -442,21 +458,405 @@ class Inflator {
           ++not_coplanar;
         }
       }
+      kind[p] = 2;
       if (slide) {
-        c.kind = 1;
-        c.group = group;
-        c.plane = plane;
-      } else {
-        c.kind = 2;
-        c.active = false;
-        c.reason = "fixed";
+        kind[p] = 1;
       }
     }
     if (not_coplanar > 0) {
       warnings_.push_back(std::to_string(not_coplanar) +
                           " sliding wall nodes are fixed: their plane's faces are not coplanar");
     }
-    // Neighbours and wall spacing.
+    // Fluid-side unit normals and centroids of the wall faces.
+    std::vector<Vec3> fluid(nf);
+    std::vector<Vec3> centroid(nf);
+    for (std::size_t f = 0; f < nf; ++f) {
+      if (!in_.wall[f]) {
+        continue;
+      }
+      fluid[f] = -normalized(face_normal(sz(f)));
+      for (const Index p : in_.faces[f]) {
+        centroid[f] += points_[u(p)];
+      }
+      centroid[f] = centroid[f] / static_cast<double>(in_.faces[f].size());
+    }
+    // Ridges: convex wall edges whose fluid-side normals turn by more than fan_threshold.
+    const double threshold = opt_.fan_threshold_deg * kDegree;
+    std::set<std::pair<Index, Index>> ridge;  // (a, b) as traversed by the first face
+    for (const auto& [e, f1] : directed) {
+      const auto it = directed.find({e.second, e.first});
+      if (it == directed.end() || e.first > e.second) {
+        continue;
+      }
+      const Index f2 = it->second;
+      const double turn = angle_between(fluid[u(f1)], fluid[u(f2)]);
+      const bool convex = dot(centroid[u(f2)] - centroid[u(f1)], fluid[u(f1)]) < 0.0;
+      if (convex && turn > threshold && opt_.fan_threshold_deg < 180.0) {
+        ridge.insert(e);
+      }
+    }
+    auto is_ridge = [&](Index a, Index b) {
+      return ridge.count({a, b}) > 0 || ridge.count({b, a}) > 0;
+    };
+    // Sectors: the wall faces around a node, connected across its non-ridge edges.
+    std::map<std::pair<Index, Index>, Index> sector_root;  // (node, face) -> root face
+    std::vector<std::vector<Index>> node_faces(points_.size());
+    for (std::size_t f = 0; f < nf; ++f) {
+      if (in_.wall[f]) {
+        for (const Index p : in_.faces[f]) {
+          node_faces[u(p)].push_back(sz(f));
+        }
+      }
+    }
+    for (std::size_t p = 0; p < points_.size(); ++p) {
+      // Union-find over the faces of node p (indices into node_faces[p]).
+      const auto& around = node_faces[p];
+      std::vector<std::size_t> up(around.size());
+      std::iota(up.begin(), up.end(), std::size_t{0});
+      auto find = [&](std::size_t i) {
+        while (up[i] != i) {
+          up[i] = up[up[i]];
+          i = up[i];
+        }
+        return i;
+      };
+      for (std::size_t i = 0; i < around.size(); ++i) {
+        const auto& face = in_.faces[u(around[i])];
+        std::size_t k = 0;
+        while (face[k] != sz(p)) {
+          ++k;
+        }
+        const Index x = face[(k + 1) % face.size()];
+        const auto it = directed.find({x, sz(p)});
+        if (it == directed.end() || is_ridge(sz(p), x)) {
+          continue;
+        }
+        const auto j = static_cast<std::size_t>(
+            std::find(around.begin(), around.end(), it->second) - around.begin());
+        const std::size_t ri = find(i);
+        const std::size_t rj = find(j);
+        // The smaller face index is the root, so sectors are numbered deterministically.
+        if (around[ri] < around[rj]) {
+          up[rj] = ri;
+        } else if (ri != rj) {
+          up[ri] = rj;
+        }
+      }
+      for (std::size_t i = 0; i < around.size(); ++i) {
+        sector_root[{sz(p), around[i]}] = around[find(i)];
+      }
+    }
+    // Sector normals (angle-weighted fluid-side normals of the sector's faces at the node).
+    std::map<std::pair<Index, Index>, Vec3> sector_normal;
+    for (const auto& [key, root] : sector_root) {
+      const auto& face = in_.faces[u(key.second)];
+      const std::size_t m = face.size();
+      std::size_t k = 0;
+      while (face[k] != key.first) {
+        ++k;
+      }
+      const Vec3 o = points_[u(key.first)];
+      const Vec3 a = points_[u(face[(k + 1) % m])] - o;
+      const Vec3 b = points_[u(face[(k + m - 1) % m])] - o;
+      sector_normal[{key.first, root}] += fluid[u(key.second)] * angle_between(a, b);
+    }
+    auto column_normal = [&](Index p, const Vec3& n) {
+      if (kind[u(p)] == 1) {
+        return normalized(n - plane[u(p)] * dot(n, plane[u(p)]));
+      }
+      return normalized(n);
+    };
+    // Columns: one per sector of every wall node (one per node without ridges).
+    std::map<std::pair<Index, Index>, Index> col_of;  // (node, sector root) -> column
+    auto new_column = [&](Index p) {
+      Column c;
+      c.base = p;
+      c.cur = p;
+      c.kind = kind[u(p)];
+      if (c.kind == 1) {
+        c.group = in_.node_group[u(p)];
+        c.plane = plane[u(p)];
+      } else if (c.kind == 2) {
+        c.active = false;
+        c.reason = "fixed";
+      }
+      cols_.push_back(c);
+      return sz(cols_.size() - 1);
+    };
+    std::vector<std::vector<Index>> face_cols;  // per real wall face (walls_ order)
+    std::vector<Index> real_faces;
+    for (std::size_t f = 0; f < nf; ++f) {
+      if (!in_.wall[f]) {
+        continue;
+      }
+      std::vector<Index> list;
+      for (const Index p : in_.faces[f]) {
+        const Index root = sector_root[{p, sz(f)}];
+        auto it = col_of.find({p, root});
+        if (it == col_of.end()) {
+          it = col_of.emplace(std::make_pair(p, root), new_column(p)).first;
+          cols_[u(it->second)].start_normal = column_normal(p, sector_normal[{p, root}]);
+        }
+        list.push_back(it->second);
+      }
+      face_cols.push_back(list);
+      real_faces.push_back(sz(f));
+    }
+    // Fans: along every ridge edge, columns at both ends with normals turning from one side's
+    // sector to the other's. A fan at node p is keyed by (p, the two sectors in increasing
+    // order), so a ridge line shares its fans between consecutive edges whichever way they are
+    // traversed; a chain of ridge edges sharing fans uses one count of fan columns (the largest
+    // turn needs at most fan_step degrees per step). A ridge ending at a node (one sector) has
+    // its own fan there.
+    struct FanKey {
+      Index p;
+      Index first;
+      Index second;
+      bool operator<(const FanKey& o) const {
+        return std::tie(p, first, second) < std::tie(o.p, o.first, o.second);
+      }
+    };
+    std::vector<std::pair<Index, Index>> ridges(ridge.begin(), ridge.end());
+    std::vector<std::array<FanKey, 2>> ridge_keys;
+    std::map<FanKey, std::vector<std::size_t>> key_ridges;
+    for (std::size_t r = 0; r < ridges.size(); ++r) {
+      const auto [a, b] = ridges[r];
+      const Index f1 = directed[{a, b}];
+      const Index f2 = directed[{b, a}];
+      std::array<FanKey, 2> keys{};
+      const std::array<Index, 2> ends = {a, b};
+      for (std::size_t k = 0; k < 2; ++k) {
+        const Index x = sector_root[{ends[k], f1}];
+        const Index y = sector_root[{ends[k], f2}];
+        keys[k] = {ends[k], std::min(x, y), std::max(x, y)};
+        key_ridges[keys[k]].push_back(r);
+      }
+      ridge_keys.push_back(keys);
+    }
+    std::vector<std::size_t> chain(ridges.size());
+    std::iota(chain.begin(), chain.end(), std::size_t{0});
+    auto find_chain = [&](std::size_t i) {
+      while (chain[i] != i) {
+        chain[i] = chain[chain[i]];
+        i = chain[i];
+      }
+      return i;
+    };
+    for (const auto& [key, list] : key_ridges) {
+      for (const std::size_t r : list) {
+        const std::size_t x = find_chain(r);
+        const std::size_t y = find_chain(list.front());
+        chain[std::max(x, y)] = std::min(x, y);
+      }
+    }
+    // Turn of a fan: between the two sectors' normals, or (one sector: a ridge ending at the
+    // node) between the normals of the two faces of the ridge edge.
+    auto fan_ends = [&](const FanKey& key, std::size_t r) {
+      if (key.first != key.second) {
+        return std::make_pair(sector_normal[{key.p, key.first}],
+                              sector_normal[{key.p, key.second}]);
+      }
+      const auto [a, b] = ridges[r];
+      return std::make_pair(fluid[u(directed[{a, b}])], fluid[u(directed[{b, a}])]);
+    };
+
+    const double step = std::max(opt_.fan_step_deg, 1.0) * kDegree;
+    std::map<std::size_t, int> chain_fans;
+    for (std::size_t r = 0; r < ridges.size(); ++r) {
+      for (const FanKey& key : ridge_keys[r]) {
+        const auto [n0, n1] = fan_ends(key, r);
+        const int k = std::max(1, static_cast<int>(std::ceil(angle_between(n0, n1) / step)) - 1);
+        int& fans = chain_fans[find_chain(r)];
+        fans = std::max(fans, k);
+      }
+    }
+    std::map<FanKey, std::vector<Index>> fan_cols;  // the fan's columns, first to second sector
+    for (std::size_t r = 0; r < ridges.size(); ++r) {
+      for (const FanKey& key : ridge_keys[r]) {
+        if (fan_cols.count(key) > 0) {
+          continue;
+        }
+        const int k = chain_fans[find_chain(r)];
+        const auto [n0, n1] = fan_ends(key, r);
+        std::vector<Index> list = {col_of[{key.p, key.first}]};
+        if (key.first == key.second) {
+          // A ridge ending at the node (one sector): its single column cannot serve both sides
+          // of the ridge, so it does not grow and the fan narrows to it (the layers taper
+          // towards the ridge end).
+          Column& end = cols_[u(list.front())];
+          if (end.active) {
+            end.active = false;
+            end.reason = "ridge end";
+            count("ridge end");
+          }
+          fan_cols[key] = std::vector<Index>(static_cast<std::size_t>(k) + 2, list.front());
+          continue;
+        }
+        for (int i = 1; i <= k; ++i) {
+          const Index c = new_column(key.p);
+          cols_[u(c)].fan = true;
+          cols_[u(c)].start_normal = column_normal(
+              key.p, slerp(normalized(n0), normalized(n1), static_cast<double>(i) / (k + 1)));
+          list.push_back(c);
+        }
+        list.push_back(col_of[{key.p, key.second}]);
+        fan_cols[key] = list;
+      }
+    }
+    // The fan's columns from the side of the ridge edge's first face to its second face's.
+    auto fan_from_first = [&](const FanKey& key, std::size_t r) {
+      std::vector<Index> list = fan_cols.at(key);
+      const auto [a, b] = ridges[r];
+      if (key.first != key.second && sector_root[{key.p, directed[{a, b}]}] != key.first) {
+        std::reverse(list.begin(), list.end());
+      }
+      return list;
+    };
+    // Wall faces: the real ones (as before), then the fan quads along every ridge edge.
+    std::vector<std::vector<Index>> virt_cols;
+    std::vector<Index> virt_face;
+    for (std::size_t r = 0; r < ridges.size(); ++r) {
+      const std::vector<Index> sa = fan_from_first(ridge_keys[r][0], r);
+      const std::vector<Index> sb = fan_from_first(ridge_keys[r][1], r);
+      for (std::size_t i = 0; i + 1 < sa.size(); ++i) {
+        // Without repeated columns (a fan narrowing to a ridge end becomes triangles).
+        std::vector<Index> list;
+        for (const Index c : {sb[i], sa[i], sa[i + 1], sb[i + 1]}) {
+          if (list.empty() || list.back() != c) {
+            list.push_back(c);
+          }
+        }
+        if (list.size() > 1 && list.front() == list.back()) {
+          list.pop_back();
+        }
+        if (list.size() >= 3) {
+          virt_cols.push_back(list);
+          virt_face.push_back(directed[{ridges[r].first, ridges[r].second}]);
+        }
+      }
+    }
+    const std::size_t n_fan_quads = virt_cols.size();
+    // Caps: at interior nodes (no non-wall face) the fan quads leave open edges between columns
+    // of the node; they form cycles, closed by triangles around a sector column (a ridge
+    // ending at the node) or around a new centre column (a corner of several ridges).
+    std::map<Index, std::vector<std::pair<Index, Index>>> open;  // node -> directed column edges
+    {
+      std::set<std::pair<Index, Index>> used;
+      for (const auto& list : virt_cols) {
+        for (std::size_t i = 0; i < list.size(); ++i) {
+          const Index x = list[i];
+          const Index y = list[(i + 1) % list.size()];
+          if (cols_[u(x)].base == cols_[u(y)].base) {
+            used.insert({x, y});
+          }
+        }
+      }
+      for (const auto& e : used) {
+        if (used.count({e.second, e.first}) == 0) {
+          open[cols_[u(e.first)].base].push_back(e);
+        }
+      }
+    }
+    for (const auto& [p, list] : open) {
+      if (!nonwall[u(p)].empty()) {
+        continue;  // a boundary node: the open edges lie on its non-wall faces
+      }
+      std::map<Index, Index> next;
+      for (const auto& [x, y] : list) {
+        if (!next.emplace(x, y).second) {
+          throw std::logic_error("inflate_3d: fan columns at a node do not form a cycle");
+        }
+      }
+      std::set<Index> done;
+      for (const auto& [x0, y0] : next) {
+        if (done.count(x0) > 0) {
+          continue;
+        }
+        std::vector<Index> cycle;
+        Index x = x0;
+        while (done.count(x) == 0) {
+          done.insert(x);
+          cycle.push_back(x);
+          const auto it = next.find(x);
+          if (it == next.end()) {
+            throw std::logic_error("inflate_3d: fan columns at a node do not form a cycle");
+          }
+          x = it->second;
+        }
+        // The cap traverses the cycle backwards.
+        std::reverse(cycle.begin(), cycle.end());
+        std::vector<std::size_t> sector;
+        for (std::size_t i = 0; i < cycle.size(); ++i) {
+          if (!cols_[u(cycle[i])].fan) {
+            sector.push_back(i);
+          }
+        }
+        const Index face = node_faces[u(p)].front();
+        if (sector.size() == 1) {
+          std::rotate(cycle.begin(), cycle.begin() + static_cast<std::ptrdiff_t>(sector.front()),
+                      cycle.end());
+          for (std::size_t i = 1; i + 1 < cycle.size(); ++i) {
+            virt_cols.push_back({cycle[0], cycle[i], cycle[i + 1]});
+            virt_face.push_back(face);
+          }
+          continue;
+        }
+        Vec3 mean;
+        for (const Index c : cycle) {
+          mean += cols_[u(c)].start_normal;
+        }
+        const Index centre = new_column(p);
+        cols_[u(centre)].fan = true;
+        cols_[u(centre)].start_normal = column_normal(p, mean);
+        for (std::size_t i = 0; i < cycle.size(); ++i) {
+          virt_cols.push_back({centre, cycle[i], cycle[(i + 1) % cycle.size()]});
+          virt_face.push_back(face);
+        }
+      }
+    }
+    // The wall faces in column space, the face across every edge and the columns' faces.
+    std::map<std::pair<Index, Index>, std::size_t> col_edge;  // directed column edge -> face
+    auto add_face = [&](Index face, const std::vector<Index>& list, bool virt) {
+      WallFace w;
+      w.face = face;
+      w.cols = list;
+      w.virt = virt;
+      for (std::size_t i = 0; i < list.size(); ++i) {
+        col_edge[{list[i], list[(i + 1) % list.size()]}] = walls_.size();
+        cols_[u(list[i])].faces.push_back(sz(walls_.size()));
+      }
+      walls_.push_back(w);
+    };
+    for (std::size_t i = 0; i < real_faces.size(); ++i) {
+      add_face(real_faces[i], face_cols[i], false);
+    }
+    for (std::size_t i = 0; i < virt_cols.size(); ++i) {
+      add_face(virt_face[i], virt_cols[i], true);
+      walls_.back().cap = i >= n_fan_quads;
+    }
+    for (WallFace& w : walls_) {
+      const std::size_t m = w.cols.size();
+      for (std::size_t i = 0; i < m; ++i) {
+        const Index x = w.cols[i];
+        const Index y = w.cols[(i + 1) % m];
+        Index other = -1;
+        if (col_edge.count({y, x}) == 0) {
+          const Index a = cols_[u(x)].base;
+          const Index b = cols_[u(y)].base;
+          if (a != b) {
+            for (const Index g : edges[{std::min(a, b), std::max(a, b)}]) {
+              if (!in_.wall[u(g)]) {
+                other = g;
+              }
+            }
+          } else if (!nonwall[u(a)].empty()) {
+            other = nonwall[u(a)].front();
+          }
+        }
+        w.across.push_back(other);
+      }
+    }
+    // Neighbours and wall spacing (over neighbours on other nodes).
     std::set<std::pair<Index, Index>> seen;
     std::vector<double> length_sum(cols_.size(), 0.0);
     std::vector<int> length_count(cols_.size(), 0);
@@ -469,6 +869,9 @@ class Inflator {
         }
         cols_[u(a)].nbrs.push_back(b);
         cols_[u(b)].nbrs.push_back(a);
+        if (cols_[u(a)].base == cols_[u(b)].base) {
+          continue;
+        }
         const double len = distance(points_[u(cols_[u(a)].base)], points_[u(cols_[u(b)].base)]);
         length_sum[u(a)] += len;
         length_sum[u(b)] += len;
@@ -476,7 +879,19 @@ class Inflator {
         length_count[u(b)] += 1;
       }
     }
+    // Columns without neighbours on other nodes (corner centres) take their node's spacing.
+    std::map<Index, std::pair<double, int>> node_length;
     for (std::size_t c = 0; c < cols_.size(); ++c) {
+      auto& [sum, count] = node_length[cols_[c].base];
+      sum += length_sum[c];
+      count += length_count[c];
+    }
+    for (std::size_t c = 0; c < cols_.size(); ++c) {
+      if (length_count[c] == 0) {
+        const auto& [sum, count] = node_length[cols_[c].base];
+        length_sum[c] = sum;
+        length_count[c] = count;
+      }
       cols_[c].origin_spacing = length_sum[c] / std::max(length_count[c], 1);
       cols_[c].next = points_[u(cols_[c].base)];
     }
@@ -504,6 +919,12 @@ class Inflator {
         count("fixed");
       }
     }
+    fans_ = 0;
+    node_cols_.assign(points_.size(), {});
+    for (std::size_t c = 0; c < cols_.size(); ++c) {
+      fans_ += static_cast<int>(cols_[c].fan);
+      node_cols_[u(cols_[c].base)].push_back(sz(c));
+    }
   }
 
   [[nodiscard]] Vec3 face_normal(Index f) const {
@@ -518,30 +939,46 @@ class Inflator {
     return points_[u(cols_[u(c)].cur)];
   }
 
-  // Triangles of a wall face's current front (tags: current point ids).
+  // Triangles of a wall face's current front (tags: current point ids; polygons of zero area at
+  // fans are skipped).
   void front_tris(std::size_t w, std::vector<Tri>& out) const {
     const WallFace& f = walls_[w];
-    for (const auto& tri : polygons(f)) {
-      if (tri.size() == 3) {
-        add_tri(f, w, tri[0], tri[1], tri[2], out);
-      } else {
-        add_tri(f, w, tri[0], tri[1], tri[2], out);
-        add_tri(f, w, tri[0], tri[2], tri[3], out);
+    for (const auto& poly : polygons(f)) {
+      std::vector<Index> ids;
+      ids.reserve(poly.size());
+      for (const std::size_t i : poly) {
+        ids.push_back(cols_[u(f.cols[i])].cur);
+      }
+      ids = distinct_cycle(ids);
+      for (std::size_t k = 1; k + 1 < ids.size(); ++k) {
+        Tri t;
+        const std::array<Index, 3> tri = {ids[0], ids[k], ids[k + 1]};
+        for (std::size_t i = 0; i < 3; ++i) {
+          t.p[i] = points_[u(tri[i])];
+          t.tag[i] = tri[i];
+        }
+        t.owner = sz(w);
+        out.push_back(t);
       }
     }
   }
 
-  void add_tri(const WallFace& f, std::size_t w, std::size_t a, std::size_t b, std::size_t c,
-               std::vector<Tri>& out) const {
-    Tri t;
-    const std::array<std::size_t, 3> local = {a, b, c};
-    for (std::size_t i = 0; i < 3; ++i) {
-      const Column& col = cols_[u(f.cols[local[i]])];
-      t.p[i] = points_[u(col.cur)];
-      t.tag[i] = col.cur;
+  // A polygon without repeated nodes (consecutive repeats, as at fans, removed); empty when
+  // fewer than three distinct nodes remain.
+  static std::vector<Index> distinct_cycle(const std::vector<Index>& ids) {
+    std::vector<Index> g;
+    for (const Index v : ids) {
+      if (g.empty() || g.back() != v) {
+        g.push_back(v);
+      }
     }
-    t.owner = sz(w);
-    out.push_back(t);
+    while (g.size() > 1 && g.front() == g.back()) {
+      g.pop_back();
+    }
+    if (g.size() < 3 || std::set<Index>(g.begin(), g.end()).size() != g.size()) {
+      return {};
+    }
+    return g;
   }
 
   // Local node lists of a wall face's front polygons (one quad, one triangle or two triangles).
@@ -575,9 +1012,14 @@ class Inflator {
       if (!col.active) {
         continue;
       }
+      // Fan and cap faces do not count: a ridge's sector columns follow their own side's faces
+      // (with the fan's faces they would turn into the fan, layer after layer).
       Vec3 sum;
       for (const Index wi : col.faces) {
         const WallFace& w = walls_[u(wi)];
+        if (w.virt) {
+          continue;
+        }
         const std::size_t m = w.cols.size();
         std::size_t i = 0;
         while (w.cols[i] != sz(c)) {
@@ -586,8 +1028,12 @@ class Inflator {
         const Vec3 o = cur_pos(sz(c));
         const Vec3 a = cur_pos(w.cols[(i + 1) % m]) - o;
         const Vec3 b = cur_pos(w.cols[(i + m - 1) % m]) - o;
-        const double angle = std::atan2(norm(cross(a, b)), dot(a, b));
-        sum += w.inward * angle;
+        sum += w.inward * angle_between(a, b);
+      }
+      // Fan columns keep their direction (radial about the ridge): recomputed from their faces,
+      // neighbouring fan columns can converge where the layers taper, folding the front.
+      if (col.fan) {
+        sum = col.start_normal;
       }
       normal[c] = project(col, sum);
       if (visibility(col, normal[c]) < 0.05) {
@@ -598,13 +1044,14 @@ class Inflator {
       std::vector<Vec3> smoothed = normal;
       for (std::size_t c = 0; c < n; ++c) {
         const Column& col = cols_[c];
-        if (!col.active) {
+        if (!col.active || col.fan) {
           continue;
         }
         Vec3 mean;
         int k = 0;
         for (const Index b : col.nbrs) {
-          if (cols_[u(b)].active) {
+          // Columns on the same node (a fan) are not averaged: their normals differ on purpose.
+          if (cols_[u(b)].active && cols_[u(b)].base != col.base) {
             mean += normal[u(b)];
             ++k;
           }
@@ -626,11 +1073,30 @@ class Inflator {
       }
       col.normal = normal[c];
       col.scale = 1.0 / std::max(visibility(col, col.normal), 1.0 / opt_.max_scale);
-      double spacing = 0.0;
-      for (const Index b : col.nbrs) {
-        spacing += distance(cur_pos(sz(c)), cur_pos(b));
+      if (col.fan) {
+        col.scale = 1.0;
       }
-      spacing /= static_cast<double>(std::max<std::size_t>(col.nbrs.size(), 1));
+      // Spacing: mean distance to the neighbours on other nodes (a corner's centre column has
+      // none: those of all the node's columns).
+      double spacing = 0.0;
+      int others = 0;
+      for (const Index b : col.nbrs) {
+        if (cols_[u(b)].base != col.base) {
+          spacing += distance(cur_pos(sz(c)), cur_pos(b));
+          ++others;
+        }
+      }
+      if (others == 0) {
+        for (const Index d : node_cols_[u(col.base)]) {
+          for (const Index b : cols_[u(d)].nbrs) {
+            if (cols_[u(b)].base != col.base) {
+              spacing += distance(cur_pos(d), cur_pos(b));
+              ++others;
+            }
+          }
+        }
+      }
+      spacing /= static_cast<double>(std::max(others, 1));
       col.target = std::max(spacing, col.origin_spacing);
       if (opt_.max_size) {
         col.target = std::min(col.target, *opt_.max_size);
@@ -686,10 +1152,14 @@ class Inflator {
     return normalized(v);
   }
 
+  // Smallest n . inward over the column's real faces (fan and cap faces do not count).
   [[nodiscard]] double visibility(const Column& col, const Vec3& n) const {
     double worst = 1.0;
     for (const Index wi : col.faces) {
-      worst = std::min(worst, dot(n, walls_[u(wi)].inward));
+      const WallFace& w = walls_[u(wi)];
+      if (!w.virt) {
+        worst = std::min(worst, dot(n, w.inward));
+      }
     }
     return worst;
   }
@@ -757,6 +1227,32 @@ class Inflator {
       e.v = {bottom[i0], bottom[i2], bottom[i1], top[l[t]], 0, 0, 0, 0};
       out.push_back(e);
     };
+    // Polygons with columns sharing a node (fans and caps at ridges): cells from their faces.
+    auto repeats = [&](const std::vector<std::size_t>& poly) {
+      for (std::size_t i = 0; i < poly.size(); ++i) {
+        for (std::size_t j = i + 1; j < poly.size(); ++j) {
+          if (bottom[poly[i]] == bottom[poly[j]]) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    const auto polys = polygons(f);
+    bool degenerate = false;
+    for (const auto& poly : polys) {
+      degenerate = degenerate || repeats(poly);
+    }
+    if (degenerate) {
+      for (const auto& poly : polys) {
+        if (repeats(poly)) {
+          collapsed_cell(poly, bottom, top, top_id, next_extra, extra, out);
+        } else {
+          tri_cell(poly[0], poly[1], poly[2]);
+        }
+      }
+      return;
+    }
     if (m == 3) {
       tri_cell(0, 1, 2);
       return;
@@ -841,6 +1337,169 @@ class Inflator {
     const Index cid = (*next_extra)++;
     extra.push_back(centre);
     for (const auto& face : faces) {
+      Element sub;
+      if (face.size() == 4) {
+        sub.kind = Kind::pyramid;
+        sub.v = {face[0], face[3], face[2], face[1], cid, 0, 0, 0};
+      } else {
+        sub.kind = Kind::tet;
+        sub.v = {face[0], face[2], face[1], cid, 0, 0, 0, 0};
+      }
+      out.push_back(sub);
+    }
+  }
+
+  // Cells on corner caps are only required to be valid: the cap's triangles join columns of very
+  // different directions, so their prisms cannot meet the scaled-Jacobian threshold of the
+  // layers.
+  void relax_caps(std::size_t w, std::vector<Element>& cells) const {
+    if (walls_[w].cap) {
+      for (Element& e : cells) {
+        e.full = false;
+      }
+    }
+  }
+
+  // The cell between a polygon of a wall face whose bottom repeats nodes (columns sharing a
+  // node) and its top: its faces (bottom, lateral, top) without repeated nodes, faces of zero
+  // area dropped and coincident opposite faces cancelled. A tetrahedron, pyramid or prism is
+  // recognised as such (a fan quad's first layer is a prism lying on its side, a cap
+  // triangle's a tetrahedron); anything else is split from its centroid.
+  void collapsed_cell(const std::vector<std::size_t>& poly, const std::vector<Index>& bottom,
+                      const std::vector<Index>& top, const std::vector<Index>& top_id,
+                      Index* next_extra, std::vector<Vec3>& extra,
+                      std::vector<Element>& out) const {
+    std::vector<std::vector<Index>> faces;
+    auto add = [&](const std::vector<Index>& raw) {
+      std::vector<Index> g;
+      for (const Index v : raw) {
+        if (g.empty() || g.back() != v) {
+          g.push_back(v);
+        }
+      }
+      while (g.size() > 1 && g.front() == g.back()) {
+        g.pop_back();
+      }
+      const std::set<Index> distinct(g.begin(), g.end());
+      if (distinct.size() >= 3 && distinct.size() == g.size()) {
+        faces.push_back(g);
+      }
+    };
+    const std::size_t m = poly.size();
+    std::vector<Index> b(m);
+    std::vector<Index> t(m);
+    for (std::size_t i = 0; i < m; ++i) {
+      b[i] = bottom[poly[i]];
+      t[i] = top[poly[i]];
+    }
+    add(b);
+    for (std::size_t i = 0; i < m; ++i) {
+      const std::size_t j = (i + 1) % m;
+      add({b[j], b[i], t[i], t[j]});
+    }
+    add(std::vector<Index>(t.rbegin(), t.rend()));
+    // Cancel pairs of coincident faces of opposite orientation (zero-volume parts).
+    auto opposite = [](const std::vector<Index>& x, const std::vector<Index>& y) {
+      if (x.size() != y.size()) {
+        return false;
+      }
+      const std::size_t n = x.size();
+      for (std::size_t s = 0; s < n; ++s) {
+        bool same = true;
+        for (std::size_t k = 0; k < n && same; ++k) {
+          same = x[k] == y[(s + n - k) % n];
+        }
+        if (same) {
+          return true;
+        }
+      }
+      return false;
+    };
+    std::vector<bool> gone(faces.size(), false);
+    for (std::size_t i = 0; i < faces.size(); ++i) {
+      for (std::size_t j = i + 1; j < faces.size() && !gone[i]; ++j) {
+        if (!gone[j] && opposite(faces[i], faces[j])) {
+          gone[i] = true;
+          gone[j] = true;
+        }
+      }
+    }
+    std::vector<std::vector<Index>> kept;
+    std::set<Index> vertices;
+    std::vector<std::size_t> tris;
+    std::vector<std::size_t> quads;
+    for (std::size_t i = 0; i < faces.size(); ++i) {
+      if (gone[i]) {
+        continue;
+      }
+      if (faces[i].size() == 3) {
+        tris.push_back(kept.size());
+      } else {
+        quads.push_back(kept.size());
+      }
+      vertices.insert(faces[i].begin(), faces[i].end());
+      kept.push_back(faces[i]);
+    }
+    if (kept.empty()) {
+      return;
+    }
+    auto other_than = [&](const std::vector<Index>& face) {
+      for (const Index v : vertices) {
+        if (std::find(face.begin(), face.end(), v) == face.end()) {
+          return v;
+        }
+      }
+      return Index{-1};
+    };
+    Element e;
+    if (vertices.size() == 4 && tris.size() == 4 && quads.empty()) {
+      const auto& f = kept[tris[0]];
+      e.kind = Kind::tet;
+      e.v = {f[0], f[2], f[1], other_than(f), 0, 0, 0, 0};
+      out.push_back(e);
+      return;
+    }
+    if (vertices.size() == 5 && tris.size() == 4 && quads.size() == 1) {
+      const auto& f = kept[quads[0]];
+      e.kind = Kind::pyramid;
+      e.v = {f[0], f[3], f[2], f[1], other_than(f), 0, 0, 0};
+      out.push_back(e);
+      return;
+    }
+    if (vertices.size() == 6 && tris.size() == 2 && quads.size() == 3) {
+      const auto& t1 = kept[tris[0]];
+      const auto& t2 = kept[tris[1]];
+      // Partner of x in the other triangle: the node next to x in a quad.
+      auto partner = [&](Index x) {
+        for (const std::size_t q : quads) {
+          const auto& f = kept[q];
+          for (std::size_t k = 0; k < 4; ++k) {
+            if (f[k] != x) {
+              continue;
+            }
+            for (const Index y : {f[(k + 1) % 4], f[(k + 3) % 4]}) {
+              if (std::find(t2.begin(), t2.end(), y) != t2.end()) {
+                return y;
+              }
+            }
+          }
+        }
+        return Index{-1};
+      };
+      e.kind = Kind::prism;
+      e.v = {t1[0], t1[2], t1[1], partner(t1[0]), partner(t1[2]), partner(t1[1]), 0, 0};
+      e.full = true;
+      out.push_back(e);
+      return;
+    }
+    Vec3 centre;
+    for (const Index id : vertices) {
+      centre += position(id, top_id, extra);
+    }
+    centre = centre / static_cast<double>(vertices.size());
+    const Index cid = (*next_extra)++;
+    extra.push_back(centre);
+    for (const auto& face : kept) {
       Element sub;
       if (face.size() == 4) {
         sub.kind = Kind::pyramid;
@@ -959,6 +1618,7 @@ class Inflator {
         bool split = false;
         int diag = 0;
         build_cells(w, top_id, &next_extra, extra, cells, &split, &diag);
+        relax_caps(w, cells);
         bool ok = true;
         for (const Element& e : cells) {
           ok = ok && element_ok(e, top_id, extra);
@@ -998,17 +1658,26 @@ class Inflator {
           continue;
         }
         for (const auto& poly : polygons(f)) {
-          for (std::size_t k = 1; k + 1 < poly.size(); ++k) {
+          // Tags: the current node of a stopped column, -(column + 1) for a new node.
+          std::vector<Index> tags;
+          std::map<Index, Vec3> where;
+          for (const std::size_t i : poly) {
+            const Index c = f.cols[i];
+            const Column& col = cols_[u(c)];
+            Index tag = col.cur;
+            if (col.active) {
+              tag = -(c + 1);
+            }
+            tags.push_back(tag);
+            where[tag] = col.next;
+          }
+          tags = distinct_cycle(tags);
+          for (std::size_t k = 1; k + 1 < tags.size(); ++k) {
             Tri t;
-            const std::array<std::size_t, 3> l = {poly[0], poly[k], poly[k + 1]};
+            const std::array<Index, 3> l = {tags[0], tags[k], tags[k + 1]};
             for (std::size_t i = 0; i < 3; ++i) {
-              const Index c = f.cols[l[i]];
-              const Column& col = cols_[u(c)];
-              t.p[i] = col.next;
-              t.tag[i] = col.cur;
-              if (col.active) {
-                t.tag[i] = -(c + 1);
-              }
+              t.p[i] = where[l[i]];
+              t.tag[i] = l[i];
             }
             t.owner = sz(w);
             fresh.push_back(t);
@@ -1105,14 +1774,16 @@ class Inflator {
         if (!a.active && !b.active) {
           continue;
         }
-        std::vector<Index> side;
-        side.push_back(b.cur);
-        side.push_back(a.cur);
+        std::vector<Index> side = {b.cur, a.cur, a.cur, b.cur};
         if (a.active) {
-          side.push_back(top_id[u(f.cols[i])]);
+          side[2] = top_id[u(f.cols[i])];
         }
         if (b.active) {
-          side.push_back(top_id[u(f.cols[(i + 1) % m])]);
+          side[3] = top_id[u(f.cols[(i + 1) % m])];
+        }
+        side = distinct_cycle(side);
+        if (side.empty()) {
+          continue;
         }
         sides_.push_back(side);
         side_face_.push_back(other);
@@ -1167,6 +1838,10 @@ class Inflator {
         for (const std::size_t i : poly) {
           ids.push_back(cols_[u(f.cols[i])].cur);
         }
+        ids = distinct_cycle(ids);
+        if (ids.empty()) {
+          continue;
+        }
         r.front.push_back(ids);
         r.front_face.push_back(f.face);
       }
@@ -1178,16 +1853,24 @@ class Inflator {
     r.height.assign(in_.points.size(), 0.0);
     r.layers.assign(in_.points.size(), 0);
     r.reason.assign(in_.points.size(), "");
+    // Nodes with several columns (fans) report their column with the most layers.
+    std::vector<bool> seen(in_.points.size(), false);
     for (const Column& c : cols_) {
-      r.reason[u(c.base)] = c.reason;
-      if (c.active) {
-        r.reason[u(c.base)] = "layers";
+      const std::size_t p = u(c.base);
+      if (seen[p] && c.layers <= r.layers[p]) {
+        continue;
       }
-      r.top[u(c.base)] = c.cur;
-      r.height[u(c.base)] = c.height;
-      r.layers[u(c.base)] = c.layers;
+      seen[p] = true;
+      r.reason[p] = c.reason;
+      if (c.active) {
+        r.reason[p] = "layers";
+      }
+      r.top[p] = c.cur;
+      r.height[p] = c.height;
+      r.layers[p] = c.layers;
     }
     r.max_layers = max_layers_;
+    r.fan_columns = fans_;
     r.stops = stops_;
     if (stops_.count("visibility") > 0) {
       r.warnings.push_back(std::to_string(stops_["visibility"]) +
@@ -1213,6 +1896,8 @@ class Inflator {
   std::vector<std::array<Index, 5>> pyramids_;
   std::vector<std::array<Index, 6>> prisms_;
   std::vector<std::array<Index, 8>> hexes_;
+  int fans_ = 0;                               // fan columns
+  std::vector<std::vector<Index>> node_cols_;  // per input point: its columns
   std::vector<std::vector<Index>> sides_;
   std::vector<Index> side_face_;
   int max_layers_ = 0;

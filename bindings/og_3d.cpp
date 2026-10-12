@@ -17,6 +17,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "opengrid/core/geom/curve.hpp"
@@ -30,6 +31,7 @@
 #include "opengrid/core/structured/surface_tfi.hpp"
 #include "opengrid/core/structured/tfi3d.hpp"
 #include "opengrid/core/unstructured/inflation3d.hpp"
+#include "opengrid/core/unstructured/optimize3d.hpp"
 
 namespace nb = nanobind;
 
@@ -127,6 +129,21 @@ nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>> index_array(
   const nb::capsule owner(data,
                           [](void* ptr) noexcept { delete[] static_cast<std::int64_t*>(ptr); });
   return {data, {cells.size(), N}, owner};
+}
+
+template <std::size_t N>
+using Cells = nb::ndarray<const std::int64_t, nb::shape<-1, N>, nb::c_contig, nb::device::cpu>;
+
+template <std::size_t N>
+std::vector<std::array<std::int64_t, N>> index_input(const Cells<N>& a) {
+  std::vector<std::array<std::int64_t, N>> out(a.shape(0));
+  const std::int64_t* d = a.data();
+  for (std::size_t c = 0; c < out.size(); ++c) {
+    for (std::size_t k = 0; k < N; ++k) {
+      out[c][k] = d[c * N + k];
+    }
+  }
+  return out;
 }
 
 }  // namespace
@@ -387,45 +404,6 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "inverted_layers, warnings).");
 
   m.def(
-      "write_cgns_unstructured_3d",
-      [](const std::string& path, const std::string& base_name,
-         const std::vector<
-             std::tuple<std::string, std::vector<double>, std::vector<double>, std::vector<double>,
-                        std::vector<std::tuple<std::string, std::string, std::vector<std::int64_t>,
-                                               std::string>>,
-                        std::string>>& zones,
-         const std::vector<std::tuple<std::string, std::string>>& families,
-         const std::vector<std::tuple<int, std::string, int, std::vector<std::int64_t>,
-                                      std::vector<std::int64_t>>>& connections) {
-        std::vector<og::CgnsUnstructuredZone3D> z;
-        z.reserve(zones.size());
-        for (const auto& [name, x, y, zz, sections, family] : zones) {
-          og::CgnsUnstructuredZone3D zone{name, x, y, zz, {}, family};
-          for (const auto& [sname, type, nodes, bc] : sections) {
-            zone.sections.push_back({sname, type, nodes, bc});
-          }
-          z.push_back(std::move(zone));
-        }
-        std::vector<og::CgnsFamily> f;
-        f.reserve(families.size());
-        for (const auto& [name, bc_type] : families) {
-          f.push_back({name, bc_type});
-        }
-        std::vector<og::CgnsVertexConnection> c;
-        c.reserve(connections.size());
-        for (const auto& [zone, name, donor, points, donor_points] : connections) {
-          c.push_back({zone, name, donor, points, donor_points});
-        }
-        const nb::gil_scoped_release release;
-        og::write_cgns_unstructured_3d(path, base_name, z, f, c);
-      },
-      nb::arg("path"), nb::arg("base_name"), nb::arg("zones"), nb::arg("families"),
-      nb::arg("connections"),
-      "Write a 3D unstructured CGNS file. zones: (name, x, y, z, sections [(name, type, 0-based "
-      "nodes, bc family or '')], family); connections: (zone, name, donor zone, 1-based points, "
-      "1-based donor points).");
-
-  m.def(
       "quality_3d",
       [](const Block& grid) {
         const og::Grid3D g = block_from(grid);
@@ -451,15 +429,22 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("grid"), "Per-cell quality of a block (nk, nj, ni, 3); arrays (nk-1, nj-1, ni-1).");
 
   m.def(
-      "write_cgns_structured_3d",
+      "write_cgns_3d",
       [](const std::string& path, const std::string& base_name,
          const std::vector<std::tuple<std::string, Block, std::string>>& blocks,
+         const std::vector<
+             std::tuple<std::string, std::vector<double>, std::vector<double>, std::vector<double>,
+                        std::vector<std::tuple<std::string, std::string, std::vector<std::int64_t>,
+                                               std::string>>,
+                        std::string>>& zones,
          const std::vector<std::tuple<std::string, std::string>>& families,
          const std::vector<std::tuple<int, std::string, std::string, std::array<int, 6>>>& bcs,
          const std::vector<std::tuple<int, std::string, int, std::array<int, 6>, std::array<int, 6>,
-                                      std::array<int, 3>>>& connections) {
-        std::vector<og::CgnsBlock> z;
-        z.reserve(blocks.size());
+                                      std::array<int, 3>>>& connections,
+         const std::vector<std::tuple<int, std::string, int, std::vector<std::int64_t>,
+                                      std::vector<std::int64_t>>>& vertex_connections) {
+        std::vector<og::CgnsBlock> bl;
+        bl.reserve(blocks.size());
         for (const auto& [name, grid, family] : blocks) {
           const og::Grid3D g = block_from(grid);
           og::CgnsBlock b{name, g.ni, g.nj, g.nk, {}, {}, {}, family};
@@ -471,7 +456,16 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
             b.y.push_back(p.y);
             b.z.push_back(p.z);
           }
-          z.push_back(std::move(b));
+          bl.push_back(std::move(b));
+        }
+        std::vector<og::CgnsUnstructuredZone3D> z;
+        z.reserve(zones.size());
+        for (const auto& [name, x, y, zz, sections, family] : zones) {
+          og::CgnsUnstructuredZone3D zone{name, x, y, zz, {}, family};
+          for (const auto& [sname, type, nodes, bc] : sections) {
+            zone.sections.push_back({sname, type, nodes, bc});
+          }
+          z.push_back(std::move(zone));
         }
         std::vector<og::CgnsFamily> f;
         f.reserve(families.size());
@@ -488,14 +482,25 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         for (const auto& [zone, name, donor, range, donor_range, transform] : connections) {
           c.push_back({zone, name, donor, range, donor_range, transform});
         }
+        std::vector<og::CgnsVertexConnection> vc;
+        vc.reserve(vertex_connections.size());
+        for (const auto& [zone, name, donor, points, donor_points] : vertex_connections) {
+          vc.push_back({zone, name, donor, points, donor_points});
+        }
         const nb::gil_scoped_release release;
-        og::write_cgns_structured_3d(path, base_name, z, f, b, c);
+        og::write_cgns_3d(path, base_name, bl, z, f, b, c, vc);
       },
-      nb::arg("path"), nb::arg("base_name"), nb::arg("blocks"), nb::arg("families"),
-      nb::arg("boundaries"), nb::arg("connections"),
-      "Write a 3D structured CGNS file. blocks: (name, grid (nk, nj, ni, 3), family); families: "
-      "(name, bc_type or ''); boundaries: (zone, name, family, (imin, jmin, kmin, imax, jmax, "
-      "kmax)); connections: (zone, name, donor zone, range, donor range, transform). 1-based.");
+      nb::arg("path"), nb::arg("base_name"), nb::arg("blocks"), nb::arg("zones"),
+      nb::arg("families"), nb::arg("boundaries"), nb::arg("connections"),
+      nb::arg("vertex_connections"),
+      "Write a 3D CGNS file. Zones are numbered blocks first, then unstructured zones. blocks: "
+      "(name, grid (nk, nj, ni, 3), family); zones: (name, x, y, z, sections [(name, type, "
+      "0-based nodes, bc family or '')], family); families: (name, bc_type or ''); boundaries "
+      "(blocks only): (zone, name, family, (imin, jmin, kmin, imax, jmax, kmax)); connections "
+      "(blocks only): (zone, name, donor zone, range, donor range, transform); "
+      "vertex_connections: (zone, name, donor zone, points, donor points), points as (i, j, k) "
+      "triples on blocks and vertex numbers on unstructured zones. All indices 1-based except "
+      "section nodes.");
   m.def(
       "inflate_3d",
       [](const nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>& points,
@@ -503,7 +508,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::int64_t>& face_group, const std::vector<std::int64_t>& node_group,
          double first_height, double growth_rate, int layers, std::optional<double> total_thickness,
          bool transition, std::optional<double> max_size, double min_jacobian, double max_scale,
-         double max_slope, double proximity) {
+         double max_slope, double proximity, double fan_threshold, double fan_step) {
         og::Inflation3DInput input;
         input.points.resize(points.shape(0));
         const double* d = points.data();
@@ -525,6 +530,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         options.max_scale = max_scale;
         options.max_slope = max_slope;
         options.proximity = proximity;
+        options.fan_threshold_deg = fan_threshold;
+        options.fan_step_deg = fan_step;
         og::Inflation3DResult r;
         {
           const nb::gil_scoped_release release;
@@ -546,6 +553,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         out["front"] = r.front;
         out["front_face"] = r.front_face;
         out["sides"] = r.sides;
+        out["fan_columns"] = r.fan_columns;
         out["side_face"] = r.side_face;
         out["top"] = r.top;
         out["height"] = r.height;
@@ -560,10 +568,84 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("node_group"), nb::arg("first_height"), nb::arg("growth_rate"), nb::arg("layers"),
       nb::arg("total_thickness").none(), nb::arg("transition"), nb::arg("max_size").none(),
       nb::arg("min_jacobian") = 0.2, nb::arg("max_scale") = 2.0, nb::arg("max_slope") = 0.5,
-      nb::arg("proximity") = 1.0,
+      nb::arg("proximity") = 1.0, nb::arg("fan_threshold") = 60.0, nb::arg("fan_step") = 30.0,
       "3D boundary-layer inflation (see inflation3d.hpp). faces: closed surface oriented out of "
       "the region; wall / face_group per face; node_group per point (plane group a wall node "
       "may slide in, or -1). Returns a dict: points (input first), tets, pyramids, prisms, "
       "hexes, front / front_face, sides / side_face, top, height, layers, max_layers, stops, "
       "warnings.");
+
+  m.def(
+      "optimize_3d",
+      [](const Points& points, const Cells<4>& tets, const Cells<5>& pyramids,
+         const Cells<6>& prisms, const Cells<8>& hexes, const std::vector<bool>& movable,
+         std::int64_t n_fixed_tets, double threshold, int passes, bool move_nodes, bool swap) {
+        og::Optimize3DInput input;
+        input.points.resize(points.shape(0));
+        const double* d = points.data();
+        for (std::size_t i = 0; i < input.points.size(); ++i) {
+          input.points[i] = {d[3 * i], d[3 * i + 1], d[3 * i + 2]};
+        }
+        input.tets = index_input<4>(tets);
+        input.pyramids = index_input<5>(pyramids);
+        input.prisms = index_input<6>(prisms);
+        input.hexes = index_input<8>(hexes);
+        input.movable = movable;
+        input.n_fixed_tets = n_fixed_tets;
+        og::Optimize3DOptions options;
+        options.threshold = threshold;
+        options.passes = passes;
+        options.move_nodes = move_nodes;
+        options.swap = swap;
+        og::Optimize3DResult r;
+        {
+          const nb::gil_scoped_release release;
+          r = og::optimize_3d(input, options);
+        }
+        auto* xyz = new double[r.points.size() * 3];
+        for (std::size_t i = 0; i < r.points.size(); ++i) {
+          xyz[3 * i] = r.points[i][0];
+          xyz[3 * i + 1] = r.points[i][1];
+          xyz[3 * i + 2] = r.points[i][2];
+        }
+        const nb::capsule own(xyz, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+        nb::dict out;
+        out["points"] = nb::ndarray<nb::numpy, double, nb::ndim<2>>(xyz, {r.points.size(), 3}, own);
+        out["tets"] = index_array(r.tets);
+        out["moved"] = r.moved;
+        out["swaps_23"] = r.swaps_23;
+        out["swaps_32"] = r.swaps_32;
+        out["worst_before"] = r.worst_before;
+        out["worst_after"] = r.worst_after;
+        out["below_before"] = r.below_before;
+        out["below_after"] = r.below_after;
+        out["inverted_after"] = r.inverted_after;
+        return out;
+      },
+      nb::arg("points"), nb::arg("tets"), nb::arg("pyramids"), nb::arg("prisms"), nb::arg("hexes"),
+      nb::arg("movable"), nb::arg("n_fixed_tets") = 0, nb::arg("threshold") = 0.3,
+      nb::arg("passes") = 4, nb::arg("move_nodes") = true, nb::arg("swap") = true,
+      "Quality optimisation of a mixed 3D mesh (see optimize3d.hpp): node moves of movable points "
+      "and 2-3 / 3-2 swaps of the tetrahedra after the first n_fixed_tets. Cell arrays are "
+      "int64 (n, 4 / 5 / 6 / 8). Returns a dict: points, tets (fixed ones first), moved, "
+      "swaps_23, swaps_32, worst_before, worst_after, below_before, below_after, "
+      "inverted_after.");
+
+  m.def(
+      "cell_quality_3d",
+      [](const Points& points, const std::vector<std::int64_t>& nodes) {
+        std::vector<std::array<double, 3>> p(points.shape(0));
+        const double* d = points.data();
+        for (std::size_t i = 0; i < p.size(); ++i) {
+          p[i] = {d[3 * i], d[3 * i + 1], d[3 * i + 2]};
+        }
+        for (const std::int64_t v : nodes) {
+          if (v < 0 || std::cmp_greater_equal(v, p.size())) {
+            throw std::invalid_argument("cell_quality_3d: node out of range");
+          }
+        }
+        return og::cell_quality_3d(p, nodes.data(), static_cast<int>(nodes.size()));
+      },
+      nb::arg("points"), nb::arg("nodes"),
+      "Signed scaled Jacobian of one cell (4, 5, 6 or 8 nodes; see optimize3d.hpp).");
 }

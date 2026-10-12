@@ -267,48 +267,71 @@ def _unique(name: str, used: set) -> str:
     return candidate
 
 
-def write_cgns_blocks(path, session, topology, base_name: str = "OpenGrid") -> dict:
-    """3D structured CGNS of the model's blocks: one zone per block (zone family), one Family_t
-    per patch, one BC_t per patched boundary face and GridConnectivity1to1_t in both directions
-    for every interface."""
+CGNS_VOLUME_SECTIONS = {
+    "tets": ("Tetrahedra", "TETRA_4"),
+    "pyramids": ("Pyramids", "PYRA_5"),
+    "prisms": ("Prisms", "PENTA_6"),
+    "hexes": ("Hexahedra", "HEXA_8"),
+}
+
+
+def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
+    """3D CGNS of the model's blocks and volumes, in one base.
+
+    * Blocks: one structured zone each (zone family), one BC_t (PointRange) per patched boundary
+      face and GridConnectivity1to1_t in both directions for every block interface.
+    * Volumes: one unstructured zone each (TETRA_4, PYRA_5, PENTA_6, HEXA_8 sections; zone
+      family), one boundary section (TRI_3 / QUAD_4) + BC_t (FaceCenter) per patched face.
+    * One Family_t per zone and per patch.
+    * Faces shared by a volume and a block or another volume: general connectivity
+      (Abutting1to1, Vertex) in both directions, matching the identical nodes of the face.
+    """
     from opengrid.io.assembly3d import block_zones
-    from opengrid.model.blocks import face_range, one_to_one_3d, patch_faces
+    from opengrid.model.blocks import face_range, one_to_one_3d
+    from opengrid.model.volumes import analyze_3d, volume_cells
 
     if not _core.cgns_available():
         raise RuntimeError("OpenGrid was built without CGNS support")
     store = session.store
     blocks = store.entities("block")
+    volumes = store.entities("volume")
+    # Global zone numbering: blocks first, then volumes.
     zone_index = {b.id: k for k, b in enumerate(blocks)}
+    for k, v in enumerate(volumes):
+        zone_index[v.id] = len(blocks) + k
     zone_names, block_zone = block_zones(session)
     families = [(name, "") for name in zone_names]
     for patch in store.entities("patch"):
         families.append((patch.name, CGNS_BC_TYPES[patch.params["patch_type"]]))
     issues = []
-    for name in [b.name for b in blocks] + [f[0] for f in families]:
+    for name in [e.name for e in [*blocks, *volumes]] + [f[0] for f in families]:
         if len(name) > MAX_NAME:
             issues.append(Issue(name, f"is longer than {MAX_NAME} characters (CGNS limit)"))
     if issues:
         raise ValidationError(issues)
-    zones = []
-    for b in blocks:
-        zones.append(
-            (b.name, np.ascontiguousarray(session.block_grid(b.name)), zone_names[block_zone[b.id]])
-        )
-    assigned, _issues = patch_faces(store, topology)
-    bcs = []
+    topology = analyze_3d(session)
     names_in_zone: dict[int, set] = {}
-    for (block_id, face), patch in sorted(assigned.items()):
+
+    def unique_in(zone, label):
+        return _unique(label, names_in_zone.setdefault(zone, set()))
+
+    # Structured zones and their BCs / 1-to-1 interfaces.
+    grids = {b.id: np.ascontiguousarray(session.block_grid(b.name)) for b in blocks}
+    block_zones_out = [(b.name, grids[b.id], zone_names[block_zone[b.id]]) for b in blocks]
+    bcs = []
+    patched = [e for e in topology["entries"] if e["block"] is not None and e["patch"]]
+    for entry in sorted(patched, key=lambda e: e["block"]):
+        block_id, face = entry["block"]
         zone = zone_index[block_id]
-        r = face_range(session.blocks.grid(block_id), face)
-        name = _unique(f"{patch}_{face}", names_in_zone.setdefault(zone, set()))
-        bcs.append((zone, name, patch, tuple(v + 1 for v in r)))
+        r = face_range(grids[block_id], face)
+        name = unique_in(zone, f"{entry['patch']}_{face}")
+        bcs.append((zone, name, entry["patch"], tuple(v + 1 for v in r)))
     connections = []
-    for a, b in topology.interfaces:
+    for a, b in topology["blocks"].interfaces:
         for this, donor in ((a, b), (b, a)):
             c = one_to_one_3d(session.blocks, this, donor)
             zone = zone_index[this.block]
-            label = f"{store.get(donor.block).name}_{donor.face}"
-            name = _unique(label, names_in_zone.setdefault(zone, set()))
+            name = unique_in(zone, f"{store.get(donor.block).name}_{donor.face}")
             connections.append(
                 (
                     zone,
@@ -319,66 +342,19 @@ def write_cgns_blocks(path, session, topology, base_name: str = "OpenGrid") -> d
                     c["transform"],
                 )
             )
-    _core.write_cgns_structured_3d(str(path), base_name, zones, families, bcs, connections)
-    return {
-        "zones": len(zones),
-        "families": len(families),
-        "boundaries": len(bcs),
-        "connections": len(connections),
-    }
-
-
-CGNS_VOLUME_SECTIONS = {
-    "tets": ("Tetrahedra", "TETRA_4"),
-    "pyramids": ("Pyramids", "PYRA_5"),
-    "prisms": ("Prisms", "PENTA_6"),
-    "hexes": ("Hexahedra", "HEXA_8"),
-}
-
-
-def write_cgns_volumes(path, session, base_name: str = "OpenGrid") -> dict:
-    """3D unstructured CGNS of the model's volumes: one unstructured zone per volume (TETRA_4,
-    PYRA_5 sections; zone family), one Family_t per patch, one boundary section (TRI_3 /
-    QUAD_4) + BC_t (FaceCenter) per patched face, vertex connectivity for faces shared by two
-    volumes."""
-    from opengrid.io.assembly3d import block_zones
-    from opengrid.model.volumes import analyze_3d, volume_cells
-
-    if not _core.cgns_available():
-        raise RuntimeError("OpenGrid was built without CGNS support")
-    store = session.store
-    if store.entities("block"):
-        raise ValidationError(
-            [
-                Issue(
-                    "CGNS", "models with both structured blocks and volumes are written in Phase 8c"
-                )
-            ]
-        )
-    volumes = store.entities("volume")
-    zone_index = {v.id: k for k, v in enumerate(volumes)}
-    zone_names, block_zone = block_zones(session)
-    families = [(name, "") for name in zone_names]
-    for patch in store.entities("patch"):
-        families.append((patch.name, CGNS_BC_TYPES[patch.params["patch_type"]]))
-    issues = []
-    for name in [v.name for v in volumes] + [f[0] for f in families]:
-        if len(name) > MAX_NAME:
-            issues.append(Issue(name, f"is longer than {MAX_NAME} characters (CGNS limit)"))
-    if issues:
-        raise ValidationError(issues)
-    topology = analyze_3d(session)
+    # Unstructured zones: cells, then one boundary section per patched face.
     meshes = {v.id: session.volume_mesh(v.name) for v in volumes}
     zones = []
-    bc_count = 0
+    bc_count = len(bcs)
     for v in volumes:
         mesh = meshes[v.id]
+        zone = zone_index[v.id]
         sections = []
         for key, array, _vtk in volume_cells(mesh):
             if len(array) or key == "tets":
                 name, kind = CGNS_VOLUME_SECTIONS[key]
+                unique_in(zone, name)
                 sections.append((name, kind, array.reshape(-1).tolist(), ""))
-        used: set = set()
         for entry in topology["entries"]:
             if entry["volume"] is None or entry["volume"][0] != v.id or entry["patch"] is None:
                 continue
@@ -390,7 +366,7 @@ def write_cgns_volumes(path, session, base_name: str = "OpenGrid") -> dict:
                 label = f"{entry['patch']}_{store.get(entry['volume'][1]).name}"
                 if size == 4:
                     label += "_q"
-                name = _unique(label, used)
+                name = unique_in(zone, label)
                 sections.append((name, kind, np.concatenate(group).tolist(), entry["patch"]))
                 bc_count += 1
         points = mesh["points"]
@@ -404,36 +380,51 @@ def write_cgns_volumes(path, session, base_name: str = "OpenGrid") -> dict:
                 zone_names[block_zone[v.id]],
             )
         )
-    # Faces shared by two volumes: matching vertices by coordinates.
-    connections = []
-    shared: dict[int, list[int]] = {}
+    # Faces shared with a volume: nodes matched by their (identical) coordinates. Each side
+    # gives {coordinate bytes: 1-based point (vertex number or (i, j, k))}.
+    sides: dict[int, list[tuple[int, dict]]] = {}
     for v in volumes:
+        pts = meshes[v.id]["points"]
         for d in v.params["faces"]:
-            shared.setdefault(d, []).append(v.id)
-    for d, owners in sorted(shared.items()):
+            ids = np.unique(np.concatenate(meshes[v.id]["faces"][d]))
+            sides.setdefault(d, []).append((v.id, {pts[i].tobytes(): (int(i) + 1,) for i in ids}))
+    for f in topology["blocks"].boundary:
+        if f.domain is None or f.domain not in sides:
+            continue
+        grid = grids[f.block]
+        r = face_range(grid, f.face)
+        lookup = {}
+        for k in range(r[2], r[5] + 1):
+            for j in range(r[1], r[4] + 1):
+                for i in range(r[0], r[3] + 1):
+                    lookup[grid[k, j, i].tobytes()] = (i + 1, j + 1, k + 1)
+        sides[f.domain].append((f.block, lookup))
+    vertex_connections = []
+    for d, owners in sorted(sides.items()):
         if len(owners) != 2:
             continue
-        a, b = owners
-        lookup = {}
-        for vid in (a, b):
-            pts = meshes[vid]["points"]
-            ids = np.unique(np.concatenate(meshes[vid]["faces"][d]))
-            lookup[vid] = {pts[i].tobytes(): int(i) for i in ids}
-        keys = sorted(lookup[a])
-        for this, donor in ((a, b), (b, a)):
-            connections.append(
+        keys = sorted(owners[0][1])
+        if sorted(owners[1][1]) != keys:
+            raise ValidationError(
+                [Issue(store.get(d).name, "the nodes of its two sides do not match")]
+            )
+        for (this, here), (donor, there) in (owners, owners[::-1]):
+            zone = zone_index[this]
+            vertex_connections.append(
                 (
-                    zone_index[this],
-                    _unique(store.get(d).name, set()),
+                    zone,
+                    unique_in(zone, store.get(d).name),
                     zone_index[donor],
-                    [lookup[this][k] + 1 for k in keys],
-                    [lookup[donor][k] + 1 for k in keys],
+                    [n for key in keys for n in here[key]],
+                    [n for key in keys for n in there[key]],
                 )
             )
-    _core.write_cgns_unstructured_3d(str(path), base_name, zones, families, connections)
+    _core.write_cgns_3d(
+        str(path), base_name, block_zones_out, zones, families, bcs, connections, vertex_connections
+    )
     return {
-        "zones": len(zones),
+        "zones": len(block_zones_out) + len(zones),
         "families": len(families),
         "boundaries": bc_count,
-        "connections": len(connections),
+        "connections": len(connections) + len(vertex_connections),
     }

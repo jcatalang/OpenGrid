@@ -11,6 +11,7 @@ add_library(og_core STATIC
   src/unstructured/domain_mesher.cpp
   src/unstructured/inflation.cpp
   src/unstructured/inflation3d.cpp
+  src/unstructured/optimize3d.cpp
   src/dist/distribution.cpp
   src/dist/geometric.cpp
   src/dist/vinokur.cpp

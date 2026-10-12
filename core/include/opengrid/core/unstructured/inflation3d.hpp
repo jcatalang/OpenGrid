@@ -61,6 +61,8 @@ struct Inflation3DOptions {
   int normal_smoothing = 5;
   double max_scale = 2.0;
   double min_visibility = 0.2;
+  double fan_threshold_deg = 60.0;  // ridges: convex edges turning more than this (>= 180: none)
+  double fan_step_deg = 30.0;       // largest turn between consecutive fan columns
 };
 
 struct Inflation3DInput {
@@ -86,6 +88,7 @@ struct Inflation3DResult {
   std::vector<int> layers;                            // per input point: number of layers
   std::vector<std::string> reason;  // per input point: why its column stopped ("": not a wall node)
   int max_layers = 0;
+  int fan_columns = 0;                        // extra columns at ridges (fans and caps)
   std::map<std::string, std::int64_t> stops;  // columns stopped, by reason
   std::vector<std::string> warnings;
 };

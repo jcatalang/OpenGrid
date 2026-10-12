@@ -133,7 +133,19 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   Criteria: first height and growth achieved (exactly on flat walls), positive cells, volume
   equal to the enclosed volume, element-type counts. Demos: sphere in a box, hybrid wing stub.
 - **8c:** optimisation (mmg or own), mixed structured/unstructured models in CGNS, pyramid
-  quality at sharp edges.
+  quality at sharp edges. As built:
+  - own optimiser for mixed meshes (node moves of interior nodes and pyramid apexes, 2-3 / 3-2
+    swaps of core tetrahedra), generator key `optimize` (on by default);
+  - ridge fans in 3D inflation (convex edges turning more than 60°: fan columns, zero-area fan
+    faces, corner caps), which replace the stops and tapers at sharp edges;
+  - one 3D CGNS writer for blocks and volumes (structured + unstructured zones, vertex
+    connectivity between them).
+
+  Criteria: optimisation never lowers the worst cell and reduces cells below the threshold;
+  boundary and layer nodes unchanged; fans give every node on interior ridges all layers, a
+  closed front and layer volume equal to the volume between wall and front; mixed CGNS passes
+  cgnscheck with matching connection coordinates. Demo: wing with fans and optimisation,
+  structured block + unstructured duct volume.
 - Surface meshing on parametric surfaces, a watertight shell check (each edge shared by exactly 2 faces, consistent orientation).
 - `TetBackend` with Netgen first and mmg for optimisation.
 - Prism/hex inflation with ridge/corner handling, pyramids at quad faces.

@@ -45,10 +45,20 @@ DEFAULT_VOLUME_GENERATOR = {
     "grading": 0.3,
     "pyramids": "auto",
     "inflation": None,
+    "optimize": True,
 }
 PYRAMID_MODES = ("auto", "always", "never")
 # Internal settings of the 3D inflation (opengrid._core.inflate_3d; not in projects).
-INFLATION_INTERNALS = {"min_jacobian": 0.2, "max_scale": 2.0, "max_slope": 0.5, "proximity": 1.0}
+INFLATION_INTERNALS = {
+    "min_jacobian": 0.2,
+    "max_scale": 2.0,
+    "max_slope": 0.5,
+    "proximity": 1.0,
+    "fan_threshold": 60.0,
+    "fan_step": 30.0,
+}
+# Internal settings of the mesh optimisation (opengrid._core.optimize_3d; not in projects).
+OPTIMIZATION_INTERNALS = {"threshold": 0.3, "passes": 4}
 # Apex height of pyramids on quads of an inflation front, in mean edge lengths.
 FRONT_APEX = 0.5
 DEFAULT_VOLUME_INFLATION = {
@@ -170,6 +180,8 @@ def normalize_volume(raw: dict, store, where: str) -> dict:
         issues.append(
             Issue(f"{where}: generator.pyramids", f"must be one of {', '.join(PYRAMID_MODES)}")
         )
+    if not isinstance(generator["optimize"], bool):
+        issues.append(Issue(f"{where}: generator.optimize", "must be True or False"))
     generator["inflation"] = normalize_volume_inflation(
         generator["inflation"], faces, store, f"{where}: generator.inflation", issues
     )
@@ -592,6 +604,40 @@ class VolumeEvaluator:
             "prisms": layer["prisms"],
             "hexes": layer["hexes"],
         }
+        optimization = None
+        if generator["optimize"]:
+            # Movable: the backend's interior nodes and the pyramid apexes. Boundary and layer
+            # nodes stay, and layer tetrahedra are never swapped. (Moving the centres of layer
+            # transition cells only trades their tetrahedra against their pyramids: their shape
+            # is set by the layer's anisotropy.)
+            movable = np.zeros(len(points), dtype=bool)
+            movable[n_points:] = True
+            out = _core.optimize_3d(
+                np.ascontiguousarray(points),
+                np.ascontiguousarray(cells["tets"]),
+                np.ascontiguousarray(cells["pyramids"]),
+                np.ascontiguousarray(cells["prisms"]),
+                np.ascontiguousarray(cells["hexes"]),
+                movable.tolist(),
+                n_fixed_tets=len(layer["tets"]),
+                **OPTIMIZATION_INTERNALS,
+            )
+            points = out["points"]
+            cells["tets"] = out["tets"]
+            optimization = {
+                key: out[key]
+                for key in (
+                    "moved",
+                    "swaps_23",
+                    "swaps_32",
+                    "worst_before",
+                    "worst_after",
+                    "below_before",
+                    "below_after",
+                )
+            }
+            if out["inverted_after"]:
+                warnings.append(f"{out['inverted_after']} cells are inverted after optimisation")
         # Drop points no cell uses (interior nodes of re-meshed sliding faces), keeping the order.
         keep = np.zeros(len(points), dtype=bool)
         for array in cells.values():
@@ -616,7 +662,13 @@ class VolumeEvaluator:
             top[renumber[kept]] = renumber[info["top"][kept]]
             for i in kept:
                 reason[renumber[i]] = info["reason"][i]
-            info = {**info, "layers": layers, "height": height, "top": top, "reason": reason}
+            info = {
+                **info,
+                "layers": layers,
+                "height": height,
+                "top": top,
+                "reason": reason,
+            }
         result = {
             "points": points,
             **cells,
@@ -625,6 +677,7 @@ class VolumeEvaluator:
             "shells": shell["shells"],
             "enclosed_volume": shell["volume"],
             "inflation": info,
+            "optimization": optimization,
             "warnings": warnings,
         }
         filled = total_volume(result)
@@ -721,11 +774,26 @@ class VolumeEvaluator:
                 core.append((c, f, False))
         for poly in res["front"]:
             core.append((np.asarray(poly, dtype=np.int64), None, True))
-        # Sliding faces with layers on them: the region outside the layers is re-meshed, its
-        # boundary nodes along the walls replaced by the column tops.
+        # Sliding faces with layers on them: the region outside the layers is re-meshed. Its
+        # boundary is the face's boundary minus the boundary of the layer sides on it (directed
+        # edges; the sides have the face's orientation, so shared edges cancel).
         for d in sorted(sides):
             own = [cells[c] for c in by_face[d]]
-            edges = [(int(top[a]), int(top[b])) for a, b in _boundary_edges(own)]
+            chain: dict[tuple[int, int], int] = {}
+
+            def add(a, b, chain=chain):
+                if chain.get((b, a), 0) > 0:
+                    chain[(b, a)] -= 1
+                else:
+                    chain[(a, b)] = chain.get((a, b), 0) + 1
+
+            for a, b in _boundary_edges(own):
+                add(a, b)
+            for side in sides[d]:
+                n = len(side)
+                for k in range(n):
+                    add(int(side[(k + 1) % n]), int(side[k]))
+            edges = sorted(e for e, count in chain.items() for _ in range(count))
             nodes = sorted({v for e in edges for v in e})
             index = {v: k for k, v in enumerate(nodes)}
             loop_xyz = np.concatenate(new_points)[nodes]
@@ -752,6 +820,7 @@ class VolumeEvaluator:
             "faces": tuple(sorted(walls)),
             "sliding": tuple(sorted(sides)),
             "max_layers": int(res["max_layers"]),
+            "fan_columns": int(res["fan_columns"]),
             "top": top,
             "height": np.asarray(res["height"]),
             "layers": np.asarray(res["layers"], dtype=np.int64),

@@ -1,6 +1,6 @@
 {
  "blocks": [
-  {"faces": [44, 53, 58, 63, 64, 65, 14, 23, 28, 33, 34, 35], "generator": {"backend": "netgen", "grading": 0.3, "inflation": {"faces": [14, 23, 28, 33, 34, 35], "first_height": 0.002, "growth_rate": 1.2, "layers": 15, "slide": true, "total_thickness": null, "transition": true}, "max_size": 0.6, "pyramids": "auto"}, "id": 66, "name": "fluid", "type": "volume"}
+  {"faces": [44, 53, 58, 63, 64, 65, 14, 23, 28, 33, 34, 35], "generator": {"backend": "netgen", "grading": 0.3, "inflation": {"faces": [14, 23, 28, 33, 34, 35], "first_height": 0.002, "growth_rate": 1.2, "layers": 15, "slide": true, "total_thickness": null, "transition": true}, "max_size": 0.6, "optimize": true, "pyramids": "auto"}, "id": 66, "name": "fluid", "type": "volume"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 17, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 7, "mode": "arc_length", "name": "carc0", "propagate_spacing": true, "segments": [{"curve": 6, "t0": 0.0, "t1": 1.0}], "type": "connector"},

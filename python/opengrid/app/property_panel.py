@@ -36,7 +36,7 @@ from opengrid.model.domains import (
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.model.patches import PATCH_TYPES, member_label
 from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
-from opengrid.model.volumes import BACKENDS, PYRAMID_MODES
+from opengrid.model.volumes import BACKENDS, DEFAULT_VOLUME_INFLATION, PYRAMID_MODES
 from opengrid.validation import ValidationError
 
 # Field editors per kind: (parameter, editor type). Types: vec3, opt_vec3, number, integer,
@@ -146,10 +146,12 @@ class ExtrusionEditor(QWidget):
 
 
 class VolumeEditor(QWidget):
-    """Volume generator: backend, max size (empty: none), grading, pyramids."""
+    """Volume generator: backend, max size (empty: none), grading, pyramids, and boundary layers
+    (wall faces; empty: none)."""
 
-    def __init__(self, value: dict, parent=None):
+    def __init__(self, value: dict, store=None, parent=None):
         super().__init__(parent)
+        self.store = store
         layout = QFormLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.backend = QComboBox()
@@ -165,6 +167,33 @@ class VolumeEditor(QWidget):
         layout.addRow("max size", self.max_size)
         layout.addRow("grading", self.grading)
         layout.addRow("pyramids", self.pyramids)
+        inflation = value["inflation"]
+        if inflation is None:
+            inflation = dict(DEFAULT_VOLUME_INFLATION)
+        names = []
+        for ref in inflation["faces"]:
+            if store is not None and ref in store:
+                names.append(store.get(ref).name)
+        self.walls = QLineEdit(", ".join(names))
+        self.walls.setPlaceholderText("wall faces (none: no layers)")
+        self.first_height = QLineEdit(format_optional(inflation["first_height"]))
+        self.layer_growth = QLineEdit(format_number(inflation["growth_rate"]))
+        self.layers = QSpinBox()
+        self.layers.setRange(1, 1000)
+        self.layers.setValue(inflation["layers"])
+        self.thickness = QLineEdit(format_optional(inflation["total_thickness"]))
+        self.thickness.setPlaceholderText("none")
+        self.transition = QCheckBox("stop at core size")
+        self.transition.setChecked(inflation["transition"])
+        self.slide = QCheckBox("slide on planar faces")
+        self.slide.setChecked(inflation["slide"])
+        layout.addRow("inflation walls", self.walls)
+        layout.addRow("first height", self.first_height)
+        layout.addRow("layer growth", self.layer_growth)
+        layout.addRow("max layers", self.layers)
+        layout.addRow("total thickness", self.thickness)
+        layout.addRow(self.transition)
+        layout.addRow(self.slide)
 
     def value(self) -> dict:
         grading = parse_numbers(self.grading.text(), "grading")
@@ -175,6 +204,32 @@ class VolumeEditor(QWidget):
             "max_size": parse_optional(self.max_size.text(), "max size"),
             "grading": grading[0],
             "pyramids": self.pyramids.currentText(),
+            "inflation": self._inflation(),
+        }
+
+    def _inflation(self):
+        names = [n.strip() for n in self.walls.text().replace(";", ",").split(",") if n.strip()]
+        if not names:
+            return None
+        ids = []
+        for name in names:
+            if self.store is None or name not in self.store:
+                raise ParseError(f"inflation walls: no domain {name!r}")
+            ids.append(self.store.get(name).id)
+        first = parse_optional(self.first_height.text(), "first height")
+        if first is None:
+            raise ParseError("first height: required when inflation walls are given")
+        growth = parse_numbers(self.layer_growth.text(), "layer growth")
+        if len(growth) != 1:
+            raise ParseError("layer growth: expected one number")
+        return {
+            "faces": tuple(ids),
+            "first_height": first,
+            "growth_rate": growth[0],
+            "layers": self.layers.value(),
+            "total_thickness": parse_optional(self.thickness.text(), "total thickness"),
+            "transition": self.transition.isChecked(),
+            "slide": self.slide.isChecked(),
         }
 
 
@@ -832,7 +887,7 @@ class PropertyPanel(QWidget):
         faces = QLabel(", ".join(self.session.store.get(f).name for f in entity.params["faces"]))
         faces.setWordWrap(True)
         self._form.addRow("faces", faces)
-        editor = VolumeEditor(entity.params["generator"])
+        editor = VolumeEditor(entity.params["generator"], self.session.store)
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 

@@ -328,13 +328,21 @@ def write_cgns_blocks(path, session, topology, base_name: str = "OpenGrid") -> d
     }
 
 
+CGNS_VOLUME_SECTIONS = {
+    "tets": ("Tetrahedra", "TETRA_4"),
+    "pyramids": ("Pyramids", "PYRA_5"),
+    "prisms": ("Prisms", "PENTA_6"),
+    "hexes": ("Hexahedra", "HEXA_8"),
+}
+
+
 def write_cgns_volumes(path, session, base_name: str = "OpenGrid") -> dict:
     """3D unstructured CGNS of the model's volumes: one unstructured zone per volume (TETRA_4,
     PYRA_5 sections; zone family), one Family_t per patch, one boundary section (TRI_3 /
     QUAD_4) + BC_t (FaceCenter) per patched face, vertex connectivity for faces shared by two
     volumes."""
     from opengrid.io.assembly3d import block_zones
-    from opengrid.model.volumes import analyze_3d
+    from opengrid.model.volumes import analyze_3d, volume_cells
 
     if not _core.cgns_available():
         raise RuntimeError("OpenGrid was built without CGNS support")
@@ -365,9 +373,11 @@ def write_cgns_volumes(path, session, base_name: str = "OpenGrid") -> dict:
     bc_count = 0
     for v in volumes:
         mesh = meshes[v.id]
-        sections = [("Tetrahedra", "TETRA_4", mesh["tets"].reshape(-1).tolist(), "")]
-        if len(mesh["pyramids"]):
-            sections.append(("Pyramids", "PYRA_5", mesh["pyramids"].reshape(-1).tolist(), ""))
+        sections = []
+        for key, array, _vtk in volume_cells(mesh):
+            if len(array) or key == "tets":
+                name, kind = CGNS_VOLUME_SECTIONS[key]
+                sections.append((name, kind, array.reshape(-1).tolist(), ""))
         used: set = set()
         for entry in topology["entries"]:
             if entry["volume"] is None or entry["volume"][0] != v.id or entry["patch"] is None:

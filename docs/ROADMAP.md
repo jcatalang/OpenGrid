@@ -121,7 +121,17 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   - tet/pyramid quality;
   - 3D unstructured exports (VTKHDF, Gmsh, CGNS);
   - GUI.
-- **8b:** prism/hex inflation from wall patches.
+- **8b:** prism/hex inflation from wall faces of volumes:
+  - marching normals with smoothing and visibility;
+  - termination (layers, thickness, transition to the core size, slope, proximity, collision,
+    quality);
+  - transition cells (pyramids, tetrahedra) where columns stop;
+  - layers sliding along planar faces (e.g. symmetry planes), re-meshed around the layers;
+  - pyramids on the quad front;
+  - export of mixed cells.
+
+  Criteria: first height and growth achieved (exactly on flat walls), positive cells, volume
+  equal to the enclosed volume, element-type counts. Demos: sphere in a box, hybrid wing stub.
 - **8c:** optimisation (mmg or own), mixed structured/unstructured models in CGNS, pyramid
   quality at sharp edges.
 - Surface meshing on parametric surfaces, a watertight shell check (each edge shared by exactly 2 faces, consistent orientation).

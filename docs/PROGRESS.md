@@ -625,3 +625,66 @@
 - **Not in 8a:** CGNS for mixed blocks + volumes and mmg optimisation (8c); 3D inflation (8b).
 - **Performance:** "5 M tets < 2 min" not measured (the demo's 118 k tetrahedra including
   quality take about 1 s; most of the demo's 11 s is surface meshing and assembly in Python).
+
+## Phase 8b — 3D inflation layers (2026-10-12) — approved
+- **C++** `inflate_3d` (`unstructured/inflation3d.cpp`, binding `_core.inflate_3d`):
+  - prism/hexahedron layers from wall faces of a closed shell;
+  - normal smoothing and visibility, scaled normals;
+  - stops by layers, thickness, transition, slope, proximity, collision (BVH), visibility and
+    quality;
+  - transition cells (pyramids, tetrahedra, centroid splits);
+  - sliding nodes in planes; side faces and per-node results.
+- **Python:**
+  - Volume generator key `inflation` = `{faces, first_height, growth_rate, layers,
+    total_thickness, transition, slide}`, validated, with names in journals.
+  - Sliding planar faces are re-meshed around the layers.
+  - Front quads get pyramids.
+  - Cell types tets/pyramids/prisms/hexes everywhere (`CELL_TYPES`, `volume_cells`): quality
+    (dihedral angles for all types, scaled Jacobian capped at 1), divergence-theorem volumes,
+    VTKHDF/Gmsh (wedge 6)/CGNS (PENTA_6, HEXA_8), scene, picking, tree.
+- **GUI:** inflation rows in the volume editor (walls, first height, growth, layers,
+  thickness, stop at core size, slide).
+- **Demo** `examples/08b_inflation.py`:
+  - **Sphere in a box** (cubed-sphere unstructured patches on three revolved surfaces):
+    - 37 200 prisms in 15 layers on every wall node, 21 714 tetrahedra;
+    - min scaled Jacobian 0.51 (prisms) / 0.14 (tetrahedra);
+    - volume equal to the enclosed volume (faceted sphere +2.0e-5 vs analytic).
+  - **NACA 0012 wing stub** (structured wing surfaces, unstructured tip, sliding symmetry
+    plane):
+    - 28 183 hexahedra, 2 347 prisms, 4 009 pyramids, 46 242 tetrahedra, up to 20 layers;
+    - the 24 trailing-edge nodes stop and the layers taper towards them;
+    - volume equal to the enclosed volume.
+  - cgnscheck is clean for both. Outputs: `08b_inflation.png`, `phase8b_main_window.png`,
+    CGNS / VTKHDF / msh, projects, journals.
+
+### Verified
+- `ctest`: 113/113 (+6 `Inflation3D`). Covered:
+  - exact first height normal to flat walls;
+  - exact total height at an untouched node;
+  - prism/hex counts;
+  - fixed-node taper;
+  - sliding nodes stay in their plane;
+  - proximity stops;
+  - invalid input.
+- clang-tidy clean.
+- `pytest`: 246/246 (+7). Covered:
+  - prism counts and achieved heights;
+  - hexahedra with pyramid caps;
+  - sliding floor: area of the re-meshed floor, VTK cell volumes positive and summing to the
+    enclosed volume, Gmsh counts, cgnscheck;
+  - journal and project round trips;
+  - the slide option off;
+  - validation, total thickness, GUI editor.
+- All demos 01–08b run.
+
+### Not verified / known limitations
+- **Sharp ridges:** no 3D fans. Columns on sharp convex ridges (e.g. trailing edges) stop and the
+  layers taper over a large part of the wall (slope 0.5).
+- **Thin transition cells:** in anisotropic surface cells (e.g. 0.006 × 0.06 near a trailing
+  edge) the transition tetrahedra and pyramids are very thin (dihedral angles near 0° / 180°;
+  volumes positive).
+- **Collision tests:** floating point with a tolerance, not exact predicates. Pyramid caps on the
+  front are placed after the collision tests.
+- **Sliding:** only on planar unstructured faces used by one volume. The volume's view of such a
+  face differs from the face's own mesh.
+- **Not in 8b (8c):** mixed blocks + volumes in CGNS; optimisation.

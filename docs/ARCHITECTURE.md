@@ -664,6 +664,57 @@ segment, so derivative jumps at knots never cost accuracy.
     sections with BC_t at FaceCenter; vertex connectivity between volumes. Models with both
     blocks and volumes in CGNS are deferred to 8c.
 
+### 3D inflation (Phase 8b)
+- **C++ `inflate_3d`** (`unstructured/inflation3d.cpp`) works on the assembled, oriented shell
+  of a volume. Python (`VolumeEvaluator._inflate`) then turns the result into the core surface
+  for Netgen.
+- **Columns:** one per wall node, of three kinds:
+  - free (all its faces are walls);
+  - sliding (its other faces all lie in one plane: a planar unstructured face used by this
+    volume only);
+  - fixed (anything else; layers taper to zero towards it).
+- **Marching normal:** angle-weighted face normals, projected into the plane for sliding nodes,
+  smoothed while visible from all faces (n·n_f ≥ 0.2), scaled by 1/min(n·n_f) (at most 2), and
+  recomputed every layer. On flat walls the height normal to the wall is exact.
+- **Stops**, re-checked until stable:
+  - layers / total thickness;
+  - transition: h_k ≥ column size, where the size is the front edge length, at least the wall
+    spacing, at most max_size;
+  - slope: at most a 0.5 slope, or one layer, above a stopped neighbour;
+  - proximity: a facing face ahead closer than the size (ray cast through a BVH);
+  - collision: floating-point segment/triangle tests with a 1e-9 tolerance;
+  - visibility;
+  - quality: cells inverted, or full prisms/hexahedra with a corner scaled Jacobian below 0.2;
+    the face's most tilted column stops first.
+- **Cells:**
+  - Triangles give prisms, degenerating to pyramids and tetrahedra where columns stop.
+  - Quads give hexahedra. Three stopped columns give a pyramid on the old quad. Otherwise a
+    centroid split (pyramids on quad faces, tetrahedra on triangle faces) keeps all shared
+    faces conforming.
+  - After the first partial layer a quad continues as two triangles, split along a diagonal
+    between advancing columns, so the front has no steep quads.
+  - A first version kept two-adjacent-stopped quads as prisms with a quad top. Its pyramid
+    caps produced 1.8° slivers; splitting through the stopped corner did as well.
+- **Core surface:**
+  - final front polygons plus the non-wall faces;
+  - sliding faces re-meshed by their own 2D generator (`UnstructuredEvaluator.remesh_planar`)
+    in their frame, with the wall chain replaced by the column tops (loops oriented by signed
+    area);
+  - the layers' side faces become those faces' boundary cells next to the new triangles;
+  - front quads always get pyramids, with the apex at 0.5 × edge length (0.3 and 0.71 gave more
+    slivers in the hex probe).
+- **Per-cell volumes** use the divergence theorem with bilinear quad faces, so a conforming
+  mesh's volumes add up exactly to the enclosed volume. Each mesh is checked for this, with a
+  warning on mismatch.
+- **Settings:**
+  - Internal settings (`INFLATION_INTERNALS`: min Jacobian, max normal scale, max slope,
+    proximity) are binding arguments, not project parameters (as in 2D).
+  - Per-node results (`layers`, `height`, `top`, `reason`) are in the final point numbering.
+- **Not done:**
+  - Sharp convex ridges (trailing edges): a single normal is not valid, so those columns stop
+    and the layers taper over about (total height / 0.5) of the wall. There are no 3D fans.
+  - Transition cells in anisotropic wall cells are thin; their volumes are positive.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

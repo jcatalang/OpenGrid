@@ -29,6 +29,7 @@
 #include "opengrid/core/structured/surface_elliptic.hpp"
 #include "opengrid/core/structured/surface_tfi.hpp"
 #include "opengrid/core/structured/tfi3d.hpp"
+#include "opengrid/core/unstructured/inflation3d.hpp"
 
 namespace nb = nanobind;
 
@@ -112,6 +113,20 @@ std::vector<og::Vec3> side(
     out.emplace_back(a(k, 0), a(k, 1), a(k, 2));
   }
   return out;
+}
+
+template <std::size_t N>
+nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>> index_array(
+    const std::vector<std::array<std::int64_t, N>>& cells) {
+  auto* data = new std::int64_t[cells.size() * N];
+  for (std::size_t c = 0; c < cells.size(); ++c) {
+    for (std::size_t k = 0; k < N; ++k) {
+      data[c * N + k] = cells[c][k];
+    }
+  }
+  const nb::capsule owner(data,
+                          [](void* ptr) noexcept { delete[] static_cast<std::int64_t*>(ptr); });
+  return {data, {cells.size(), N}, owner};
 }
 
 }  // namespace
@@ -481,4 +496,74 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "Write a 3D structured CGNS file. blocks: (name, grid (nk, nj, ni, 3), family); families: "
       "(name, bc_type or ''); boundaries: (zone, name, family, (imin, jmin, kmin, imax, jmax, "
       "kmax)); connections: (zone, name, donor zone, range, donor range, transform). 1-based.");
+  m.def(
+      "inflate_3d",
+      [](const nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>& points,
+         const std::vector<std::vector<std::int64_t>>& faces, const std::vector<bool>& wall,
+         const std::vector<std::int64_t>& face_group, const std::vector<std::int64_t>& node_group,
+         double first_height, double growth_rate, int layers, std::optional<double> total_thickness,
+         bool transition, std::optional<double> max_size, double min_jacobian, double max_scale,
+         double max_slope, double proximity) {
+        og::Inflation3DInput input;
+        input.points.resize(points.shape(0));
+        const double* d = points.data();
+        for (std::size_t i = 0; i < input.points.size(); ++i) {
+          input.points[i] = {d[3 * i], d[3 * i + 1], d[3 * i + 2]};
+        }
+        input.faces = faces;
+        input.wall = wall;
+        input.face_group = face_group;
+        input.node_group = node_group;
+        og::Inflation3DOptions options;
+        options.first_height = first_height;
+        options.growth_rate = growth_rate;
+        options.max_layers = layers;
+        options.total_thickness = total_thickness;
+        options.transition = transition;
+        options.max_size = max_size;
+        options.min_jacobian = min_jacobian;
+        options.max_scale = max_scale;
+        options.max_slope = max_slope;
+        options.proximity = proximity;
+        og::Inflation3DResult r;
+        {
+          const nb::gil_scoped_release release;
+          r = og::inflate_3d(input, options);
+        }
+        auto* xyz = new double[r.points.size() * 3];
+        for (std::size_t i = 0; i < r.points.size(); ++i) {
+          xyz[3 * i] = r.points[i][0];
+          xyz[3 * i + 1] = r.points[i][1];
+          xyz[3 * i + 2] = r.points[i][2];
+        }
+        const nb::capsule own(xyz, [](void* ptr) noexcept { delete[] static_cast<double*>(ptr); });
+        nb::dict out;
+        out["points"] = nb::ndarray<nb::numpy, double, nb::ndim<2>>(xyz, {r.points.size(), 3}, own);
+        out["tets"] = index_array(r.tets);
+        out["pyramids"] = index_array(r.pyramids);
+        out["prisms"] = index_array(r.prisms);
+        out["hexes"] = index_array(r.hexes);
+        out["front"] = r.front;
+        out["front_face"] = r.front_face;
+        out["sides"] = r.sides;
+        out["side_face"] = r.side_face;
+        out["top"] = r.top;
+        out["height"] = r.height;
+        out["layers"] = r.layers;
+        out["reason"] = r.reason;
+        out["max_layers"] = r.max_layers;
+        out["stops"] = r.stops;
+        out["warnings"] = r.warnings;
+        return out;
+      },
+      nb::arg("points"), nb::arg("faces"), nb::arg("wall"), nb::arg("face_group"),
+      nb::arg("node_group"), nb::arg("first_height"), nb::arg("growth_rate"), nb::arg("layers"),
+      nb::arg("total_thickness").none(), nb::arg("transition"), nb::arg("max_size").none(),
+      nb::arg("min_jacobian") = 0.2, nb::arg("max_scale") = 2.0, nb::arg("max_slope") = 0.5,
+      nb::arg("proximity") = 1.0,
+      "3D boundary-layer inflation (see inflation3d.hpp). faces: closed surface oriented out of "
+      "the region; wall / face_group per face; node_group per point (plane group a wall node "
+      "may slide in, or -1). Returns a dict: points (input first), tets, pyramids, prisms, "
+      "hexes, front / front_face, sides / side_face, top, height, layers, max_layers, stops, "
+      "warnings.");
 }

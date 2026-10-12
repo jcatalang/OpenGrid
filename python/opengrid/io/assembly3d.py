@@ -2,7 +2,8 @@
 and Gmsh writers.
 
 Cells: hexahedra of blocks (VTK_HEXAHEDRON, nodes (i,j,k), (i+1,j,k), (i+1,j+1,k), (i,j+1,k) and
-the same at k+1), tetrahedra (VTK_TETRA) and pyramids (VTK_PYRAMID, base then apex) of volumes;
+the same at k+1), and the tetrahedra, pyramids, prisms and hexahedra of volumes (VTK types and
+node orders as in opengrid.model.volumes.CELL_TYPES);
 points shared by several blocks / volumes (interfaces carry identical nodes) are merged.
 Boundary faces in patches become quads (block faces) or triangles / quads (volume faces) with
 outward normals. Blocks and volumes in no zone are collected in the implicit zone "default".
@@ -13,12 +14,11 @@ import numpy as np
 from opengrid import _core
 from opengrid.io.assembly import DEFAULT_ZONE, MeshAssembly
 from opengrid.model.blocks import face_array
+from opengrid.model.volumes import volume_cells
 from opengrid.validation import Issue, ValidationError
 
 VTK_QUAD = 9
 VTK_HEXAHEDRON = 12
-VTK_TETRA = 10
-VTK_PYRAMID = 14
 VTK_TRIANGLE = 5
 # Faces whose (first index x second index) direction points into the block.
 REVERSED_FACES = ("imin", "kmin", "jmax")
@@ -103,13 +103,11 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
         meshes[volume.id] = mesh
         starts[volume.id] = offset
         pool.append(mesh["points"])
-        tets = mesh["tets"] + offset
-        pyramids = mesh["pyramids"] + offset
-        cells.extend(tets)
-        cells.extend(pyramids)
-        types.append(np.full(len(tets), VTK_TETRA, dtype=np.uint8))
-        types.append(np.full(len(pyramids), VTK_PYRAMID, dtype=np.uint8))
-        count = len(tets) + len(pyramids)
+        count = 0
+        for _key, array, vtk_type in volume_cells(mesh):
+            cells.extend(array + offset)
+            types.append(np.full(len(array), vtk_type, dtype=np.uint8))
+            count += len(array)
         cell_block.append(np.full(count, number, dtype=np.int32))
         cell_zone.append(np.full(count, block_zone[volume.id], dtype=np.int32))
         cell_ijk.append(

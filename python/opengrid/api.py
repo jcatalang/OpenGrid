@@ -463,7 +463,12 @@ class Session:
     def create_volume(self, faces, generator=None, name: str | None = None) -> str:
         """Unstructured 3D volume (tetrahedra, pyramids on quad faces) enclosed by the given
         domains (one or more closed shells). ``generator``: ``{"backend": "netgen",
-        "max_size": None, "grading": 0.3, "pyramids": True}``."""
+        "max_size": None, "grading": 0.3, "pyramids": "auto" | "always" | "never",
+        "inflation": None}``. ``inflation``: boundary layers (prisms on triangles, hexahedra on
+        quads) from wall faces, ``{"faces": [domains], "first_height", "growth_rate": 1.2,
+        "layers": 30, "total_thickness": None, "transition": True, "slide": True}``; with
+        ``slide`` the layers slide along planar unstructured faces that meet the walls and are
+        used by this volume only (those faces are re-meshed around the layers)."""
         return self._create("volume", {"faces": faces, "generator": generator}, name)
 
     def set_volume_generator(self, name: str, **changes) -> str:
@@ -472,8 +477,10 @@ class Session:
         return self.modify(name, generator=generator)
 
     def volume_mesh(self, name: str) -> dict:
-        """``{"points", "tets" (m, 4), "pyramids" (k, 5), "faces" {domain id: surface cells},
-        "warnings", ...}`` (boundary nodes first, identical to the face meshes)."""
+        """``{"points", "tets" (m, 4), "pyramids" (k, 5), "prisms" (k, 6), "hexes" (k, 8),
+        "faces" {domain id: boundary cells}, "inflation" (None or {"max_layers", "layers",
+        "height", "stops", ...}), "warnings", ...}`` (boundary nodes first, identical to the face
+        meshes)."""
         return self.volumes.mesh(self.store.get(name).id)
 
     def volume_quality(self, name: str) -> dict:
@@ -484,9 +491,12 @@ class Session:
     def volume_status(self, name: str) -> str:
         mesh = self.volume_mesh(name)
         text = f"{len(mesh['tets'])} tetrahedra"
-        if len(mesh["pyramids"]):
-            text += f", {len(mesh['pyramids'])} pyramids"
+        for key, label in (("pyramids", "pyramids"), ("prisms", "prisms"), ("hexes", "hexahedra")):
+            if len(mesh[key]):
+                text += f", {len(mesh[key])} {label}"
         text += f", {len(mesh['points'])} points, {mesh['shells']} shell(s)"
+        if mesh["inflation"] is not None:
+            text += f"; up to {mesh['inflation']['max_layers']} layers"
         if mesh["warnings"]:
             text += "; " + "; ".join(mesh["warnings"])
         return text

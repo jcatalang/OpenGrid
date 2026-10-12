@@ -96,8 +96,9 @@ class ModelTree(QTreeWidget):
                 try:
                     mesh = session.volume_mesh(entity.name)
                     info = f"{len(mesh['tets'])} tets"
-                    if len(mesh["pyramids"]):
-                        info += f", {len(mesh['pyramids'])} pyr"
+                    for key, short in (("pyramids", "pyr"), ("prisms", "pri"), ("hexes", "hex")):
+                        if len(mesh[key]):
+                            info += f", {len(mesh[key])} {short}"
                 except ValidationError:
                     pass
                 item = QTreeWidgetItem(blocks, [entity.name, info])

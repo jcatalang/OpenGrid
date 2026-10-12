@@ -1,7 +1,7 @@
 {
  "blocks": [
-  {"faces": [27, 36, 41, 46, 47, 48, 15, 16, 17, 18], "generator": {"backend": "netgen", "grading": 0.3, "max_size": 0.12, "pyramids": "auto"}, "id": 79, "name": "near", "type": "volume"},
-  {"faces": [57, 66, 71, 76, 77, 78, 27, 36, 41, 46, 47, 48], "generator": {"backend": "netgen", "grading": 0.3, "max_size": 0.6, "pyramids": "auto"}, "id": 80, "name": "far", "type": "volume"}
+  {"faces": [27, 36, 41, 46, 47, 48, 15, 16, 17, 18], "generator": {"backend": "netgen", "grading": 0.3, "inflation": null, "max_size": 0.12, "pyramids": "auto"}, "id": 79, "name": "near", "type": "volume"},
+  {"faces": [57, 66, 71, 76, 77, 78, 27, 36, 41, 46, 47, 48], "generator": {"backend": "netgen", "grading": 0.3, "inflation": null, "max_size": 0.6, "pyramids": "auto"}, "id": 80, "name": "far", "type": "volume"}
  ],
  "connectors": [
   {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 3, "mode": "arc_length", "name": "c-top0", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},

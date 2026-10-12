@@ -109,6 +109,28 @@ history). Phase tags show where each item came from.
 - **mmg** [8a]: not packaged on conda-forge for osx-arm64; optimisation is planned for 8c (source
   build or own implementation).
 
+## 3D inflation
+- **Sharp ridges** [8b]:
+  - There are no 3D fans: columns on sharp convex ridges such as wing trailing edges can't use
+    a single normal, so they stop.
+  - The layers then taper towards the ridge at slope 0.5. On the demo wing only 43 % of the wall
+    nodes keep all 20 layers.
+  - In the probe, loosening the quality floor instead made the upper and lower fronts cross.
+- **Thin transition cells** [8b]:
+  - Where columns stop inside anisotropic wall cells, the transition tetrahedra and pyramids
+    are thin (dihedral angles near 0° / 180° on the demo wing; volumes positive).
+  - Netgen's tetrahedra next to such steps can be poor too.
+- **Collision tests** [8b]:
+  - Floating point with a 1e-9 tolerance, not exact predicates.
+  - Pyramid caps on the layer front are added after the collision tests and never checked
+    themselves.
+- **Sliding** [8b]:
+  - Only along planar unstructured faces used by this volume alone.
+  - The volume re-meshes such a face, so its view of the face differs from the face's own mesh,
+    which is what the GUI shows.
+- **Internal settings** [8b]: not exposed in projects (as in 2D): minimum Jacobian 0.2, normal
+  scale cap 2, slope 0.5, proximity 1, visibility 0.2, 5 smoothing sweeps.
+
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**
   - Phase 5 → 5a (Delaunay), 5b (advancing front), 5c (quads, smoothing, CGNS unstructured).
@@ -122,5 +144,7 @@ history). Phase tags show where each item came from.
     planned in ARCHITECTURE §7. That is Netgen's supported interface, and it keeps Netgen an
     optional run-time dependency.
   - `netgen` was added to `environment.yml`.
+- **3D inflation is a volume generator setting** [8b], like 2D inflation, not a separate
+  entity. Walls are given as faces (domains); the spec says "wall patches".
 - **Environment** [8a]: Netgen installed into the `opengrid` conda env (VTK, PySide6, pyvista
   and NumPy unchanged).

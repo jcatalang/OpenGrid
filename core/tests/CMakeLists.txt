@@ -13,6 +13,7 @@ add_executable(og_core_tests
   test_triangulate.cpp
   test_quads.cpp
   test_inflation.cpp
+  test_inflation3d.cpp
   test_3d.cpp
   test_3d_smoothing.cpp)
 target_link_libraries(og_core_tests PRIVATE og_core og_options GTest::gtest_main)

@@ -419,6 +419,22 @@ def assemble_loops(
     return result
 
 
+def _sources(generator) -> list[tuple]:
+    sources = []
+    for item in generator["sources"]:
+        sources.append(
+            (
+                item["p0"][0],
+                item["p0"][1],
+                item["p1"][0],
+                item["p1"][1],
+                item["size"],
+                item["radius"],
+            )
+        )
+    return sources
+
+
 class UnstructuredEvaluator:
     """Triangulations of unstructured domains, cached by a key over the generator settings and
     the boundary nodes."""
@@ -460,6 +476,51 @@ class UnstructuredEvaluator:
             start += n
         return points, np.concatenate(segments).astype(np.int64)
 
+    def remesh_planar(self, entity_id: int, points, segments) -> tuple[np.ndarray, np.ndarray]:
+        """Triangles filling the region of a planar domain bounded by other loops (``points``
+        (n, 3) and ``segments`` (m, 2); e.g. around inflation layers that slide on the domain), in
+        the domain's own frame and with its generator settings (triangles only, no inflation).
+        Returns (points: the given points first, unchanged, then interior points; triangles)."""
+        entity = self.store.get(entity_id)
+        generator = entity.params["generator"]
+        loops3 = loop_points(entity.params, self.store, self.connectors, entity.name)
+        frame = domain_frame(entity.params, self.store, loops3, entity.name)
+        points = np.asarray(points, dtype=float)
+        uv = frame.to2d(points)
+        segments = np.asarray(segments, dtype=np.int64).reshape(-1, 2)
+        # Outer loops counter-clockwise, holes clockwise: the loops' signed areas add up to the
+        # (positive) area of the region.
+        a = uv[segments[:, 0]]
+        b = uv[segments[:, 1]]
+        if np.sum(a[:, 0] * b[:, 1] - b[:, 0] * a[:, 1]) < 0:
+            segments = segments[:, ::-1]
+        try:
+            xy, triangles, _quads, _rejected, _warnings, _layers = _core.mesh_domain(
+                uv,
+                np.ascontiguousarray(segments),
+                algorithm=generator["algorithm"],
+                element_type="triangles",
+                refine=generator["refine"],
+                min_angle=generator["min_angle"],
+                growth_rate=generator["growth_rate"],
+                max_size=generator["max_size"],
+                sources=_sources(generator),
+                max_points=generator["max_points"],
+                smoothing=generator["smoothing"],
+                smoothing_iterations=generator["smoothing_iterations"],
+                edge_swap=generator["edge_swap"],
+                wall=[],
+            )
+        except ValueError as error:
+            raise ValidationError(
+                [Issue(entity.name, f"re-meshing around layers: {error}")]
+            ) from None
+        xyz = np.zeros((len(xy), 3))
+        if len(xy) > len(points):
+            xyz[len(points) :] = frame.to3d(xy[len(points) :])
+        xyz[: len(points)] = points
+        return xyz, np.asarray(triangles, dtype=np.int64)
+
     def mesh(self, entity_id: int) -> dict:
         entity = self.store.get(entity_id)
         generator = entity.params["generator"]
@@ -474,18 +535,7 @@ class UnstructuredEvaluator:
         if key in self._cache:
             self._cache.move_to_end(key)
             return self._cache[key]
-        sources = []
-        for item in generator["sources"]:
-            sources.append(
-                (
-                    item["p0"][0],
-                    item["p0"][1],
-                    item["p1"][0],
-                    item["p1"][1],
-                    item["size"],
-                    item["radius"],
-                )
-            )
+        sources = _sources(generator)
         try:
             inflation = generator["inflation"]
             wall = []

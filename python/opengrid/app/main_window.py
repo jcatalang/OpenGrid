@@ -713,13 +713,15 @@ class MainWindow(QMainWindow):
 
     def _cell_corners(self, name: str, j: int, i: int) -> np.ndarray:
         if self.session.store.get(name).kind == "volume":
+            from opengrid.model.volumes import CELL_FACES, volume_cells
+
             mesh = self.session.volume_mesh(name)
-            n = len(mesh["tets"])
-            if i < n:
-                c = mesh["points"][mesh["tets"][i]]
-                return c[[0, 1, 2, 0, 3, 1, 3, 2]]
-            c = mesh["points"][mesh["pyramids"][i - n]]
-            return c[[0, 1, 2, 3, 0, 4, 1, 4, 2, 4, 3]]
+            for key, array, _vtk in volume_cells(mesh):
+                if i < len(array):
+                    # A polyline over the cell's faces (outline of the worst cell).
+                    order = [v for face in CELL_FACES[key] for v in (*face, face[0])]
+                    return mesh["points"][array[i]][order]
+                i -= len(array)
         if self.session.store.get(name).kind == "block":
             grid = self.session.block_grid(name)
             nk, nj, ni, _ = grid.shape

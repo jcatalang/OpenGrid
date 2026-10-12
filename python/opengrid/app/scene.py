@@ -32,6 +32,20 @@ WORST_COLOR = "#ff3b30"
 TESSELLATION_TOLERANCE = 2e-4
 
 
+def volume_grid(mesh) -> pv.UnstructuredGrid:
+    """A volume mesh (opengrid.model.volumes) as a VTK unstructured grid, cells in the canonical
+    order (so cell indices match the quality arrays)."""
+    from opengrid.model.volumes import volume_cells
+
+    cells = []
+    types = []
+    for _key, array, vtk_type in volume_cells(mesh):
+        if len(array):
+            cells.append(np.hstack([np.full((len(array), 1), array.shape[1]), array]).ravel())
+            types.append(np.full(len(array), vtk_type, dtype=np.uint8))
+    return pv.UnstructuredGrid(np.concatenate(cells), np.concatenate(types), mesh["points"])
+
+
 class Scene:
     def __init__(self, plotter, session: Session):
         self.plotter = plotter
@@ -231,18 +245,10 @@ class Scene:
         self._actors[entity.id] = [name]
 
     def block_mesh(self, entity) -> pv.DataSet:
-        """The block (structured grid) or volume (tetrahedra and pyramids), with the cut plane
+        """The block (structured grid) or volume (unstructured grid), with the cut plane
         and shrink applied."""
         if entity.kind == "volume":
-            m = self.session.volume_mesh(entity.name)
-            cells = [np.hstack([np.full((len(m["tets"]), 1), 4), m["tets"]]).ravel()]
-            types = [np.full(len(m["tets"]), pv.CellType.TETRA, dtype=np.uint8)]
-            if len(m["pyramids"]):
-                cells.append(
-                    np.hstack([np.full((len(m["pyramids"]), 1), 5), m["pyramids"]]).ravel()
-                )
-                types.append(np.full(len(m["pyramids"]), pv.CellType.PYRAMID, dtype=np.uint8))
-            mesh = pv.UnstructuredGrid(np.concatenate(cells), np.concatenate(types), m["points"])
+            mesh = volume_grid(self.session.volume_mesh(entity.name))
         else:
             grid = np.asarray(self.session.block_grid(entity.name))
             mesh = pv.StructuredGrid(

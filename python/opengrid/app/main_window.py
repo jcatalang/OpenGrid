@@ -309,6 +309,21 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
 
+        topology_menu = self.menuBar().addMenu("&Topology")
+        self.topology_actions = {
+            "split_connector": self._action("Split connector at node…", self.split_connector),
+            "join_connectors": self._action("Join two connectors", self.join_connectors),
+            "split_domain": self._action("Split structured domain…", self.split_domain),
+            "join_domains": self._action("Join two structured domains", self.join_domains),
+            "split_block": self._action("Split block…", self.split_block),
+            "join_blocks": self._action("Join two blocks", self.join_blocks),
+            "ogrid": self._action("O-grid (butterfly) domain or block…", self.ogrid),
+        }
+        for key, action in self.topology_actions.items():
+            if key in ("split_domain", "split_block", "ogrid"):
+                topology_menu.addSeparator()
+            topology_menu.addAction(action)
+
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
         view_menu.addSeparator()
@@ -982,6 +997,130 @@ class MainWindow(QMainWindow):
             log.warning("%s", text)
             self.statusBar().showMessage(text.splitlines()[0], 8000)
             return None
+
+    # ------------------------------------------------------- topology editing
+    def _one(self, kind: str, label: str) -> str | None:
+        names = self._selected_of_kind(kind)
+        if len(names) != 1:
+            self.statusBar().showMessage(f"Select one {label}", 5000)
+            return None
+        return names[0]
+
+    def _two(self, kind: str, label: str) -> list[str] | None:
+        names = self._selected_of_kind(kind)
+        if len(names) != 2:
+            self.statusBar().showMessage(f"Select two {label}", 5000)
+            return None
+        return names
+
+    def _ask_int(self, title: str, label: str, low: int, high: int) -> int | None:
+        value, ok = QInputDialog.getInt(self, title, label, (low + high) // 2, low, high)
+        if not ok:
+            return None
+        return value
+
+    def _after_topology(self, names) -> None:
+        names = [n for n in names or [] if n]
+        if names:
+            log.info("topology edit: %s", ", ".join(names))
+            ids = [self.session.store.get(n).id for n in names if n in self.session.store]
+            self.set_selection(ids)
+
+    def split_connector(self, index: int | None = None) -> list[str] | None:
+        name = self._one("connector", "connector")
+        if name is None:
+            return None
+        n = len(self.session.connector_nodes(name).points)
+        if index is None:
+            index = self._ask_int("Split connector", f"Node (1 … {n - 2}):", 1, n - 2)
+            if index is None:
+                return None
+        names = self._run(lambda: self.session.split_connector(name, index))
+        self._after_topology(names)
+        return names
+
+    def join_connectors(self) -> str | None:
+        names = self._two("connector", "connectors sharing an end")
+        if names is None:
+            return None
+        joined = self._run(lambda: self.session.join_connectors(*names))
+        self._after_topology([joined])
+        return joined
+
+    def split_domain(self, direction: str | None = None, index: int | None = None):
+        name = self._one("domain", "structured domain")
+        if name is None:
+            return None
+        ni, nj = self.session.domain_dimensions(name)
+        if direction is None:
+            direction, ok = QInputDialog.getItem(
+                self, "Split domain", "Along grid line:", ["i", "j"], 0, False
+            )
+            if not ok:
+                return None
+        size = ni
+        if direction == "j":
+            size = nj
+        if index is None:
+            index = self._ask_int("Split domain", f"{direction} (1 … {size - 2}):", 1, size - 2)
+            if index is None:
+                return None
+        names = self._run(lambda: self.session.split_domain(name, **{direction: index}))
+        self._after_topology(names)
+        return names
+
+    def join_domains(self) -> str | None:
+        names = self._two("domain", "structured domains sharing an edge")
+        if names is None:
+            return None
+        joined = self._run(lambda: self.session.join_domains(*names))
+        self._after_topology([joined])
+        return joined
+
+    def split_block(self, axis: str | None = None, index: int | None = None):
+        name = self._one("block", "block")
+        if name is None:
+            return None
+        nk, nj, ni = self.session.block_grid(name).shape[:3]
+        if axis is None:
+            axis, ok = QInputDialog.getItem(self, "Split block", "Axis:", ["i", "j", "k"], 0, False)
+            if not ok:
+                return None
+        size = {"i": ni, "j": nj, "k": nk}[axis]
+        if index is None:
+            index = self._ask_int("Split block", f"{axis} (1 … {size - 2}):", 1, size - 2)
+            if index is None:
+                return None
+        names = self._run(lambda: self.session.split_block(name, axis, index))
+        self._after_topology(names)
+        return names
+
+    def join_blocks(self) -> str | None:
+        names = self._two("block", "blocks sharing a face")
+        if names is None:
+            return None
+        joined = self._run(lambda: self.session.join_blocks(*names))
+        self._after_topology([joined])
+        return joined
+
+    def ogrid(self, fraction: float | None = None) -> list[str] | None:
+        domains = self._selected_of_kind("domain")
+        blocks = self._selected_of_kind("block")
+        if len(domains) + len(blocks) != 1:
+            self.statusBar().showMessage("Select one structured domain or block", 5000)
+            return None
+        if fraction is None:
+            fraction, ok = QInputDialog.getDouble(
+                self, "O-grid", "Core size (fraction of the outer size):", 0.5, 0.05, 0.95, 2
+            )
+            if not ok:
+                return None
+        if domains:
+            names = self._run(lambda: self.session.ogrid_domain(domains[0], fraction=fraction))
+        else:
+            names = self._run(lambda: self.session.ogrid_block(blocks[0], fraction=fraction))
+        self._after_topology(names)
+        return names
 
     # ------------------------------------------------------------ file actions
     def _confirm_discard(self) -> bool:

@@ -15,7 +15,7 @@ __pycache__/
 _skbuild/
 build/
 compile_commands.json
-dist/
+/dist/
 examples/output/*.cgns
 examples/output/*.msh
 examples/output/*.vtkhdf

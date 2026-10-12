@@ -8,6 +8,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "opengrid/core/geom/curve.hpp"
@@ -37,6 +38,8 @@ class CurveChain {
 
   // Point at arc length s from the start (clamped to [0, L]).
   [[nodiscard]] Vec3 point_at_length(double s) const;
+  // Piece index and curve parameter of the point at arc length s (clamped to [0, L]).
+  [[nodiscard]] std::pair<std::size_t, double> locate_length(double s) const;
   // Point at chain parameter u in [0, 1] (clamped).
   [[nodiscard]] Vec3 point_at_param(double u) const;
   // Arc length from the start to chain parameter u.

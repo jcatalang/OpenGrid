@@ -4,6 +4,7 @@
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
@@ -156,23 +157,31 @@ og::DistributionType distribution_type(const std::string& name) {
   if (name == "sine") {
     return og::DistributionType::Sine;
   }
+  if (name == "explicit") {
+    return og::DistributionType::Explicit;
+  }
   throw std::invalid_argument("unknown distribution type '" + name + "'");
 }
 
 og::DistributionSpec make_spec(const std::string& type, std::optional<double> begin_spacing,
                                std::optional<double> end_spacing,
-                               std::optional<double> growth_ratio) {
+                               std::optional<double> growth_ratio,
+                               const std::optional<std::vector<double>>& positions) {
   og::DistributionSpec spec;
   spec.type = distribution_type(type);
   spec.begin_spacing = begin_spacing;
   spec.end_spacing = end_spacing;
   spec.growth_ratio = growth_ratio;
+  if (positions) {
+    spec.positions = *positions;
+  }
   return spec;
 }
 
-// (start, end, n_points, type, begin_spacing, end_spacing, growth_ratio)
-using SubTuple = std::tuple<double, double, int, std::string, std::optional<double>,
-                            std::optional<double>, std::optional<double>>;
+// (start, end, n_points, type, begin_spacing, end_spacing, growth_ratio, positions)
+using SubTuple =
+    std::tuple<double, double, int, std::string, std::optional<double>, std::optional<double>,
+               std::optional<double>, std::optional<std::vector<double>>>;
 using SegmentTuple = std::tuple<std::shared_ptr<og::Curve>, double, double>;
 
 std::vector<og::Vec3> eval_params(const og::Curve& curve, const double* ts, std::size_t n) {
@@ -279,13 +288,15 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
   m.def(
       "distribute",
       [](int n_points, const std::string& type, std::optional<double> begin_spacing,
-         std::optional<double> end_spacing, std::optional<double> growth_ratio) {
-        const og::Distribution d =
-            og::distribute(n_points, make_spec(type, begin_spacing, end_spacing, growth_ratio));
+         std::optional<double> end_spacing, std::optional<double> growth_ratio,
+         const std::optional<std::vector<double>>& positions) {
+        const og::Distribution d = og::distribute(
+            n_points, make_spec(type, begin_spacing, end_spacing, growth_ratio, positions));
         return std::make_tuple(to_numpy(d.s), d.warnings);
       },
       nb::arg("n_points"), nb::arg("type") = "uniform", nb::arg("begin_spacing") = nb::none(),
       nb::arg("end_spacing") = nb::none(), nb::arg("growth_ratio") = nb::none(),
+      nb::arg("positions") = nb::none(),
       "Distribution on [0, 1] (spacings as fractions); returns (s, warnings).");
   m.def("max_stretching_ratio", &og::max_stretching_ratio, nb::arg("positions"));
 
@@ -311,7 +322,9 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       .def(
           "point_at_param",
           [](const og::CurveChain& c, double u) { return c.point_at_param(u).to_array(); },
-          nb::arg("u"));
+          nb::arg("u"))
+      .def("locate_length", &og::CurveChain::locate_length, nb::arg("s"),
+           "(piece index, curve parameter) of the point at arc length s.");
 
   m.def(
       "connector_nodes",
@@ -323,12 +336,12 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
           throw std::invalid_argument("unknown spacing mode '" + mode + "'");
         }
         std::vector<og::SubConnectorSpec> specs;
-        for (const auto& [start, end, n_points, type, begin, finish, ratio] : subs) {
+        for (const auto& [start, end, n_points, type, begin, finish, ratio, positions] : subs) {
           og::SubConnectorSpec spec;
           spec.start = start;
           spec.end = end;
           spec.n_points = n_points;
-          spec.distribution = make_spec(type, begin, finish, ratio);
+          spec.distribution = make_spec(type, begin, finish, ratio, positions);
           specs.push_back(spec);
         }
         const og::ConnectorNodes nodes = og::connector_nodes(chain, spacing_mode, specs);

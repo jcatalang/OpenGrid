@@ -54,6 +54,22 @@ TEST(CurveChain, LengthAndContinuity) {
   EXPECT_NEAR(chain.length_at_param(0.5), 0.5 * chain.length(), 1e-12);
 }
 
+TEST(CurveChain, LocateLength) {
+  const auto arc = quarter_arc();
+  const og::CurveChain chain({{line({0, 3, 0}, {0, 1, 0}), 0.0, 1.0}, {arc, 1.0, 0.0}}, 1e-12);
+  const auto [k0, t0] = chain.locate_length(0.5);
+  EXPECT_EQ(k0, 0U);
+  EXPECT_NEAR(t0, 0.25, 1e-14);
+  // The arc runs backwards: a quarter of its length from its end is t = 0.75.
+  const auto [k1, t1] = chain.locate_length(2.0 + std::numbers::pi / 8.0);
+  EXPECT_EQ(k1, 1U);
+  EXPECT_NEAR(t1, 0.75, 1e-12);
+  const double s = 2.3;
+  const auto [k2, t2] = chain.locate_length(s);
+  EXPECT_LT(og::distance(arc->eval(t2), chain.point_at_length(s)), 1e-15);
+  EXPECT_EQ(k2, 1U);
+}
+
 TEST(CurveChain, InvalidChains) {
   const auto arc = quarter_arc();
   EXPECT_THROW(og::CurveChain({}, 1e-9), std::invalid_argument);

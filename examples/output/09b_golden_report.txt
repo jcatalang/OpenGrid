@@ -1,0 +1,12 @@
+Golden validation cases (examples/golden), built from their scripts and checked.
+
+g01_unit_square: ok (0.0 s, journal replays: True); uniform_min_sj=1, stretched_min_sj=0.777017, stretched_first_spacing=0.001
+g02_quarter_annulus: ok (0.0 s, journal replays: True); radius_error=6.66134e-16, angle_error=4.44089e-16
+g03_naca0012_grids: ok (1.0 s, journal replays: True); o-grid_mean_first_height=0.0001, o-grid_min_sj=0.143657, c-grid_mean_first_height=0.0001, c-grid_min_sj=0.575961
+g04_cylinder_ogrid: ok (0.0 s, journal replays: True); first_height_error=2.11026e-16, angle_error=8.53774e-07
+g05_backward_step: ok (0.0 s, journal replays: True); area=45, interfaces=['c-interface (inlet-block | upper-block)', 'c-mid (lower-block | upper-block)']
+g06_airfoil_hybrid: ok (0.0 s, journal replays: True); quads=6421, triangles=3900, area=1255.73, first_height=1e-05
+g07_duct: ok (0.0 s, journal replays: True); volume=4, cells=16000
+g08_annular_sector: ok (0.0 s, journal replays: True); volume=1.57048, polygon_volume=1.57048
+g09_sphere_in_box: ok (1.7 s, journal replays: True); tets=15473, prisms=19536, pyramids=0, volume=186.981, worst_jacobian=0.300079
+g10_wing_stub: ok (8.6 s, journal replays: True); tets=68452, prisms=2084, hexes=32931, max_layers=12, worst_jacobian=0.0515424

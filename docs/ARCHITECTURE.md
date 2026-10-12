@@ -810,6 +810,39 @@ segment, so derivative jumps at knots never cost accuracy.
   edges are listed by connector. `CadImport.report()` gives the whole account, including the
   healing log.
 
+### Topology editing, scripting documentation, golden cases (Phase 9b)
+- **Explicit distribution** (`dist/distribution.cpp`, type `explicit` with `positions`): the
+  node positions given directly. Splitting and joining connectors use it so nodes do not move;
+  `CurveChain::locate_length` finds the piece and curve parameter where a chain is cut.
+- **Operations** (`model/topology_edit.py`, command `TopologyEdit`): each is a store
+  transformation in one transaction, validated by the normal parameter normalisation and
+  journaled as its high-level call (deterministic, so a replay recreates the same names).
+  - Connectors: split at a node (the original keeps its id and the first part, so references
+    stay valid; users get both parts in their direction) and join (users must hold them
+    consecutively; closed two-connector loops become one).
+  - Structured domains: split along a grid line — edge connectors crossing the cut are split
+    first, the cut is a connector on a polyline through the grid line with explicit positions
+    at its vertices, so the new boundaries are the old grid line exactly. Join two domains
+    sharing a whole edge: the second is rotated / flipped so the shared edge runs opposite,
+    the generator's wall edges are remapped (dropped with a warning where they would land on
+    edges 1 / 3), shared connectors nobody else uses are deleted.
+  - Six-face blocks: split = four face splits (the matching grid line is found by coordinates,
+    so face orientation does not matter) + a new interior face assembled from the four cuts;
+    join = the four side-face pairs joined + the shared face deleted. Block orientation is
+    recomputed, so smoothing walls (named by face) are dropped with a warning.
+  - O-grids: core corners at centre + fraction (corner − centre) (centre = mean of the
+    corners), straight inner and radial connectors (optional tanh spacing at the outer
+    boundary), new faces in a plane z = const listed counter-clockwise. The block version
+    builds 8 radial and 12 inner connectors, 12 radial and 6 inner faces, and 6 shell blocks (+
+    core). Domains on surfaces and extruded blocks are refused (reported).
+- **Documentation:** `docs/SCRIPTING.md` (guide) and `docs/API.md`, generated from the Session
+  docstrings in fixed groups; tests keep both complete and current.
+- **Golden cases:** `examples/golden/gNN_*.py`, each `build()` + `check(og)`; built only through
+  the public API; `tests/python/test_golden.py` runs them and replays their journals.
+- **Repository fix:** `.gitignore` had `dist/` (meant for Python build output), which also
+  ignored `core/src/dist/` and `core/include/opengrid/core/dist/`; it is `/dist/` now and the
+  distribution sources are tracked (earlier commits lacked them).
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

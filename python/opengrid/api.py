@@ -11,6 +11,7 @@ replayable Python script::
     og.save("geometry.ogp")
 """
 
+import logging
 import math
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from opengrid.model.volumes import VolumeEvaluator
 from opengrid.validation import Issue, ValidationError
 
 IMPORT_MODES = ("spline", "split", "polyline")
+log = logging.getLogger("opengrid")
 
 
 class Session:
@@ -52,12 +54,15 @@ class Session:
         self.project_path: Path | None = None
         # GUI/report threshold for the stretching-ratio warning (not stored in projects).
         self.stretching_threshold = 1.3
+        self.last_warnings: list[str] = []  # warnings of the last topology edit
 
     # ------------------------------------------------------------- creation
     def create_point(self, xyz, name: str | None = None) -> str:
+        """Database point."""
         return self._create("point", {"xyz": xyz}, name)
 
     def create_line(self, p0, p1, name: str | None = None) -> str:
+        """Straight line from p0 to p1 (2 or 3 coordinates each)."""
         return self._create("line", {"p0": p0, "p1": p1}, name)
 
     def create_arc(
@@ -97,6 +102,7 @@ class Session:
         return self.create_arc(center, radius, 0.0, math.tau, normal, x_axis, name)
 
     def create_polyline(self, points, name: str | None = None) -> str:
+        """Polyline through the points (straight segments)."""
         return self._create("polyline", {"points": points}, name)
 
     def create_spline(
@@ -119,6 +125,7 @@ class Session:
     def create_nurbs(
         self, degree: int, knots, control_points, weights=None, name: str | None = None
     ) -> str:
+        """NURBS curve: full knot vector (len(control_points) + degree + 1), optional weights."""
         params = {
             "degree": degree,
             "knots": knots,
@@ -238,6 +245,7 @@ class Session:
         return self.create_connector(segments, dimension, distribution, name=name)
 
     def set_dimension(self, name: str, dimension: int) -> str:
+        """Set a connector's number of points."""
         return self.modify(name, dimension=dimension)
 
     def set_distribution(
@@ -248,6 +256,7 @@ class Session:
         end_spacing: float | None = None,
         growth_ratio: float | None = None,
     ) -> str:
+        """Set a connector's distribution ("uniform", "geometric", "tanh", "sine")."""
         distribution = {
             "type": type,
             "begin_spacing": begin_spacing,
@@ -357,6 +366,7 @@ class Session:
         return self._create("unstructured_domain", params, name)
 
     def set_unstructured_generator(self, name: str, **changes) -> str:
+        """Change some generator settings of an unstructured domain."""
         generator = dict(self.entity(name).params["generator"])
         generator.update(changes)
         return self.modify(name, generator=generator)
@@ -411,6 +421,7 @@ class Session:
         return self.domains.smooth(self._domain_id(name), progress)
 
     def domain_status(self, name: str) -> str:
+        """One-line summary of a structured or unstructured domain."""
         entity = self.store.get(name)
         if entity.kind == "unstructured_domain":
             mesh = self.unstructured_mesh(name)
@@ -476,6 +487,7 @@ class Session:
         return self._create("volume", {"faces": faces, "generator": generator}, name)
 
     def set_volume_generator(self, name: str, **changes) -> str:
+        """Change some generator settings of a volume."""
         generator = dict(self.entity(name).params["generator"])
         generator.update(changes)
         return self.modify(name, generator=generator)
@@ -489,11 +501,13 @@ class Session:
         return self.volumes.mesh(self.store.get(name).id)
 
     def volume_quality(self, name: str) -> dict:
+        """Per-cell quality arrays of a volume mesh (scaled Jacobian, angles, aspect ratio, ...)."""
         from opengrid.model.volumes import volume_quality
 
         return volume_quality(self.volume_mesh(name))
 
     def volume_status(self, name: str) -> str:
+        """One-line summary of a volume mesh: cell counts, points, shells, layers."""
         mesh = self.volume_mesh(name)
         text = f"{len(mesh['tets'])} tetrahedra"
         for key, label in (("pyramids", "pyramids"), ("prisms", "prisms"), ("hexes", "hexahedra")):
@@ -571,6 +585,7 @@ class Session:
         return _core.quality_3d(np.ascontiguousarray(self.block_grid(name)))
 
     def block_status(self, name: str) -> str:
+        """One-line summary of a block: points, cells, source, smoothing and quality floor."""
         nk, nj, ni, _ = self.block_grid(name).shape
         params = self.store.get(name).params
         source = "6 faces, TFI"
@@ -631,15 +646,19 @@ class Session:
         return self.modify(source, periodic=periodic)
 
     def unpair_periodic(self, source: str) -> str:
+        """Remove the periodic pairing of a patch."""
         return self.modify(source, periodic=None)
 
     def set_patch_type(self, name: str, patch_type: str) -> str:
+        """Change a patch's boundary-condition type (wall, inlet, outlet, ...)."""
         return self.modify(name, patch_type=patch_type)
 
     def add_to_patch(self, name: str, connectors) -> str:
+        """Add members (connectors in 2D, domains or block faces in 3D) to a patch."""
         return self._change_members(name, "connector", connectors, add=True)
 
     def remove_from_patch(self, name: str, connectors) -> str:
+        """Remove members from a patch."""
         return self._change_members(name, "connector", connectors, add=False)
 
     def create_zone(self, name: str | None = None, members=()) -> str:
@@ -647,9 +666,11 @@ class Session:
         return self._create("zone", {"members": members}, name)
 
     def add_to_zone(self, name: str, domains) -> str:
+        """Add domains to a zone."""
         return self._change_members(name, "domain", domains, add=True)
 
     def remove_from_zone(self, name: str, domains) -> str:
+        """Remove members from a zone."""
         return self._change_members(name, "domain", domains, add=False)
 
     def _change_members(self, name: str, key: str, refs, add: bool) -> str:
@@ -731,6 +752,7 @@ class Session:
         return validate_patches(self.store, self.topology(), self)
 
     def unassigned_boundary_connectors(self) -> list[str]:
+        """Boundary entities that belong to no patch."""
         return self.boundary_report().unassigned
 
     def _require_valid_boundary(self):
@@ -831,18 +853,117 @@ class Session:
         return self.commands.run(ModifyEntity(name, params))
 
     def rename(self, name: str, new_name: str) -> str:
+        """Rename an entity (references follow; journals stay valid)."""
         return self.commands.run(RenameEntity(name, new_name))
 
     def delete(self, names) -> int:
+        """Delete entities (a name or a list); refused while other entities use them."""
         if isinstance(names, str):
             names = [names]
         return self.commands.run(DeleteEntities(list(names)))
 
     def undo(self) -> None:
+        """Undo the last command."""
         self.commands.undo()
 
     def redo(self) -> None:
+        """Redo the last undone command."""
         self.commands.redo()
+
+    # ------------------------------------------------------ topology editing
+    def _topology(self, method: str, label: str, *args, **kwargs) -> list[str]:
+        from opengrid.commands import TopologyEdit
+        from opengrid.model import topology_edit
+
+        function = getattr(topology_edit, method)
+        command = TopologyEdit(method, function, args, kwargs, label)
+        names = self.commands.run(command)
+        self.last_warnings = command.warnings
+        for warning in command.warnings:
+            log.warning("%s: %s", method, warning)
+        return names
+
+    def split_connector(self, name: str, index: int, new_name: str | None = None) -> list[str]:
+        """Split a connector at node ``index``: it keeps nodes 0..index, a new connector takes
+        the rest (explicit distributions keep every node). Domains, loops and patches using it
+        get both. Returns [name, new connector]."""
+        kwargs = {}
+        if new_name is not None:
+            kwargs["new_name"] = new_name
+        return self._topology("split_connector", f"Split {name}", name, index, **kwargs)
+
+    def join_connectors(self, first: str, second: str) -> str:
+        """Join two connectors sharing an end into ``first`` (all nodes kept); users must take
+        them consecutively. Returns the joined connector's name."""
+        return self._topology("join_connectors", f"Join {first}", first, second)[0]
+
+    def split_domain(self, name: str, i: int | None = None, j: int | None = None) -> list[str]:
+        """Split a structured domain along grid line i (or j). The cut becomes a connector on a
+        polyline through the grid line; edge connectors crossing it are split. Returns [name
+        (part with the lower index), new domain, cut connector]."""
+        kwargs = {}
+        if i is not None:
+            kwargs["i"] = i
+        if j is not None:
+            kwargs["j"] = j
+        return self._topology("split_domain", f"Split {name}", name, **kwargs)
+
+    def join_domains(self, first: str, second: str) -> str:
+        """Join two structured domains sharing a whole edge into ``first``; connectors only
+        the shared edge used are deleted. Returns the joined domain's name."""
+        return self._topology("join_domains", f"Join {first}", first, second)[0]
+
+    def split_block(self, name: str, axis: str, index: int) -> list[str]:
+        """Split a six-face block at ``index`` along ``axis`` ("i", "j" or "k"): its side faces
+        are split and a new interior face is created. Returns [name, new block, new face]."""
+        return self._topology("split_block", f"Split {name}", name, axis, index)
+
+    def join_blocks(self, first: str, second: str) -> str:
+        """Join two six-face blocks sharing a face into ``first`` (side faces joined pairwise,
+        the shared face deleted). Returns the joined block's name."""
+        return self._topology("join_blocks", f"Join {first}", first, second)[0]
+
+    def ogrid_domain(
+        self,
+        name: str,
+        fraction: float = 0.5,
+        radial_points: int | None = None,
+        radial_spacing: float | None = None,
+        core: bool = True,
+    ) -> list[str]:
+        """O-grid (butterfly) a structured domain: four domains around a core whose corners are
+        centre + fraction * (corner - centre); radial connectors with ``radial_points`` (default
+        (ni + nj) / 4) and optional tanh ``radial_spacing`` at the outer boundary. ``core=False``
+        leaves the core as a hole. The domain is replaced; returns the new domains."""
+        return self._topology(
+            "ogrid_domain",
+            f"O-grid {name}",
+            name,
+            fraction=fraction,
+            radial_points=radial_points,
+            radial_spacing=radial_spacing,
+            core=core,
+        )
+
+    def ogrid_block(
+        self,
+        name: str,
+        fraction: float = 0.5,
+        radial_points: int | None = None,
+        radial_spacing: float | None = None,
+        core: bool = True,
+    ) -> list[str]:
+        """O-grid (butterfly) a six-face block: six shell blocks around a core block (or only the
+        shell with ``core=False``), all hexahedral. Returns the new blocks."""
+        return self._topology(
+            "ogrid_block",
+            f"O-grid {name}",
+            name,
+            fraction=fraction,
+            radial_points=radial_points,
+            radial_spacing=radial_spacing,
+            core=core,
+        )
 
     # --------------------------------------------------------------- import
     def import_airfoil_dat(
@@ -977,9 +1098,11 @@ class Session:
 
     # -------------------------------------------------------------- queries
     def entity(self, name: str) -> Entity:
+        """The stored entity (id, name, kind, canonical params)."""
         return self.store.get(name)
 
     def names(self, kind: str | None = None) -> list[str]:
+        """Entity names in creation order, optionally of one kind ("line", "connector", ...)."""
         return [entity.name for entity in self.store.entities(kind)]
 
     def geometry(self, name: str):
@@ -987,6 +1110,7 @@ class Session:
         return self.store.geometry(name)
 
     def length(self, name: str) -> float:
+        """Arc length of a curve (0 for points)."""
         curve = self.geometry(name)
         if curve is None:
             return 0.0
@@ -1001,6 +1125,7 @@ class Session:
 
     # --------------------------------------------------------- project files
     def save(self, path) -> None:
+        """Write the project file (.ogp, canonical JSON)."""
         project.save(self.store, path)
         self.project_path = Path(path)
 
@@ -1012,13 +1137,16 @@ class Session:
         self.commands.journal.append(f"og.load({str(path)!r})")
 
     def new(self) -> None:
+        """Start an empty model (clears the undo history)."""
         self._replace_store(Store())
         self.project_path = None
 
     def journal_text(self) -> str:
+        """The session journal: a Python script that rebuilds the model (opengrid.replay)."""
         return self.commands.journal.text()
 
     def save_journal(self, path) -> None:
+        """Write the journal script to a file."""
         Path(path).write_text(self.journal_text(), encoding="utf-8")
 
     # ------------------------------------------------------------- internals

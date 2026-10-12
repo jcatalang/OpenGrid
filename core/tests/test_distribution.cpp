@@ -243,3 +243,18 @@ TEST(Distribution, MaxStretchingRatio) {
       og::distribute(21, spec(DistributionType::Geometric, std::nullopt, std::nullopt, 1.2));
   EXPECT_NEAR(og::max_stretching_ratio(g.s), 1.2, 1e-12);
 }
+
+TEST(Distribution, ExplicitPositions) {
+  DistributionSpec s;
+  s.type = DistributionType::Explicit;
+  s.positions = {0.0, 0.1, 0.35, 1.0};
+  EXPECT_EQ(og::distribute(4, s).s, s.positions);
+  EXPECT_THROW((void)og::distribute(5, s), std::invalid_argument);  // wrong count
+  s.positions = {0.0, 0.4, 0.3, 1.0};
+  EXPECT_THROW((void)og::distribute(4, s), std::invalid_argument);  // not increasing
+  s.positions = {0.0, 0.4, 0.9};
+  EXPECT_THROW((void)og::distribute(3, s), std::invalid_argument);  // does not end at 1
+  s.positions = {0.0, 0.5, 1.0};
+  s.begin_spacing = 0.1;
+  EXPECT_THROW((void)og::distribute(3, s), std::invalid_argument);
+}

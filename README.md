@@ -3,20 +3,43 @@
 Interactive block-structured / unstructured / hybrid mesh generator for CFD (2D and 3D). C++20 core, Python bindings (nanobind),
 PySide6 + VTK GUI, and a Python scripting API.
 
-Status: Phase 4 (geometry, connectors, structured 2D domains with TFI/elliptic smoothing,
-unstructured triangle domains (constrained Delaunay + refinement), quality metrics, patches
-and zones, CGNS / Gmsh / VTKHDF / Plot3D export, scripting API and GUI).
-See `docs/ROADMAP.md` and `docs/PROGRESS.md`.
+Status: Phases 0–9b done (9c, performance and packaging, remains). What it does:
+
+- **Geometry:** lines, arcs, polylines, splines, NURBS curves and surfaces; airfoil `.dat`, CSV and
+  STEP / IGES import (OpenCASCADE, optional) with healing and automatic connectors and domains.
+- **Connectors:** uniform, geometric, tanh and sine distributions with end spacings, breakpoints,
+  spacing propagation; split and join.
+- **2D / surface meshing:** structured domains (TFI, Hermite TFI, elliptic smoothing with wall
+  control), unstructured domains (constrained Delaunay, advancing front, quads), boundary layers.
+- **3D:** structured blocks (six faces, extrusion, hyperbolic extrusion, elliptic smoothing) and
+  unstructured / hybrid volumes (Netgen tetrahedra, prism and hexahedron layers with fans,
+  pyramids, own optimiser), with a quality floor every cell must meet.
+- **Multi-block topology:** split / join domains and blocks, O-grid (butterfly) domains and
+  blocks for all-hexahedral meshes.
+- **Export:** CGNS (structured, unstructured, mixed), VTKHDF, Gmsh 4.1, Plot3D; patches and
+  zones, boundary checks before export.
+- **Everything is scriptable:** the GUI and scripts share one API; every action is an undoable
+  command recorded in a replayable Python journal.
+
+See `docs/SCRIPTING.md` (guide), `docs/API.md` (reference), `examples/` (one demo per phase)
+and `examples/golden/` (the validation cases).
 
 ```python
 import opengrid
 
 og = opengrid.Session()
-og.create_spline([(0, 0), (0.5, 0.06), (1, 0)], method="natural", name="upper")
-og.create_circle((0.5, 0), 20.0, name="farfield")
-og.create_connector("upper", 121, {"type": "tanh", "begin_spacing": 1e-3, "end_spacing": 5e-4})
-print(og.connector_report("connector-1"))
-og.save("geometry.ogp")
+og.create_circle((0, 0), 0.5, name="cylinder")
+og.create_circle((0, 0), 10.0, name="far")
+og.create_line((0.5, 0), (10, 0), name="cut")
+og.create_connector("cylinder", 129, name="c-cyl")
+og.create_connector("far", 129, name="c-far")
+og.create_connector(
+    "cut", 81, {"type": "tanh", "begin_spacing": 1e-4, "end_spacing": 1.0}, name="c-cut"
+)
+og.create_domain([[("c-cyl", True)], ["c-cut"], ["c-far"], [("c-cut", True)]], name="ogrid")
+og.create_patch("wall", "wall", ["c-cyl"])
+og.create_patch("farfield", "farfield", ["c-far"])
+og.export_cgns("cylinder.cgns")
 print(og.journal_text())  # replayable script of everything done
 ```
 
@@ -63,7 +86,10 @@ python tools/check_no_ternary.py
 ```
 
 ## Documentation
+- `docs/SCRIPTING.md`: scripting guide; `docs/API.md`: API reference (generated:
+  `python tools/gen_api_docs.py`)
 - `docs/SPEC.md`: requirements and the phase prompts
 - `docs/ARCHITECTURE.md`: design decisions and licensing
 - `docs/ROADMAP.md`: phases and acceptance criteria
 - `docs/PROGRESS.md`: what has been done
+- `docs/OPEN_ISSUES.md`: limitations and caveats

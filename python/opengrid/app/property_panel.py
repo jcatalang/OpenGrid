@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from opengrid.api import Session
 from opengrid.model.blocks import EXTRUSION_MODES
-from opengrid.model.connectors import CURVE_KINDS, DISTRIBUTION_TYPES, SPACING_MODES
+from opengrid.model.connectors import CURVE_KINDS, DISTRIBUTION_TYPES, EXPLICIT, SPACING_MODES
 from opengrid.model.domains import (
     CONTROLS,
     DEFAULT_ELLIPTIC,
@@ -717,7 +717,8 @@ class UnstructuredEditor(QWidget):
 
 
 class DistributionEditor(QWidget):
-    """Type + begin/end spacing + growth ratio (empty fields mean 'not specified')."""
+    """Type + begin/end spacing + growth ratio (empty fields mean 'not specified'). Explicit
+    positions (from split / join) are kept while the type stays 'explicit'."""
 
     def __init__(self, value: dict, parent=None):
         super().__init__(parent)
@@ -725,6 +726,9 @@ class DistributionEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.type = QComboBox()
         self.type.addItems(list(DISTRIBUTION_TYPES))
+        self._positions = value.get("positions")
+        if value["type"] == EXPLICIT:
+            self.type.addItem(EXPLICIT)
         self.type.setCurrentText(value["type"])
         self.begin = QLineEdit(format_optional(value["begin_spacing"]))
         self.end = QLineEdit(format_optional(value["end_spacing"]))
@@ -737,12 +741,15 @@ class DistributionEditor(QWidget):
         layout.addRow("growth ratio", self.ratio)
 
     def value(self) -> dict:
-        return {
+        result = {
             "type": self.type.currentText(),
             "begin_spacing": parse_optional(self.begin.text(), "begin spacing"),
             "end_spacing": parse_optional(self.end.text(), "end spacing"),
             "growth_ratio": parse_optional(self.ratio.text(), "growth ratio"),
         }
+        if result["type"] == EXPLICIT:
+            result["positions"] = self._positions
+        return result
 
 
 def format_number(value: float) -> str:

@@ -8,6 +8,7 @@ from opengrid.commands.geometry import (
     ModifyEntity,
     RenameEntity,
 )
+from opengrid.commands.topology import TopologyEdit
 
 __all__ = [
     "Command",
@@ -18,4 +19,5 @@ __all__ = [
     "Journal",
     "ModifyEntity",
     "RenameEntity",
+    "TopologyEdit",
 ]

@@ -176,10 +176,21 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   external flow with boundary layers, exported.
 
 ### 9b — Scripting polish, topology helpers
-- Python scripting API documentation and examples reproducing all golden cases from scripts only
-  (tested).
-- Domain/block splitting and joining at given indices; O-grid / butterfly topology helpers for
-  multi-block hexahedral meshes.
+- Scripting guide (`docs/SCRIPTING.md`) and an API reference generated from the docstrings
+  (`docs/API.md`, `tools/gen_api_docs.py`); a test fails when a public method is undocumented,
+  unlisted or the reference is stale.
+- The ten golden cases of SPEC.md as standalone scripts (`examples/golden/`, public API only),
+  each with invariant checks (exact TFI on the annulus, wall spacings, areas / volumes against
+  exact polygons, interfaces, quality floor); a test runs them all and replays their journals.
+- Split / join of connectors (nodes kept by explicit distributions), structured domains (cut
+  along a grid line, the parts reproduce linear TFI exactly) and six-face blocks (split and
+  rejoined blocks have the original points); users (loops, inflation walls, patches, zones,
+  volumes) follow. Undo is one step; journals replay.
+- O-grid (butterfly) of a structured domain (core + four) and of a six-face block (core + six
+  shells, or the shell only): a circle section goes from min scaled Jacobian 0.05 to 0.71, a
+  solid sphere from inverted cells to 0.58 — all-hexahedral multi-block meshes.
+- GUI: Topology menu. Demo: all-hex pipe and ball (CGNS multi-block, cgnscheck clean), block
+  split / join, the golden-case report.
 
 ### 9c — Performance and packaging
 - Performance targets from SPEC.md measured by a benchmark script in Release on M1. OpenMP/TBB

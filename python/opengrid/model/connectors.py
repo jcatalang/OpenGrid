@@ -1,9 +1,12 @@
 """Connectors: parameter schema, validation, curve chains and node evaluation.
 
 A connector is a chain of curve pieces with a number of points ("dimension") and a 1D
-distribution. Breakpoints split it into sub-connectors at given positions and node indices;
-the top-level distribution applies to the first sub-connector and each breakpoint's
-distribution to the sub-connector after it. Spacings are absolute lengths.
+distribution. Besides the stretching functions, ``{"type": "explicit", "positions": (...)}``
+gives the node positions directly (fractions of the length, 0 to 1, one per point); splitting
+and joining connectors produce it so that the new connectors keep the old nodes. Breakpoints
+split it into sub-connectors at given positions and node indices; the top-level distribution
+applies to the first sub-connector and each breakpoint's distribution to the sub-connector
+after it. Spacings are absolute lengths.
 
 Spacing propagation (``propagate_spacing``): an end of a tanh/sine (sub-)connector whose
 spacing is unspecified adopts the explicit spacing that other connectors prescribe at the same
@@ -19,7 +22,8 @@ import numpy as np
 from opengrid import _core
 from opengrid.validation import Issue, ValidationError
 
-DISTRIBUTION_TYPES = ("uniform", "geometric", "tanh", "sine")
+DISTRIBUTION_TYPES = ("uniform", "geometric", "tanh", "sine")  # the stretching functions
+EXPLICIT = "explicit"  # given positions (from split / join)
 SPACING_MODES = ("arc_length", "parametric")
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
 SPACING_TYPES = ("tanh", "sine")  # types whose free ends can adopt propagated spacings
@@ -55,15 +59,18 @@ def normalize_distribution(raw, where: str, field_name: str = "distribution") ->
         raise ValidationError(
             [Issue(f"{where}: {field_name}", f"expected a dict or type name, got {raw!r}")]
         )
-    unknown = sorted(set(raw) - set(DEFAULT_DISTRIBUTION))
+    allowed = set(DEFAULT_DISTRIBUTION)
+    kind = raw.get("type", "uniform")
+    if kind == EXPLICIT:
+        allowed.add("positions")
+    unknown = sorted(set(raw) - allowed)
     for key in unknown:
         issues.append(Issue(f"{where}: {field_name}.{key}", "unexpected key"))
-    kind = raw.get("type", "uniform")
-    if kind not in DISTRIBUTION_TYPES:
+    if kind not in DISTRIBUTION_TYPES and kind != EXPLICIT:
         issues.append(
             Issue(
                 f"{where}: {field_name}.type",
-                f"must be one of {', '.join(DISTRIBUTION_TYPES)}, got {kind!r}",
+                f"must be one of {', '.join((*DISTRIBUTION_TYPES, EXPLICIT))}, got {kind!r}",
             )
         )
     result = {"type": kind}
@@ -87,9 +94,37 @@ def normalize_distribution(raw, where: str, field_name: str = "distribution") ->
         )
     if kind in SPACING_TYPES and result["growth_ratio"] is not None:
         issues.append(Issue(f"{where}: {field_name}.growth_ratio", f"not used by {kind}"))
+    if kind == EXPLICIT:
+        if given:
+            issues.append(Issue(f"{where}: {field_name}", f"explicit takes no {', '.join(given)}"))
+        positions = _positions(raw.get("positions"), f"{where}: {field_name}.positions", issues)
+        result["positions"] = positions
     if issues:
         raise ValidationError(issues)
     return result
+
+
+def _positions(raw, label: str, issues: list[Issue]) -> tuple | None:
+    """Explicit node positions: at least two finite, strictly increasing numbers from 0 to 1."""
+    if not isinstance(raw, (list, tuple, np.ndarray)) or len(raw) < 2:
+        issues.append(Issue(label, "expected a list of at least 2 positions from 0 to 1"))
+        return None
+    values = []
+    for item in raw:
+        if hasattr(item, "item") and not isinstance(item, (int, float)):
+            item = item.item()
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
+            issues.append(Issue(label, f"expected numbers, got {item!r}"))
+            return None
+        values.append(float(item))
+    if values[0] != 0.0 or values[-1] != 1.0:
+        issues.append(Issue(label, "must start at 0 and end at 1"))
+        return None
+    for k in range(1, len(values)):
+        if not values[k] > values[k - 1]:
+            issues.append(Issue(label, f"must increase strictly (position {k})"))
+            return None
+    return tuple(values)
 
 
 def _segment(raw, index: int, store, where: str, issues: list[Issue]) -> dict | None:
@@ -189,6 +224,22 @@ def normalize_connector(raw: dict, store, where: str) -> dict:
             )
         previous_position = item["position"]
         previous_index = item["index"]
+    if not issues:
+        indices = [0] + [b["index"] for b in breakpoints] + [dimension - 1]
+        dists = [distribution] + [b["distribution"] for b in breakpoints]
+        for k, dist in enumerate(dists):
+            explicit = dist.get("positions")
+            needed = indices[k + 1] - indices[k] + 1
+            if dist["type"] == EXPLICIT and explicit is not None and len(explicit) != needed:
+                label = "distribution"
+                if k > 0:
+                    label = f"breakpoints[{k - 1}].distribution"
+                issues.append(
+                    Issue(
+                        f"{where}: {label}.positions",
+                        f"has {len(explicit)} positions for {needed} points",
+                    )
+                )
     params = {
         "segments": tuple(segments),
         "dimension": dimension,
@@ -449,6 +500,7 @@ class ConnectorEvaluator:
                     dist["begin_spacing"],
                     dist["end_spacing"],
                     dist["growth_ratio"],
+                    dist.get("positions"),
                 )
             )
         points, arc_positions, warnings, ratio = _core.connector_nodes(chain, params["mode"], specs)

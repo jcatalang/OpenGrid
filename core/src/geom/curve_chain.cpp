@@ -61,15 +61,20 @@ std::size_t CurveChain::piece_at_length(double s) const {
   return std::min(k, segments_.size() - 1);
 }
 
-Vec3 CurveChain::point_at_length(double s) const {
+std::pair<std::size_t, double> CurveChain::locate_length(double s) const {
   s = std::clamp(s, 0.0, length());
   const std::size_t k = piece_at_length(s);
   const Piece& piece = segments_[k];
   const double local = s - cumulative_[k];
   if (piece.segment.t1 > piece.segment.t0) {
-    return piece.segment.curve->eval(piece.segment.curve->t_at_length(piece.offset + local));
+    return {k, piece.segment.curve->t_at_length(piece.offset + local)};
   }
-  return piece.segment.curve->eval(piece.segment.curve->t_at_length(piece.offset - local));
+  return {k, piece.segment.curve->t_at_length(piece.offset - local)};
+}
+
+Vec3 CurveChain::point_at_length(double s) const {
+  const auto [k, t] = locate_length(s);
+  return segments_[k].segment.curve->eval(t);
 }
 
 double CurveChain::piece_param(std::size_t k, double u) const {

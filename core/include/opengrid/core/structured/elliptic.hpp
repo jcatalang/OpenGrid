@@ -5,9 +5,11 @@
 // (same for y), alpha = |r_eta|^2, beta = r_xi . r_eta, gamma = |r_xi|^2, discretised with
 // second-order central differences and solved by point SOR or alternating-direction line SOR
 // (an eta-line sweep then a xi-line sweep per iteration; source terms implicit along the
-// lines) with coefficients frozen per sweep. The control terms are written in the
-// alpha/gamma-scaled form of Thomas & Middlecoff, which keeps P and Q dimensionless and O(1)
-// even at very small wall spacings. Control functions:
+// lines) with coefficients frozen per sweep. Both use zebra ordering: odd lines (point SOR:
+// rows) first, then even ones; lines of one colour only read lines of the other colour, so they
+// are relaxed in parallel with a result that does not depend on the thread count. The control terms
+// are written in the alpha/gamma-scaled form of Thomas & Middlecoff, which keeps P and Q
+// dimensionless and O(1) even at very small wall spacings. Control functions:
 //  * Laplace (Winslow-type smoothing): P = Q = 0.
 //  * Thomas-Middlecoff: P from the bottom/top boundary distributions, -(r_xi.r_xixi)/|r_xi|^2,
 //    interpolated linearly in eta; Q likewise from left/right, interpolated in xi.
@@ -72,6 +74,7 @@ struct EllipticOptions {
   double omega = 1.0;
   int max_iterations = 1000;
   double tolerance = 1e-6;  // on the residual relative to the first iteration (floor: 1e-13 L)
+  int acceleration = 0;     // Anderson acceleration depth (0: plain relaxation)
 };
 
 // Shared with a monitoring thread: iteration count, residual history and a cancel flag.

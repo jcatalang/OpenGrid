@@ -83,7 +83,13 @@ def test_cancel_smoothing(window, qtbot):
     window.session.create_structured_domain(
         connectors=["c-inner", "c-outer", "c-cut"],
         generator={
-            "elliptic": {"control": "laplace", "max_iterations": 10**8, "tolerance": 1e-300}
+            # Plain relaxation: the accelerated one reaches round-off before it can be cancelled.
+            "elliptic": {
+                "control": "laplace",
+                "max_iterations": 10**8,
+                "tolerance": 1e-300,
+                "acceleration": 0,
+            }
         },
         name="ring",
     )

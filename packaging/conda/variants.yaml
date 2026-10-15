@@ -1,0 +1,5 @@
+# Build variants for packaging/conda/recipe.yaml (rattler-build picks this file up
+# automatically next to the recipe). Python 3.12: the run-time dependencies (Netgen, VTK,
+# PySide6, OCCT) are all built for it on conda-forge.
+python:
+  - "3.12"

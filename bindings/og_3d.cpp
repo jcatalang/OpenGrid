@@ -25,6 +25,7 @@
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality3d.hpp"
 #include "opengrid/core/quality/quality_cells3d.hpp"
+#include "opengrid/core/quality/volume_quality.hpp"
 #include "opengrid/core/structured/elliptic3d.hpp"
 #include "opengrid/core/structured/extrude.hpp"
 #include "opengrid/core/structured/hyperbolic.hpp"
@@ -294,7 +295,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "smooth_elliptic_3d",
       [](const Block& grid, const std::string& control,
          const std::vector<std::tuple<int, std::optional<double>, double, double, double>>& walls,
-         double omega, int max_iterations, double tolerance, og::SmoothingProgress* progress) {
+         double omega, int max_iterations, double tolerance, og::SmoothingProgress* progress,
+         int acceleration) {
         og::Elliptic3DOptions options;
         if (control == "laplace") {
           options.control = og::ControlType::Laplace;
@@ -316,6 +318,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         options.omega = omega;
         options.max_iterations = max_iterations;
         options.tolerance = tolerance;
+        options.acceleration = acceleration;
         const og::Grid3D g = block_from(grid);
         og::Elliptic3DResult r;
         {
@@ -329,7 +332,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("walls") =
           std::vector<std::tuple<int, std::optional<double>, double, double, double>>{},
       nb::arg("omega") = 1.0, nb::arg("max_iterations") = 500, nb::arg("tolerance") = 1e-6,
-      nb::arg("progress") = nb::none(),
+      nb::arg("progress") = nb::none(), nb::arg("acceleration") = 0,
       "3D elliptic smoothing; walls: (face 0..5 = imin..kmax, spacing or None, decay, "
       "relaxation, max_source). Returns (grid, residuals, iterations, converged, cancelled, "
       "warnings).");
@@ -716,4 +719,50 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "Per-cell scaled Jacobian, equiangle skewness and smallest / largest dihedral angle "
       "(degrees) of a mixed 3D mesh, cells in the order tets, pyramids, prisms, hexes (see "
       "quality_cells3d.hpp).");
+
+  m.def(
+      "volume_quality",
+      [](const Points& points, const Cells<4>& tets, const Cells<5>& pyramids,
+         const Cells<6>& prisms, const Cells<8>& hexes) {
+        const std::size_t n_points = points.shape(0);
+        std::vector<og::CellArray> cells = {{tets.data(), tets.shape(0), 4},
+                                            {pyramids.data(), pyramids.shape(0), 5},
+                                            {prisms.data(), prisms.shape(0), 6},
+                                            {hexes.data(), hexes.shape(0), 8}};
+        for (const og::CellArray& array : cells) {
+          const std::size_t n = array.count * static_cast<std::size_t>(array.size);
+          for (std::size_t k = 0; k < n; ++k) {
+            if (array.nodes[k] < 0 || std::cmp_greater_equal(array.nodes[k], n_points)) {
+              throw std::invalid_argument("volume_quality: node out of range");
+            }
+          }
+        }
+        og::VolumeQuality q;
+        {
+          const nb::gil_scoped_release release;
+          q = og::volume_quality(points.data(), n_points, cells);
+        }
+        nb::dict result;
+        const std::array<std::pair<const char*, std::vector<double>*>, 8> fields = {
+            {{"scaled_jacobian", &q.scaled_jacobian},
+             {"aspect_ratio", &q.aspect_ratio},
+             {"min_angle", &q.min_angle},
+             {"max_angle", &q.max_angle},
+             {"skewness", &q.skewness},
+             {"volume", &q.volume},
+             {"non_orthogonality", &q.non_orthogonality},
+             {"volume_ratio", &q.volume_ratio}}};
+        for (const auto& [label, values] : fields) {
+          auto* owned = new std::vector<double>(std::move(*values));
+          const nb::capsule own(
+              owned, [](void* ptr) noexcept { delete static_cast<std::vector<double>*>(ptr); });
+          result[label] =
+              nb::ndarray<nb::numpy, double, nb::ndim<1>>(owned->data(), {owned->size()}, own);
+        }
+        return result;
+      },
+      nb::arg("points"), nb::arg("tets"), nb::arg("pyramids"), nb::arg("prisms"), nb::arg("hexes"),
+      "All per-cell quality metrics of a mixed 3D mesh (scaled_jacobian, aspect_ratio, "
+      "min_angle, max_angle, skewness, volume, non_orthogonality, volume_ratio), cells in the "
+      "order tets, pyramids, prisms, hexes (see volume_quality.hpp; parallel, GIL released).");
 }

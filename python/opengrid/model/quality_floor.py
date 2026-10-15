@@ -65,13 +65,6 @@ def floor_summary(scaled_jacobian, skewness, floor: dict) -> dict:
     }
 
 
-def volume_floor(mesh, floor: dict) -> dict:
-    """Floor check of a volume mesh (cells in the order tets, pyramids, prisms, hexes)."""
-    arrays = [np.ascontiguousarray(mesh[k], dtype=np.int64) for k in CELL_KEYS]
-    q = _core.quality_cells_3d(np.ascontiguousarray(mesh["points"], dtype=float), *arrays)
-    return floor_summary(q["scaled_jacobian"], q["skewness"], floor)
-
-
 def block_floor(grid, floor: dict) -> dict:
     """Floor check of a block grid (nk, nj, ni, 3) with its hexahedra's metrics."""
     q = _core.quality_3d(np.ascontiguousarray(grid, dtype=float))

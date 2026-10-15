@@ -3,6 +3,8 @@ add_library(og_core STATIC
   src/util/gauss_kronrod.cpp
   src/util/roots.cpp
   src/util/predicates.cpp
+  src/util/parallel.cpp
+  src/util/anderson.cpp
   src/unstructured/size_field.cpp
   src/unstructured/triangulate.cpp
   src/unstructured/advancing_front.cpp
@@ -30,6 +32,7 @@ add_library(og_core STATIC
   src/quality/quality_cells.cpp
   src/quality/quality_cells3d.cpp
   src/quality/quality3d.cpp
+  src/quality/volume_quality.cpp
   src/geom/surface.cpp
   src/structured/tfi3d.cpp
   src/structured/extrude.cpp
@@ -59,5 +62,22 @@ if(OG_WITH_CGNS)
     message(STATUS "OpenGrid: CGNS export enabled")
   else()
     message(WARNING "OpenGrid: CGNS library not found; CGNS export disabled")
+  endif()
+endif()
+
+# Optional OpenMP for the hot loops (core/include/opengrid/core/util/parallel.hpp). Apple Clang
+# has no OpenMP runtime of its own: the conda environment's libomp (llvm-openmp) is used.
+if(OG_WITH_OPENMP)
+  if(NOT DEFINED OpenMP_ROOT AND DEFINED ENV{CONDA_PREFIX})
+    set(OpenMP_ROOT "$ENV{CONDA_PREFIX}")
+  endif()
+  find_package(OpenMP COMPONENTS CXX)
+  if(OpenMP_CXX_FOUND)
+    # Public: parallel_for is a header template, so its users compile the pragmas too.
+    target_link_libraries(og_core PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(og_core PUBLIC OG_WITH_OPENMP)
+    message(STATUS "OpenGrid: OpenMP ${OpenMP_CXX_VERSION} enabled")
+  else()
+    message(WARNING "OpenGrid: OpenMP not found; parallel loops run serially")
   endif()
 endif()

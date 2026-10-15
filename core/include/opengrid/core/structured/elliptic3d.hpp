@@ -5,7 +5,10 @@
 // where a_mn are the cofactors of the covariant metric g_mn = r_m . r_n (the contravariant
 // metric times J^2), discretised with second-order central differences (the source terms in the
 // neighbour coefficients, as in the 2D smoother) and solved by point SOR with coefficients frozen
-// per node update. Control functions:
+// per node update. Planes k = const are relaxed in zebra order (odd k, then even k; the stencil
+// reaches k +/- 1 only), the planes of one colour in parallel, nodes within a plane in order -
+// the result does not depend on the thread count. Optional Anderson acceleration of the
+// iteration (util/anderson.hpp), as in the 2D smoother. Control functions:
 //  * Laplace (Winslow-type smoothing): P_m = 0.
 //  * Thomas-Middlecoff (3D extension): on the four faces containing the m-lines,
 //    P_m = -(r_m . r_mm) / |r_m|^2, blended into the block by transfinite interpolation in index
@@ -39,6 +42,7 @@ struct Elliptic3DOptions {
   double omega = 1.0;
   int max_iterations = 500;
   double tolerance = 1e-6;  // on the residual relative to the first iteration
+  int acceleration = 0;     // Anderson acceleration depth (0: plain relaxation)
 };
 
 struct Elliptic3DResult {

@@ -1,0 +1,25 @@
+{
+ "blocks": [],
+ "connectors": [
+  {"breakpoints": [], "dimension": 500, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 4, "mode": "arc_length", "name": "c-cyl", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 500, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 5, "mode": "arc_length", "name": "c-far", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 200, "distribution": {"begin_spacing": 0.001, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "id": 6, "mode": "arc_length", "name": "c-cut", "propagate_spacing": true, "segments": [{"curve": 3, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"center": [0.0, 0.0, 0.0], "end_angle": 6.283185307179586, "id": 1, "name": "cyl", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 6.283185307179586, "id": 2, "name": "far", "normal": [0.0, 0.0, 1.0], "radius": 20.0, "start_angle": 0.0, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 3, "name": "cut", "p0": [0.5, 0.0, 0.0], "p1": [20.0, 0.0, 0.0], "type": "line"}
+ ],
+ "domains": [
+  {"edges": [[{"connector": 4, "reversed": true}], [{"connector": 6, "reversed": false}], [{"connector": 5, "reversed": false}], [{"connector": 6, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "thomas_middlecoff", "max_iterations": 20000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.001}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 7, "name": "d", "surface": null, "type": "domain"}
+ ],
+ "format": "opengrid-project",
+ "name_counters": {},
+ "next_id": 8,
+ "patches": [],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

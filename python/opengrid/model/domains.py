@@ -27,6 +27,8 @@ EDGE_NAMES = ("edge 0 (j = 0)", "edge 1 (i = imax)", "edge 2 (j = jmax)", "edge 
 METHODS = ("tfi", "hermite_tfi")
 CONTROLS = ("laplace", "thomas_middlecoff", "ttm")
 SOLVERS = ("point_sor", "line_sor")
+# Anderson acceleration depth of the elliptic iteration (0: plain relaxation).
+MAX_ACCELERATION = 50
 WALL_EDGES = (0, 2)  # walls with spacing/orthogonality control: j = 0 and j = jmax
 ATTRACTION_KINDS = ("xi_line", "eta_line", "point")
 
@@ -38,6 +40,7 @@ DEFAULT_ELLIPTIC = {
     "omega": 1.0,
     "max_iterations": 2000,
     "tolerance": 1e-6,
+    "acceleration": 5,
 }
 DEFAULT_WALL = {"edge": 0, "spacing": None, "decay": 0.1, "relaxation": 0.1, "max_source": 100.0}
 DEFAULT_GENERATOR = {
@@ -124,6 +127,18 @@ def _normalize_elliptic(raw, where: str, issues: list[Issue]) -> dict | None:
             Issue(f"{label}.max_iterations", f"must be a positive integer, got {iterations!r}")
         )
     tolerance = _float(merged["tolerance"], label, "tolerance", issues, positive=True)
+    acceleration = merged["acceleration"]
+    if (
+        isinstance(acceleration, bool)
+        or not isinstance(acceleration, int)
+        or not 0 <= acceleration <= MAX_ACCELERATION
+    ):
+        issues.append(
+            Issue(
+                f"{label}.acceleration",
+                f"must be an integer from 0 (off) to {MAX_ACCELERATION}, got {acceleration!r}",
+            )
+        )
     walls = []
     seen = set()
     for index, item in enumerate(merged["walls"]):
@@ -186,6 +201,7 @@ def _normalize_elliptic(raw, where: str, issues: list[Issue]) -> dict | None:
         "omega": omega,
         "max_iterations": iterations,
         "tolerance": tolerance,
+        "acceleration": acceleration,
     }
 
 
@@ -644,6 +660,7 @@ def elliptic_arguments(elliptic: dict) -> dict:
         "omega": elliptic["omega"],
         "max_iterations": elliptic["max_iterations"],
         "tolerance": elliptic["tolerance"],
+        "acceleration": elliptic["acceleration"],
     }
 
 

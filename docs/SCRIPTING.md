@@ -71,6 +71,9 @@ og.create_patch("wall", "wall", ["c-cyl"])
 og.create_patch("farfield", "farfield", ["c-far"])
 og.export_cgns("cylinder.cgns")
 ```
+Elliptic smoothing is accelerated (Anderson, `"acceleration": 5` by default; `0` for plain
+relaxation) and runs in parallel.
+
 Edges of a structured domain are listed counter-clockwise: edge 0 (j = 0, i increasing),
 edge 1 (i = imax), edge 2 (j = jmax, i decreasing), edge 3 (i = 0); each edge is a chain of
 connectors, `(name, True)` meaning reversed. `create_structured_domain(connectors=[...])`
@@ -131,6 +134,11 @@ result = og.import_cad("part.step", spacing=0.05, domains="auto")
 print(result.report())  # healing log, skipped faces, free edges
 og.create_volume(result.domains, name="solid")
 ```
+
+## Threads
+Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by
+default, or `OMP_NUM_THREADS`), `opengrid.set_threads(n)` changes it. Results never depend on
+it: the same model gives the same mesh, bit for bit, on 1 or 10 threads.
 
 ## Exports
 

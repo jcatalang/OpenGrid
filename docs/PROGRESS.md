@@ -847,3 +847,54 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - `pytest` +24 (11 topology editing incl. GUI, 11 golden, 2 API docs) → 287.
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
+
+## Phase 9c — performance and packaging (2026-10-13) — approved
+
+### Built
+- OpenMP (`OG_WITH_OPENMP`, `util/parallel.hpp`): deterministic `parallel_for` (static
+  schedule, outputs per index, sums in index order). `opengrid.threads()` /
+  `opengrid.set_threads(n)`; `llvm-openmp` added to `environment.yml`.
+- Elliptic smoothing, 2D and 3D: zebra ordering relaxed in parallel, precomputed wall-source
+  weights, Anderson acceleration (`util/anderson.hpp`; new setting `acceleration`, default 5,
+  0 = plain; GUI spin box).
+- Volume quality metrics in C++ (`quality/volume_quality.cpp`), computed once per volume mesh
+  and reused by the floor and volume checks, `volume_quality` and the exports (the NumPy
+  version is the test reference).
+- 3D optimiser: whole-mesh scans in parallel; swap candidates from the bad tetrahedra only
+  (same swaps, identical meshes on five reference cases). Netgen backend: bulk NumPy transfer
+  and Netgen's thread pool. Assembled shells cached by face-mesh digest.
+- Benchmark `examples/09c_performance.py` (report, JSON and chart in `examples/output`).
+- Packaging: conda recipe (`packaging/conda`, rattler-build; recipe tests: imports, OpenMP, a
+  smoke test meshing 2D + a Netgen volume + exports) and `packaging/macos/build_app.sh`
+  (`OpenGrid.app` + DMG via conda-pack; binaries re-signed ad hoc after prefix rewriting).
+- Fix found by the conda compiler (Clang 23): `geom/surface.cpp` lacked `#include <string>`.
+
+### Results (Release, M1 Max, 10 threads)
+| Case | Cells | Time | Target |
+|---|---|---|---|
+| 2D structured TFI 1001² (grid + quality + VTKHDF) | 1.00 M | 1.8 s | < 10 s met |
+| 2D Delaunay | 1.23 M | 3.4 s | < 10 s met |
+| 2D advancing front | 1.25 M | 4.1 s | < 10 s met |
+| 2D hybrid (layers + triangles) | 1.54 M | 4.9 s | < 10 s met |
+| 500 x 200 elliptic, wall control | 0.1 M | 1.1 s, converged (402 it.) | < 2 s met |
+| 3D tetrahedra (Netgen) | 4.96 M | 176–186 s | < 120 s **missed** |
+
+- The elliptic case on one thread: 3.2 s, identical grid. Without acceleration: not converged
+  after 4000 iterations (residual 9e-3 of the first). Before this phase: 2000 iterations in
+  11.7 s, not converged.
+- Demo smoothers: NACA O-grid 891 → 129 iterations (0.8 → 0.1 s), C-grid 2110 → 249 (3.2 →
+  0.3 s), spacing and orthogonality unchanged. Golden wing stub 8.6 → 3.0 s; pytest 194 → 63 s.
+- 5M tetrahedra: Netgen ~157 s with its thread pool; our own part ~19 s (optimiser 13 s, quality and checks ~5 s). At 278k tetrahedra the whole
+  volume went from 29 s to 8.8 s; before this phase 2.2M tetrahedra took 193 s for the volume,
+  19 s for quality and 21 s for the VTKHDF export.
+- Packages: `opengrid-0.0.1-py312_0.conda` (947 KiB) builds and passes its tests;
+  `OpenGrid.app` 1.9 GB, DMG 722 MB; the app copied elsewhere runs the smoke test and the GUI
+  with an empty environment; the phase screenshot was taken with the bundle's Python.
+
+### Verified
+- `ctest` +3 (parallel_for, Anderson, volume quality) → 130; `pytest` +9 → 296.
+- Thread independence: identical digests for 1–10 threads (2D / 3D smoothing, volume meshes,
+  quality). C++ volume quality = NumPy reference (1e-9; angles 1e-5 degrees).
+- Strict CI build, clang-tidy on changed C++ files, ruff, clang-format, ternary check, API docs
+  check; all demos 01–09b run. Changed outputs: projects / journals now carry
+  `acceleration: 5`; smoothed grids differ at tolerance level (pictures 03, 05a, 05b, 07a).

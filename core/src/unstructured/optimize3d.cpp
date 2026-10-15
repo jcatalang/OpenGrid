@@ -13,6 +13,7 @@
 
 #include "opengrid/core/geom/vec3.hpp"
 #include "opengrid/core/quality/quality_cells3d.hpp"
+#include "opengrid/core/util/parallel.hpp"
 
 namespace og {
 
@@ -174,13 +175,14 @@ class Optimizer {
   }
 
   [[nodiscard]] Index below_floor() const {
-    Index count = 0;
-    for (const Cell& cell : cells_) {
+    std::vector<char> below(cells_.size(), 0);
+    parallel_for(0, sz(cells_.size()), [&](Index c) {
+      const Cell& cell = cells_[u(c)];
       if (cell.alive && margin(cell) < 0.0) {
-        ++count;
+        below[u(c)] = 1;
       }
-    }
-    return count;
+    });
+    return static_cast<Index>(std::count(below.begin(), below.end(), 1));
   }
 
   [[nodiscard]] double worst_margin(std::size_t v) const {
@@ -193,13 +195,11 @@ class Optimizer {
 
   Index rescue() {
     build_node_cells();
+    const std::vector<double> worst = per_node([&](std::size_t v) { return worst_margin(v); });
     std::vector<std::pair<double, std::size_t>> order;
     for (std::size_t v = 0; v < points_.size(); ++v) {
-      if (movable_[v] && start_[v] != start_[v + 1]) {
-        const double worst = worst_margin(v);
-        if (worst < 0.0) {
-          order.emplace_back(worst, v);
-        }
+      if (movable_[v] && start_[v] != start_[v + 1] && worst[v] < 0.0) {
+        order.emplace_back(worst[v], v);
       }
     }
     std::sort(order.begin(), order.end());
@@ -253,15 +253,34 @@ class Optimizer {
     return moved;
   }
 
+  // f(v) for every movable node with cells (others: +infinity), in parallel.
+  template <class F>
+  [[nodiscard]] std::vector<double> per_node(F&& f) const {
+    std::vector<double> out(points_.size(), std::numeric_limits<double>::infinity());
+    parallel_for(0, sz(points_.size()), [&](Index i) {
+      const std::size_t v = u(i);
+      if (movable_[v] && start_[v] != start_[v + 1]) {
+        out[v] = f(v);
+      }
+    });
+    return out;
+  }
+
   [[nodiscard]] std::tuple<double, Index, Index> summary() const {
+    std::vector<double> values(cells_.size(), 1.0);
+    parallel_for(0, sz(cells_.size()), [&](Index c) {
+      if (cells_[u(c)].alive) {
+        values[u(c)] = quality(cells_[u(c)]);
+      }
+    });
     double worst = 1.0;
     Index below = 0;
     Index inverted = 0;
-    for (const Cell& cell : cells_) {
-      if (!cell.alive) {
+    for (std::size_t c = 0; c < cells_.size(); ++c) {
+      if (!cells_[c].alive) {
         continue;
       }
-      const double q = quality(cell);
+      const double q = values[c];
       worst = std::min(worst, q);
       if (q < opt_.threshold) {
         ++below;
@@ -332,19 +351,19 @@ class Optimizer {
   Index move_nodes() {
     build_node_cells();
     // Movable nodes of cells below the threshold, worst first.
+    const std::vector<double> worst = per_node([&](std::size_t v) { return worst_around(v); });
     std::vector<std::pair<double, std::size_t>> order;
     for (std::size_t v = 0; v < points_.size(); ++v) {
-      if (!movable_[v] || start_[v] == start_[v + 1]) {
-        continue;
-      }
-      const double worst = worst_around(v);
-      if (worst < opt_.threshold) {
-        order.emplace_back(worst, v);
+      if (movable_[v] && start_[v] != start_[v + 1] && worst[v] < opt_.threshold) {
+        order.emplace_back(worst[v], v);
       }
     }
     std::sort(order.begin(), order.end());
     Index moved = 0;
-    for (const auto& [initial, v] : order) {
+    for (const auto& entry : order) {
+      // Not a structured binding: lambdas below capture v (clang rejects capturing structured
+      // bindings when OpenMP is enabled).
+      const auto v = entry.second;
       Score current = score(v);
       if (current.worst >= opt_.threshold) {
         continue;
@@ -431,41 +450,52 @@ class Optimizer {
     return cell_quality_3d(points_, t.data(), 4);
   }
 
+  // Whether cell w has the sorted triangle `key` among its triangular faces.
+  [[nodiscard]] static bool has_triangle(const Cell& w, const std::array<Index, 3>& key) {
+    for (const auto& f : cell_triangles(w.n)) {
+      std::array<Index, 3> t = {w.v[u(f[0])], w.v[u(f[1])], w.v[u(f[2])]};
+      std::sort(t.begin(), t.end());
+      if (t == key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Whether cell w has the edge (a, b), a < b.
+  [[nodiscard]] static bool has_edge(const Cell& w, Index a, Index b) {
+    for (const auto& e : cell_edges(w.n)) {
+      const Index x = w.v[u(e[0])];
+      const Index y = w.v[u(e[1])];
+      if (std::min(x, y) == a && std::max(x, y) == b) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   std::pair<Index, Index> swap() {
-    // Faces (sorted triangles) and edges (sorted pairs) of all alive cells, with their cells.
-    std::vector<std::pair<std::array<Index, 3>, Index>> faces;
-    std::vector<std::pair<std::array<Index, 2>, Index>> edges;
-    for (std::size_t c = 0; c < cells_.size(); ++c) {
-      Cell& cell = cells_[c];
+    // Node -> cells at the start of the pass (cells killed during the pass stay listed, new ones
+    // are tracked separately), ascending cell index.
+    build_node_cells();
+    for (Cell& cell : cells_) {
       cell.touched = false;
-      if (!cell.alive) {
-        continue;
-      }
-      for (const auto& f : cell_triangles(cell.n)) {
-        std::array<Index, 3> key = {cell.v[u(f[0])], cell.v[u(f[1])], cell.v[u(f[2])]};
-        std::sort(key.begin(), key.end());
-        faces.emplace_back(key, sz(c));
-      }
-      for (const auto& e : cell_edges(cell.n)) {
-        std::array<Index, 2> key = {cell.v[u(e[0])], cell.v[u(e[1])]};
-        std::sort(key.begin(), key.end());
-        edges.emplace_back(key, sz(c));
-      }
     }
-    std::sort(faces.begin(), faces.end());
-    std::sort(edges.begin(), edges.end());
     std::vector<double> q(cells_.size(), 1.0);
-    for (std::size_t c = 0; c < cells_.size(); ++c) {
-      if (cells_[c].alive && cells_[c].n == 4) {
-        q[c] = quality(cells_[c]);
+    parallel_for(0, sz(cells_.size()), [&](Index c) {
+      if (cells_[u(c)].alive && cells_[u(c)].n == 4) {
+        q[u(c)] = quality(cells_[u(c)]);
       }
-    }
-    // Candidates: (worst quality of the cells involved, kind 0 face / 1 edge, first entry).
+    });
+    // Candidates: a face of exactly two cells (2-3 swap) or an edge of exactly three cells (3-2
+    // swap), all swappable tetrahedra, the worst below the threshold - so every candidate has a
+    // tetrahedron below the threshold, and only those are searched. Order: worst quality, kind
+    // (0 face, 1 edge), sorted node key; cells by ascending index.
     struct Candidate {
       double worst;
       int kind;
-      std::size_t first;
-      std::size_t count;
+      std::array<Index, 3> key;
+      std::array<Index, 3> cells;
       bool operator<(const Candidate& o) const {
         if (worst != o.worst) {
           return worst < o.worst;
@@ -473,52 +503,73 @@ class Optimizer {
         if (kind != o.kind) {
           return kind < o.kind;
         }
-        return first < o.first;
+        return key < o.key;
       }
     };
     std::vector<Candidate> candidates;
-    for (std::size_t i = 0; i < faces.size();) {
-      std::size_t j = i;
-      while (j < faces.size() && faces[j].first == faces[i].first) {
-        ++j;
+    const std::size_t n_start = cells_.size();
+    for (std::size_t c = 0; c < n_start; ++c) {
+      const Cell& cell = cells_[c];
+      if (!cell.alive || cell.n != 4 || !cell.swappable || !(q[c] < opt_.threshold)) {
+        continue;
       }
-      if (j - i == 2) {
-        const Cell& a = cells_[u(faces[i].second)];
-        const Cell& b = cells_[u(faces[i + 1].second)];
-        const double worst = std::min(q[u(faces[i].second)], q[u(faces[i + 1].second)]);
-        if (a.swappable && b.swappable && worst < opt_.threshold) {
-          candidates.push_back({worst, 0, i, 2});
+      for (const auto& f : cell_triangles(4)) {
+        std::array<Index, 3> key = {cell.v[u(f[0])], cell.v[u(f[1])], cell.v[u(f[2])]};
+        std::sort(key.begin(), key.end());
+        std::vector<Index> around;
+        for (Index k = start_[u(key[0])]; k < start_[u(key[0]) + 1]; ++k) {
+          const Index w = node_cells_[u(k)];
+          if (has_triangle(cells_[u(w)], key)) {
+            around.push_back(w);
+          }
         }
+        if (around.size() != 2 || !cells_[u(around[0])].swappable ||
+            !cells_[u(around[1])].swappable) {
+          continue;
+        }
+        const double worst = std::min(q[u(around[0])], q[u(around[1])]);
+        candidates.push_back({worst, 0, key, {around[0], around[1], -1}});
       }
-      i = j;
-    }
-    for (std::size_t i = 0; i < edges.size();) {
-      std::size_t j = i;
-      while (j < edges.size() && edges[j].first == edges[i].first) {
-        ++j;
-      }
-      if (j - i == 3) {
+      for (const auto& e : cell_edges(4)) {
+        const Index a = std::min(cell.v[u(e[0])], cell.v[u(e[1])]);
+        const Index b = std::max(cell.v[u(e[0])], cell.v[u(e[1])]);
+        std::vector<Index> around;
+        for (Index k = start_[u(a)]; k < start_[u(a) + 1]; ++k) {
+          const Index w = node_cells_[u(k)];
+          if (has_edge(cells_[u(w)], a, b)) {
+            around.push_back(w);
+          }
+        }
+        if (around.size() != 3) {
+          continue;
+        }
         bool ok = true;
         double worst = 1.0;
-        for (std::size_t k = i; k < j; ++k) {
-          ok = ok && cells_[u(edges[k].second)].swappable;
-          worst = std::min(worst, q[u(edges[k].second)]);
+        for (const Index w : around) {
+          ok = ok && cells_[u(w)].swappable;
+          worst = std::min(worst, q[u(w)]);
         }
-        if (ok && worst < opt_.threshold) {
-          candidates.push_back({worst, 1, i, 3});
+        if (ok) {
+          candidates.push_back({worst, 1, {a, b, -1}, {around[0], around[1], around[2]}});
         }
       }
-      i = j;
     }
     std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end(),
+                                 [](const Candidate& x, const Candidate& y) {
+                                   return x.kind == y.kind && x.key == y.key;
+                                 }),
+                     candidates.end());
     // Edges created during this pass (a 2-3 swap must not duplicate an existing edge).
     std::set<std::array<Index, 2>> new_edges;
     auto edge_exists = [&](Index a, Index b) {
-      std::array<Index, 2> key = {std::min(a, b), std::max(a, b)};
-      const auto it = std::lower_bound(edges.begin(), edges.end(), key,
-                                       [](const std::pair<std::array<Index, 2>, Index>& e,
-                                          const std::array<Index, 2>& k) { return e.first < k; });
-      return (it != edges.end() && it->first == key) || new_edges.count(key) > 0;
+      const std::array<Index, 2> key = {std::min(a, b), std::max(a, b)};
+      for (Index k = start_[u(key[0])]; k < start_[u(key[0]) + 1]; ++k) {
+        if (has_edge(cells_[u(node_cells_[u(k)])], key[0], key[1])) {
+          return true;
+        }
+      }
+      return new_edges.count(key) > 0;
     };
     Index s23 = 0;
     Index s32 = 0;
@@ -542,12 +593,12 @@ class Optimizer {
     };
     for (const Candidate& cand : candidates) {
       if (cand.kind == 0) {
-        const Index ca = faces[cand.first].second;
-        const Index cb = faces[cand.first + 1].second;
+        const Index ca = cand.cells[0];
+        const Index cb = cand.cells[1];
         if (cells_[u(ca)].touched || cells_[u(cb)].touched) {
           continue;
         }
-        const auto& key = faces[cand.first].first;
+        const auto& key = cand.key;
         const Cell& ta = cells_[u(ca)];
         const Cell& tb = cells_[u(cb)];
         Index d = -1;
@@ -583,13 +634,13 @@ class Optimizer {
       std::array<Index, 3> around{};
       bool skip = false;
       for (std::size_t k = 0; k < 3; ++k) {
-        around[k] = edges[cand.first + k].second;
+        around[k] = cand.cells[k];
         skip = skip || cells_[u(around[k])].touched;
       }
       if (skip) {
         continue;
       }
-      const auto& key = edges[cand.first].first;
+      const auto& key = cand.key;
       const Index d = key[0];
       const Index e = key[1];
       // The ring: each tetrahedron's two other nodes; closed ring a-b, b-c, c-a.

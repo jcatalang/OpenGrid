@@ -7,6 +7,9 @@
 #include <optional>
 #include <stdexcept>
 
+#include "opengrid/core/util/anderson.hpp"
+#include "opengrid/core/util/parallel.hpp"
+
 namespace og {
 namespace {
 
@@ -48,6 +51,7 @@ struct Wall {
   int ta = 0;  // tangential axes
   int tb = 1;
   std::vector<double> spacing;           // per face node
+  std::vector<double> weight;            // source decay per grid line from the wall
   std::array<std::vector<double>, 3> s;  // sources per block axis, per face node
   bool clamped = false;
 };
@@ -188,6 +192,13 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
       }
     }
   }
+  for (Wall& w : walls) {
+    const int across = n[static_cast<std::size_t>(w.axis)];
+    w.weight.resize(static_cast<std::size_t>(across));
+    for (int depth = 0; depth < across; ++depth) {
+      w.weight[static_cast<std::size_t>(depth)] = std::exp(-w.control.decay * depth);
+    }
+  }
   auto update_walls = [&]() {
     for (Wall& w : walls) {
       for (int ib = 1; ib < w.nb - 1; ++ib) {
@@ -216,10 +227,7 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
             st += w.control.relaxation * std::tanh(lean);
           }
           for (auto& s : w.s) {
-            if (std::fabs(s[id]) > w.control.max_source) {
-              w.clamped = true;
-              s[id] = std::clamp(s[id], -w.control.max_source, w.control.max_source);
-            }
+            s[id] = std::clamp(s[id], -w.control.max_source, w.control.max_source);
           }
         }
       }
@@ -234,7 +242,7 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
       if (w.side > 0) {
         depth = n[static_cast<std::size_t>(w.axis)] - 1 - depth;
       }
-      const double weight = std::exp(-w.control.decay * depth);
+      const double weight = w.weight[static_cast<std::size_t>(depth)];
       const auto id = static_cast<std::size_t>(p[static_cast<std::size_t>(w.tb)]) *
                           static_cast<std::size_t>(w.na) +
                       static_cast<std::size_t>(p[static_cast<std::size_t>(w.ta)]);
@@ -244,6 +252,49 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
     }
   };
 
+  // Iteration state for the acceleration: the node coordinates and the wall sources.
+  std::size_t state_size = 3 * g.x.size();
+  for (const Wall& w : walls) {
+    state_size += 3 * w.spacing.size();
+  }
+  auto pack = [&](std::vector<double>& u) {
+    u.resize(state_size);
+    std::size_t at_k = 0;
+    for (const Vec3& q : g.x) {
+      u[at_k++] = q.x;
+      u[at_k++] = q.y;
+      u[at_k++] = q.z;
+    }
+    for (const Wall& w : walls) {
+      for (const auto& source : w.s) {
+        for (const double value : source) {
+          u[at_k++] = value;
+        }
+      }
+    }
+  };
+  auto unpack = [&](const std::vector<double>& u) {
+    std::size_t at_k = 0;
+    for (Vec3& q : g.x) {
+      q.x = u[at_k++];
+      q.y = u[at_k++];
+      q.z = u[at_k++];
+    }
+    for (Wall& w : walls) {
+      for (auto& source : w.s) {
+        for (double& value : source) {
+          value = u[at_k++];
+        }
+      }
+    }
+  };
+  AndersonAccelerator anderson(state_size, options.acceleration);
+  std::vector<double> before;
+  std::vector<double> after;
+  double best = 0.0;
+  std::vector<double> plane_sum(static_cast<std::size_t>(nk), 0.0);
+  std::vector<std::size_t> plane_count(static_cast<std::size_t>(nk), 0);
+
   Elliptic3DResult result;
   double first = 0.0;
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
@@ -251,10 +302,13 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
       result.cancelled = true;
       break;
     }
+    if (options.acceleration > 0) {
+      pack(before);
+    }
     update_walls();
-    double sum = 0.0;
-    std::size_t count = 0;
-    for (int k = 1; k < nk - 1; ++k) {
+    auto relax_plane = [&](int k) {
+      double sum = 0.0;
+      std::size_t count = 0;
       for (int j = 1; j < nj - 1; ++j) {
         for (int i = 1; i < ni - 1; ++i) {
           const Idx p = {i, j, k};
@@ -299,6 +353,19 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
           ++count;
         }
       }
+      plane_sum[static_cast<std::size_t>(k)] = sum;
+      plane_count[static_cast<std::size_t>(k)] = count;
+    };
+    for (int colour = 1; colour >= 0; --colour) {
+      const std::int64_t planes = (nk - 2 - (1 - colour) + 1) / 2;
+      parallel_for(
+          0, planes, [&](std::int64_t m) { relax_plane(static_cast<int>(2 * m + 2 - colour)); }, 2);
+    }
+    double sum = 0.0;
+    std::size_t count = 0;
+    for (int k = 1; k < nk - 1; ++k) {
+      sum += plane_sum[static_cast<std::size_t>(k)];
+      count += plane_count[static_cast<std::size_t>(k)];
     }
     const double rms = std::sqrt(sum / static_cast<double>(std::max<std::size_t>(count, 1)));
     result.residuals.push_back(rms);
@@ -308,13 +375,35 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
     result.iterations = iteration + 1;
     if (iteration == 0) {
       first = rms;
+      best = rms;
+    }
+    if (options.acceleration > 0) {
+      // Restart the history when the residual grows well above its best value.
+      if (rms > 4.0 * best) {
+        anderson.reset();
+        best = rms;
+      }
+      best = std::min(best, rms);
+      pack(after);
+      if (anderson.step(before, after)) {
+        unpack(after);
+      }
     }
     if (rms <= options.tolerance * first || rms <= 1e-13 * std::max(size, 1e-300)) {
       result.converged = true;
       break;
     }
   }
-  for (const Wall& w : walls) {
+  // A source at its clamp in the final state: the wall targets could not be met (checked at
+  // the end, as accelerated iterates may overshoot the clamp temporarily).
+  for (Wall& w : walls) {
+    for (const auto& source : w.s) {
+      for (const double value : source) {
+        if (std::fabs(value) >= w.control.max_source) {
+          w.clamped = true;
+        }
+      }
+    }
     if (w.clamped) {
       result.warnings.emplace_back("elliptic 3D: wall sources reached max_source (face " +
                                    std::to_string(w.axis * 2 + (w.side + 1) / 2) + ")");

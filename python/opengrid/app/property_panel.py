@@ -30,6 +30,7 @@ from opengrid.model.domains import (
     DEFAULT_ELLIPTIC,
     DEFAULT_WALL,
     EDGE_NAMES,
+    MAX_ACCELERATION,
     METHODS,
     SOLVERS,
 )
@@ -476,6 +477,10 @@ class GeneratorEditor(QWidget):
         self.iterations.setRange(1, 10_000_000)
         self.iterations.setValue(elliptic["max_iterations"])
         self.tolerance = QLineEdit(format_number(elliptic["tolerance"]))
+        self.acceleration = QSpinBox()
+        self.acceleration.setRange(0, MAX_ACCELERATION)
+        self.acceleration.setValue(elliptic["acceleration"])
+        self.acceleration.setToolTip("Anderson acceleration depth (0: plain relaxation)")
         walls = {wall["edge"]: wall for wall in elliptic["walls"]}
         self.wall_boxes = {}
         self.wall_spacing = {}
@@ -502,6 +507,7 @@ class GeneratorEditor(QWidget):
         layout.insertRow(6, "omega", self.omega)
         layout.insertRow(7, "max iterations", self.iterations)
         layout.insertRow(8, "tolerance", self.tolerance)
+        layout.insertRow(9, "acceleration", self.acceleration)
         layout.addRow("attractions", self.attractions)
 
     def value(self) -> dict:
@@ -541,6 +547,7 @@ class GeneratorEditor(QWidget):
             "omega": omega[0],
             "max_iterations": self.iterations.value(),
             "tolerance": tolerance[0],
+            "acceleration": self.acceleration.value(),
         }
         return result
 

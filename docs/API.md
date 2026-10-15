@@ -162,7 +162,10 @@ layers from wall connectors, e.g. ``{"connectors": ["c-wall"], "first_height": 1
 
 Update generator settings, e.g. ``set_domain_generator("d", method="hermite_tfi")`` or
 ``elliptic={"walls": [{"edge": 0, "spacing": 1e-5}]}`` (merged into the current elliptic
-settings; ``elliptic=None`` switches smoothing off).
+settings; ``elliptic=None`` switches smoothing off). Elliptic keys: ``control``
+("laplace", "thomas_middlecoff", "ttm"), ``walls``, ``attractions``, ``solver``
+("line_sor", "point_sor"), ``omega``, ``max_iterations``, ``tolerance`` and
+``acceleration`` (Anderson depth, default 5; 0: plain relaxation).
 
 ### `set_unstructured_generator(name: str, **changes) -> str`
 
@@ -212,7 +215,8 @@ or from an ``extrusion`` of a domain: ``{"domain", "mode": "translate" | "rotate
 jmax) conditions of hyperbolic extrusion ("free", "constant_x", "constant_y",
 "constant_z", "periodic"), "dissipation"}``. ``smoothing``: 3D elliptic smoothing
 ``{"control": "laplace" | "thomas_middlecoff", "walls": [{"face": "kmin", "spacing",
-"decay", "relaxation", "max_source"}], "omega", "max_iterations", "tolerance"}``.
+"decay", "relaxation", "max_source"}], "omega", "max_iterations", "tolerance",
+"acceleration" (Anderson depth, default 5; 0: plain relaxation)}``.
 ``quality_floor``: ``{"min_jacobian": 0.05, "max_skewness": 0.95}`` (None: the default);
 cells missing it are reported by the boundary report, and exports refuse the model.
 

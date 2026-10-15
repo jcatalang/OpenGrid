@@ -3,7 +3,7 @@
 Interactive block-structured / unstructured / hybrid mesh generator for CFD (2D and 3D). C++20 core, Python bindings (nanobind),
 PySide6 + VTK GUI, and a Python scripting API.
 
-Status: Phases 0–9b done (9c, performance and packaging, remains). What it does:
+Status: all phases (0–9c) done. What it does:
 
 - **Geometry:** lines, arcs, polylines, splines, NURBS curves and surfaces; airfoil `.dat`, CSV and
   STEP / IGES import (OpenCASCADE, optional) with healing and automatic connectors and domains.
@@ -20,6 +20,9 @@ Status: Phases 0–9b done (9c, performance and packaging, remains). What it doe
   zones, boundary checks before export.
 - **Everything is scriptable:** the GUI and scripts share one API; every action is an undoable
   command recorded in a replayable Python journal.
+- **Fast and deterministic:** parallel (OpenMP) hot loops whose results do not depend on the
+  thread count; 1M-cell 2D meshes in 2–5 s, a 500 x 200 elliptic grid with wall control in
+  about 1 s (`examples/09c_performance.py`; `opengrid.set_threads(n)`).
 
 See `docs/SCRIPTING.md` (guide), `docs/API.md` (reference), `examples/` (one demo per phase)
 and `examples/golden/` (the validation cases).
@@ -43,7 +46,17 @@ og.export_cgns("cylinder.cgns")
 print(og.journal_text())  # replayable script of everything done
 ```
 
-## Setup (conda-forge, primary)
+## Install
+- **macOS (Apple silicon):** `OpenGrid.app` / the DMG built by `packaging/macos/build_app.sh`
+  (self-contained; signed ad hoc, so the first launch of a downloaded copy needs right-click →
+  Open).
+- **Linux / macOS, conda package:** build it with
+  `rattler-build build --recipe packaging/conda/recipe.yaml -m packaging/conda/variants.yaml
+  -c conda-forge --output-dir packaging/output`, then
+  `conda create -n og -c file://$PWD/packaging/output -c conda-forge opengrid` and run
+  `opengrid` (GUI) or `python -c "import opengrid"`.
+
+## Setup (conda-forge, development)
 ```bash
 conda env create -f environment.yml
 conda activate opengrid

@@ -5,9 +5,10 @@ when the project is complete. Items fixed in a later phase are removed (see `PRO
 history). Phase tags show where each item came from.
 
 ## Not verified
-- **CI and other platforms** [0–9b]:
+- **CI and other platforms** [0–9c]:
   - GitHub Actions has never run (no remote).
-  - The Linux build and the uv-based setup are untested.
+  - The Linux build and the uv-based setup are untested; the conda recipe was built and
+    tested on osx-arm64 only (it should build on Linux unchanged, but has not been run there).
 - **Real input devices** [1–3]: real mouse and trackpad interaction is untested (handlers are
   tested in world coordinates), and trackpad pinch-to-zoom is not handled.
 - **No solver has been run** on any exported file [4]. CGNS is checked with cgnscheck and h5py,
@@ -16,10 +17,6 @@ history). Phase tags show where each item came from.
   VTK, cgnscheck or h5py instead.
 - **Cancel time** [3]: "smoothing cancel returns within 0.5 s" was not timed. Cancellation is
   checked once per iteration (about 1 ms on the demo grids).
-- **3D performance target** [8a]: "5 M tetrahedra < 2 min" not measured. The 118 k-tetrahedron
-  volume takes about 1 s in Netgen plus quality, but most of the 8a demo's 11 s is surface
-  meshing and shell assembly in Python.
-
 ## Geometry, connectors, GUI basics
 - **GUI geometry** [1]:
   - Geometry is created in the z = 0 plane only (the API accepts 3D).
@@ -209,6 +206,34 @@ history). Phase tags show where each item came from.
   so commits before it do not build from a fresh clone.
 - **09a_bracket.step changes on every demo run** [9a]: OCCT writes the date into the STEP
   header.
+
+## Performance and packaging
+- **3D target missed** [9c]: 5M tetrahedra take 176–186 s (target 120 s; two runs) on an M1 Max:
+  Netgen about 157 s even with its thread pool (serial Delaunay insertion about 50 s), then our
+  optimiser 13 s, quality and checks about 5 s. Fewer Netgen optimisation passes would meet the
+  time but drop the worst scaled Jacobian from 0.17 to 0.015, so they were not used. Partitioned
+  parallel meshing or another backend would be needed.
+- **Serial parts** [9c]: Delaunay / advancing-front insertion, 2D and 3D inflation, the
+  optimiser's node moves and swaps (order-dependent; 13 s of the 5M case) and Netgen's insertion.
+  The 2D targets are met anyway (1M cells in 1.8–4.8 s including export).
+- **"Converges interactively"** [9c] was read as: converges to the default tolerance in under
+  2 s with live progress. Measured on a 500 x 200 O-grid with wall control: 1.06 s.
+- **Smoothed grids changed slightly** [9c]: zebra line ordering (needed for parallelism) and
+  Anderson acceleration (default depth 5) reach the same fixed point by a different path, so
+  smoothed grids differ from earlier versions at the tolerance level (about 1e-3 of the local
+  spacing on the test O-grid). Projects saved earlier get `acceleration: 5` when loaded;
+  `acceleration: 0` gives plain relaxation (but still zebra-ordered).
+- **Determinism across threads** [9c]: checked (identical digests) for 1–10 threads on the
+  elliptic smoothers, volume meshes and quality metrics; Netgen's thread pool gave identical
+  meshes in our checks, which Netgen itself does not promise.
+- **VTKHDF export dominates 2D timings** [9c]: about 1.7–2.4 s of each 1M-cell case
+  (HDF5 writes from Python; not parallelised).
+- **App bundle** [9c]: arm64 only; signed ad hoc, not notarised (Gatekeeper asks on first launch
+  of a downloaded copy); large (a whole conda environment with Qt, VTK, OCCT, Netgen). Building
+  it needs conda, rattler-build and conda-pack, and network access to conda-forge.
+- **No AppImage** [9c]: the conda package is the Linux deliverable.
+- **Package metadata** [9c]: version 0.0.1, license `LicenseRef-OpenGrid` and a placeholder home
+  page; set them before publishing.
 
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**

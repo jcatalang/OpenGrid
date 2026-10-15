@@ -193,6 +193,13 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   split / join, the golden-case report.
 
 ### 9c — Performance and packaging
-- Performance targets from SPEC.md measured by a benchmark script in Release on M1. OpenMP/TBB
-  for hot loops, with determinism preserved.
-- Packaging: macOS arm64 app bundle; AppImage or conda package for Linux.
+- Performance targets from SPEC.md measured by a benchmark script in Release on M1
+  (`examples/09c_performance.py`): 2D 1M cells < 10 s (structured, Delaunay, advancing front,
+  hybrid; mesh + quality + export), 500 x 200 elliptic smoothing with wall control converged in
+  < 2 s, 3D 5M tetrahedra via Netgen < 120 s (reported; bounded by Netgen's own time).
+- OpenMP for hot loops (`OG_WITH_OPENMP`, `util/parallel.hpp`) with determinism preserved:
+  identical results for any thread count (tested). Anderson acceleration of the 2D and 3D
+  elliptic smoothers; volume quality metrics in C++; optimiser and Netgen transfer overheads
+  removed (identical meshes).
+- Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
+  and a macOS arm64 app bundle + DMG built from it (conda-pack).

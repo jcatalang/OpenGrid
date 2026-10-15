@@ -39,6 +39,7 @@
 #include "opengrid/core/unstructured/advancing_front.hpp"
 #include "opengrid/core/unstructured/domain_mesher.hpp"
 #include "opengrid/core/unstructured/triangulate.hpp"
+#include "opengrid/core/util/parallel.hpp"
 #include "opengrid/core/version.hpp"
 
 namespace nb = nanobind;
@@ -206,6 +207,10 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
   nb::set_leak_warnings(std::getenv("OG_LEAK_WARNINGS") != nullptr);
   m.def("version", &og::version, "Version string of the C++ core library.");
   m.def("add", &og::add, nb::arg("a"), nb::arg("b"), "Add two 64-bit integers (build smoke test).");
+  m.def("thread_count", &og::thread_count, "Threads used by parallel loops (1 without OpenMP).");
+  m.def("set_thread_count", &og::set_thread_count, nb::arg("n"),
+        "Set the number of threads of parallel loops (results do not depend on it).");
+  m.def("openmp_enabled", &og::openmp_enabled, "Whether the core was built with OpenMP.");
 
   nb::class_<og::Curve>(m, "Curve", "Parametric curve x(t), t in [0, 1].")
       .def(
@@ -389,7 +394,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
          const std::vector<std::tuple<double, double, double, double>>& points,
          const std::optional<WallTuple>& bottom_wall, const std::optional<WallTuple>& top_wall,
          const std::string& solver, double omega, int max_iterations, double tolerance,
-         og::SmoothingProgress* progress) {
+         og::SmoothingProgress* progress, int acceleration) {
         og::EllipticOptions options;
         if (control == "laplace") {
           options.control = og::ControlType::Laplace;
@@ -418,6 +423,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         options.omega = omega;
         options.max_iterations = max_iterations;
         options.tolerance = tolerance;
+        options.acceleration = acceleration;
         const og::Grid2D initial = grid_from(grid);
         og::EllipticResult result;
         {
@@ -431,7 +437,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       nb::arg("points") = nb::list(), nb::arg("bottom_wall") = nb::none(),
       nb::arg("top_wall") = nb::none(), nb::arg("solver") = "line_sor", nb::arg("omega") = 1.0,
       nb::arg("max_iterations") = 1000, nb::arg("tolerance") = 1e-6,
-      nb::arg("progress") = nb::none(),
+      nb::arg("progress") = nb::none(), nb::arg("acceleration") = 0,
       "Elliptic smoothing (GIL released); returns (grid, residuals, iterations, converged, "
       "cancelled, warnings).");
 

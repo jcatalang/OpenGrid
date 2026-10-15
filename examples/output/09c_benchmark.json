@@ -1,0 +1,163 @@
+{
+ "machine": "Apple M1 Max, Darwin 24.2.0, Python 3.12.15, OpenGrid 0.0.1, OpenMP True, 10 threads",
+ "cases": [
+  {
+   "name": "2D structured TFI 1001 x 1001",
+   "cells": 1000000,
+   "stages": [
+    [
+     "grid (TFI)",
+     0.01017174986191094
+    ],
+    [
+     "quality",
+     0.13190216687507927
+    ],
+    [
+     "VTKHDF export",
+     1.6361588751897216
+    ]
+   ],
+   "total": 1.7782327919267118,
+   "target": 10.0,
+   "met": true,
+   "notes": [
+    "min scaled Jacobian 1.000"
+   ]
+  },
+  {
+   "name": "2D unstructured (delaunay)",
+   "cells": 1232486,
+   "stages": [
+    [
+     "mesh",
+     0.9891537909861654
+    ],
+    [
+     "quality",
+     0.4787872079759836
+    ],
+    [
+     "VTKHDF export",
+     1.9186825840733945
+    ]
+   ],
+   "total": 3.3866235830355436,
+   "target": 10.0,
+   "met": true,
+   "notes": [
+    "min angle 30.1 deg"
+   ]
+  },
+  {
+   "name": "2D unstructured (advancing front)",
+   "cells": 1246306,
+   "stages": [
+    [
+     "mesh",
+     2.0202965000644326
+    ],
+    [
+     "quality",
+     0.3417742499150336
+    ],
+    [
+     "VTKHDF export",
+     1.7693152909632772
+    ]
+   ],
+   "total": 4.131386040942743,
+   "target": 10.0,
+   "met": true,
+   "notes": [
+    "min angle 34.7 deg"
+   ]
+  },
+  {
+   "name": "2D hybrid (boundary layers + triangles)",
+   "cells": 1535441,
+   "stages": [
+    [
+     "mesh",
+     1.8706704590003937
+    ],
+    [
+     "quality",
+     0.6160412500612438
+    ],
+    [
+     "VTKHDF export",
+     2.400598374893889
+    ]
+   ],
+   "total": 4.887310083955526,
+   "target": 10.0,
+   "met": true,
+   "notes": [
+    "39980 layer quads, 1495461 triangles"
+   ]
+  },
+  {
+   "name": "2D elliptic smoothing 500 x 200 (wall control)",
+   "cells": 99301,
+   "stages": [
+    [
+     "smoothing",
+     1.0959979998879135
+    ]
+   ],
+   "total": 1.0959979998879135,
+   "target": 2.0,
+   "met": true,
+   "notes": [
+    "converged True in 402 iterations; wall spacing 0.001 .. 0.001 (requested 0.001)",
+    "1 thread: 3.24 s, identical grid",
+    "without acceleration: 4000 iterations in 4.95 s, not converged (residual 9.3e-03 of the first)"
+   ]
+  },
+  {
+   "name": "3D elliptic block smoothing 81 x 41 x 41 (wall control)",
+   "cells": 128000,
+   "stages": [
+    [
+     "smoothing",
+     0.9627754159737378
+    ]
+   ],
+   "total": 0.9627754159737378,
+   "target": null,
+   "met": null,
+   "notes": [
+    "81 x 41 x 41 points (128000 cells), translate extrusion, elliptic smoothing converged in 285 iterations"
+   ]
+  },
+  {
+   "name": "3D tetrahedra via Netgen",
+   "cells": 4962183,
+   "stages": [
+    [
+     "surface meshes",
+     0.0898195409681648
+    ],
+    [
+     "volume (Netgen + optimisation)",
+     186.12780691706575
+    ],
+    [
+     "quality",
+     0.0034665409475564957
+    ],
+    [
+     "VTKHDF export",
+     7.171206165803596
+    ]
+   ],
+   "total": 193.39229916478507,
+   "target": 120.0,
+   "met": false,
+   "notes": [
+    "volume generation 186.2 s; min scaled Jacobian 0.100; 4962183 tetrahedra, 830848 points, 1 shell(s)"
+   ]
+  }
+ ]
+}

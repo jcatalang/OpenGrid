@@ -1,0 +1,92 @@
+# Conda package of OpenGrid (rattler-build; conda-forge dependencies).
+#   rattler-build build --recipe packaging/conda/recipe.yaml -m packaging/conda/variants.yaml \
+#       -c conda-forge --output-dir packaging/output
+# The same recipe builds on linux-64, linux-aarch64, osx-arm64 and osx-64.
+context:
+  version: "0.0.1"
+
+package:
+  name: opengrid
+  version: ${{ version }}
+
+source:
+  path: ../..
+  use_gitignore: true
+
+build:
+  number: 0
+  script:
+    # Clang on macOS ships no OpenMP runtime: the host prefix's libomp is found through
+    # OpenMP_ROOT (GCC on Linux brings its own). scikit-build-core reads CMAKE_ARGS.
+    - export CMAKE_ARGS="${CMAKE_ARGS:-} -DOpenMP_ROOT=$PREFIX -DOG_WITH_OPENMP=ON"
+    - export CMAKE_GENERATOR=Ninja
+    - ${{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  python:
+    entry_points:
+      - opengrid = opengrid.__main__:main
+
+requirements:
+  build:
+    - ${{ compiler('cxx') }}
+    - cmake >=3.28
+    - ninja
+    - if: build_platform != target_platform
+      then:
+        - python
+        - cross-python_${{ target_platform }}
+        - nanobind >=2.0
+  host:
+    - python
+    - pip
+    - scikit-build-core >=0.10
+    - nanobind >=2.0
+    - hdf5
+    - cgns
+    - zlib
+    - occt
+    - if: osx
+      then: llvm-openmp
+  ignore_run_exports:
+    # Linked through CGNS only (whose own run exports pin them).
+    by_name:
+      - hdf5
+      - libzlib
+  run:
+    - python
+    - numpy >=1.26
+    - h5py
+    - meshio >=5.3
+    - pyside6 >=6.6
+    - vtk-base >=9.3
+    - pyvista >=0.43
+    - pyvistaqt >=0.11
+    - qtpy
+    - matplotlib-base
+    # Tetrahedral backend (LGPL-2.1, dynamic, loaded at run time).
+    - netgen
+    - if: osx
+      then: llvm-openmp
+
+tests:
+  - python:
+      imports:
+        - opengrid
+        - opengrid._core
+        - opengrid._occt
+      pip_check: false
+  - script:
+      - python -c "import opengrid; print(opengrid.core_version(), opengrid.threads())"
+      - python -c "import opengrid._core as c; assert c.openmp_enabled()"
+      - python packaging_smoke.py
+    files:
+      recipe:
+        - packaging_smoke.py
+
+about:
+  homepage: https://example.invalid/opengrid
+  license: LicenseRef-OpenGrid
+  summary: Interactive structured / unstructured / hybrid mesh generator (2D / 3D)
+  description: |
+    OpenGrid: a C++20 meshing core (TFI, elliptic and hyperbolic grids, Delaunay and advancing
+    front, boundary layers, 3D blocks and volumes) with a Python API, a PySide6 / VTK GUI,
+    STEP / IGES import (OpenCASCADE) and Netgen as the tetrahedral backend.

@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from opengrid import _core
+from opengrid.model.domains import MAX_ACCELERATION
 from opengrid.validation import Issue, ValidationError
 
 FACE_NAMES = ("imin", "imax", "jmin", "jmax", "kmin", "kmax")
@@ -49,6 +50,7 @@ DEFAULT_SMOOTHING = {
     "omega": 1.0,
     "max_iterations": 500,
     "tolerance": 1e-6,
+    "acceleration": 5,
 }
 DEFAULT_DISTRIBUTION = {
     "type": "uniform",
@@ -198,12 +200,25 @@ def _normalize_smoothing(raw, label, issues) -> dict | None:
     iterations = merged["max_iterations"]
     if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
         issues.append(Issue(f"{label}.max_iterations", "must be an integer >= 1"))
+    acceleration = merged["acceleration"]
+    if (
+        isinstance(acceleration, bool)
+        or not isinstance(acceleration, int)
+        or not 0 <= acceleration <= MAX_ACCELERATION
+    ):
+        issues.append(
+            Issue(
+                f"{label}.acceleration",
+                f"must be an integer from 0 (off) to {MAX_ACCELERATION}, got {acceleration!r}",
+            )
+        )
     return {
         "control": merged["control"],
         "walls": tuple(walls),
         "omega": _number(merged["omega"], f"{label}.omega", issues),
         "max_iterations": iterations,
         "tolerance": _number(merged["tolerance"], f"{label}.tolerance", issues),
+        "acceleration": acceleration,
     }
 
 
@@ -466,6 +481,7 @@ class BlockEvaluator:
                         sm["omega"],
                         sm["max_iterations"],
                         sm["tolerance"],
+                        acceleration=sm["acceleration"],
                     )
                 )
             except ValueError as error:

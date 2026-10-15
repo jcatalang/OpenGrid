@@ -20,3 +20,5 @@ examples/output/*.cgns
 examples/output/*.msh
 examples/output/*.vtkhdf
 examples/output/*.xyz
+/packaging/output/
+/packaging/dist/

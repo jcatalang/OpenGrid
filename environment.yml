@@ -19,6 +19,7 @@ dependencies:
   - hdf5
   - cgns
   - zlib  # development link needed by the CGNS CMake config
+  - llvm-openmp  # OpenMP runtime (Apple Clang has none; Phase 9c parallel loops)
   # GUI / visualization
   - pyside6>=6.6
   - vtk>=9.3

@@ -7,6 +7,9 @@
 #include <string>
 #include <tuple>
 
+#include "opengrid/core/util/anderson.hpp"
+#include "opengrid/core/util/parallel.hpp"
+
 namespace og {
 namespace {
 
@@ -189,6 +192,36 @@ void update_wall(const Field& x, const Field& y, const WallControl& control, boo
   }
 }
 
+// Thomas algorithm on k = 1..n-2 of a line with Dirichlet ends (k = 0 and k = n-1 hold the
+// boundary values in rx/ry and are not modified). Returns false on a zero pivot.
+bool solve_line(const double* la, double* lb, const double* lc, double* rx, double* ry,
+                std::size_t n) {
+  const std::size_t last = n - 2;
+  rx[1] -= la[1] * rx[0];
+  ry[1] -= la[1] * ry[0];
+  rx[last] -= lc[last] * rx[n - 1];
+  ry[last] -= lc[last] * ry[n - 1];
+  for (std::size_t k = 2; k <= last; ++k) {
+    if (!(lb[k - 1] != 0.0)) {
+      return false;
+    }
+    const double w = la[k] / lb[k - 1];
+    lb[k] -= w * lc[k - 1];
+    rx[k] -= w * rx[k - 1];
+    ry[k] -= w * ry[k - 1];
+  }
+  if (!(lb[last] != 0.0)) {
+    return false;
+  }
+  rx[last] /= lb[last];
+  ry[last] /= lb[last];
+  for (std::size_t k = last - 1; k >= 1; --k) {
+    rx[k] = (rx[k] - lc[k] * rx[k + 1]) / lb[k];
+    ry[k] = (ry[k] - lc[k] * ry[k + 1]) / lb[k];
+  }
+  return true;
+}
+
 }  // namespace
 
 EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& options,
@@ -237,17 +270,24 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
     top.spacing = wall_spacing(x, y, options.top, false);
   }
 
+  // Decay of the wall sources with the line index (computed once).
+  std::vector<double> bottom_weight(static_cast<std::size_t>(nj), 0.0);
+  std::vector<double> top_weight(static_cast<std::size_t>(nj), 0.0);
+  for (int j = 0; j < nj; ++j) {
+    bottom_weight[static_cast<std::size_t>(j)] = std::exp(-options.bottom.decay * j);
+    top_weight[static_cast<std::size_t>(j)] = std::exp(-options.top.decay * (nj - 1 - j));
+  }
   // Total control at (i, j) = background + decaying wall sources.
   auto control = [&](int i, int j, double& p, double& q) {
     p = p0(i, j);
     q = q0(i, j);
     if (options.bottom.enabled) {
-      const double w = std::exp(-options.bottom.decay * j);
+      const double w = bottom_weight[static_cast<std::size_t>(j)];
       p += bottom.p[static_cast<std::size_t>(i)] * w;
       q += bottom.q[static_cast<std::size_t>(i)] * w;
     }
     if (options.top.enabled) {
-      const double w = std::exp(-options.top.decay * (nj - 1 - j));
+      const double w = top_weight[static_cast<std::size_t>(j)];
       p += top.p[static_cast<std::size_t>(i)] * w;
       q += top.q[static_cast<std::size_t>(i)] * w;
     }
@@ -292,44 +332,42 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
     return s;
   };
 
-  // Thomas algorithm on k = 1..n-2 of a line with Dirichlet ends (k = 0 and k = n-1 hold the
-  // boundary values in rx/ry and are not modified). Returns false on a zero pivot.
-  std::vector<double> la;
-  std::vector<double> lb;
-  std::vector<double> lc;
-  std::vector<double> rx;
-  std::vector<double> ry;
-  auto solve_line = [&](std::size_t n) {
-    const std::size_t last = n - 2;
-    rx[1] -= la[1] * rx[0];
-    ry[1] -= la[1] * ry[0];
-    rx[last] -= lc[last] * rx[n - 1];
-    ry[last] -= lc[last] * ry[n - 1];
-    for (std::size_t k = 2; k <= last; ++k) {
-      if (!(lb[k - 1] != 0.0)) {
-        return false;
-      }
-      const double w = la[k] / lb[k - 1];
-      lb[k] -= w * lc[k - 1];
-      rx[k] -= w * rx[k - 1];
-      ry[k] -= w * ry[k - 1];
-    }
-    if (!(lb[last] != 0.0)) {
-      return false;
-    }
-    rx[last] /= lb[last];
-    ry[last] /= lb[last];
-    for (std::size_t k = last - 1; k >= 1; --k) {
-      rx[k] = (rx[k] - lc[k] * rx[k + 1]) / lb[k];
-      ry[k] = (ry[k] - lc[k] * ry[k + 1]) / lb[k];
-    }
-    return true;
-  };
-  auto resize = [&](int n) {
-    for (auto* v : {&la, &lb, &lc, &rx, &ry}) {
-      v->assign(static_cast<std::size_t>(n), 0.0);
+  // Line-solver scratch, one row per line so lines of one colour can be solved concurrently,
+  // and the squared corrections per line (or point row), summed in order afterwards.
+  const auto line_storage = static_cast<std::size_t>(ni) * static_cast<std::size_t>(nj);
+  std::vector<double> la(line_storage);
+  std::vector<double> lb(line_storage);
+  std::vector<double> lc(line_storage);
+  std::vector<double> rx(line_storage);
+  std::vector<double> ry(line_storage);
+  std::vector<double> line_sum(static_cast<std::size_t>(std::max(ni, nj)), 0.0);
+
+  // Iteration state for the acceleration: x, y and the wall sources.
+  const std::size_t field_size = x.v.size();
+  const std::size_t state_size = 2 * field_size + 4 * static_cast<std::size_t>(ni);
+  auto pack = [&](std::vector<double>& u) {
+    u.resize(state_size);
+    std::copy(x.v.begin(), x.v.end(), u.begin());
+    std::copy(y.v.begin(), y.v.end(), u.begin() + static_cast<std::ptrdiff_t>(field_size));
+    auto at = u.begin() + static_cast<std::ptrdiff_t>(2 * field_size);
+    for (const std::vector<double>* source : {&bottom.p, &bottom.q, &top.p, &top.q}) {
+      at = std::copy(source->begin(), source->end(), at);
     }
   };
+  auto unpack = [&](const std::vector<double>& u) {
+    std::copy(u.begin(), u.begin() + static_cast<std::ptrdiff_t>(field_size), x.v.begin());
+    std::copy(u.begin() + static_cast<std::ptrdiff_t>(field_size),
+              u.begin() + static_cast<std::ptrdiff_t>(2 * field_size), y.v.begin());
+    auto at = u.begin() + static_cast<std::ptrdiff_t>(2 * field_size);
+    for (std::vector<double>* source : {&bottom.p, &bottom.q, &top.p, &top.q}) {
+      std::copy(at, at + static_cast<std::ptrdiff_t>(ni), source->begin());
+      at += static_cast<std::ptrdiff_t>(ni);
+    }
+  };
+  AndersonAccelerator anderson(state_size, options.acceleration);
+  std::vector<double> before;
+  std::vector<double> after;
+  double best_residual = 0.0;
 
   EllipticResult result;
   double first_residual = 0.0;
@@ -342,83 +380,134 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
       result.cancelled = true;
       break;
     }
+    if (options.acceleration > 0) {
+      pack(before);
+    }
     if (options.bottom.enabled) {
       update_wall(x, y, options.bottom, true, bottom);
     }
     if (options.top.enabled) {
       update_wall(x, y, options.top, false, top);
     }
-    double sum = 0.0;
+    // Correction of node (i, j); returns its squared length.
     auto apply = [&](int i, int j, double gx, double gy) {
       const double cx = gx - x(i, j);
       const double cy = gy - y(i, j);
-      sum += cx * cx + cy * cy;
       x(i, j) += options.omega * cx;
       y(i, j) += options.omega * cy;
+      return cx * cx + cy * cy;
     };
+    std::fill(line_sum.begin(), line_sum.end(), 0.0);
     if (options.solver == EllipticSolver::PointSor) {
-      for (int j = 1; j < nj - 1; ++j) {
-        for (int i = 1; i < ni - 1; ++i) {
-          const Stencil s = stencil(i, j);
-          if (!(s.diag > 0.0)) {
-            continue;
-          }
-          const double gx = (s.aw * x(i - 1, j) + s.ae * x(i + 1, j) + s.as * x(i, j - 1) +
-                             s.an * x(i, j + 1) + s.cross_x) /
-                            s.diag;
-          const double gy = (s.aw * y(i - 1, j) + s.ae * y(i + 1, j) + s.as * y(i, j - 1) +
-                             s.an * y(i, j + 1) + s.cross_y) /
-                            s.diag;
-          apply(i, j, gx, gy);
-        }
+      // Zebra rows: odd j, then even j (the cross term reaches the rows j +/- 1, so points of
+      // one row cannot be split by colour); the points of a row are relaxed in order.
+      for (int colour = 1; colour >= 0; --colour) {
+        const std::int64_t count = (nj - 2 - (1 - colour) + 1) / 2;
+        parallel_for(
+            0, count,
+            [&](std::int64_t m) {
+              const auto j = static_cast<int>(2 * m + 2 - colour);
+              double sum = 0.0;
+              for (int i = 1; i < ni - 1; ++i) {
+                const Stencil s = stencil(i, j);
+                if (!(s.diag > 0.0)) {
+                  continue;
+                }
+                const double gx = (s.aw * x(i - 1, j) + s.ae * x(i + 1, j) + s.as * x(i, j - 1) +
+                                   s.an * x(i, j + 1) + s.cross_x) /
+                                  s.diag;
+                const double gy = (s.aw * y(i - 1, j) + s.ae * y(i + 1, j) + s.as * y(i, j - 1) +
+                                   s.an * y(i, j + 1) + s.cross_y) /
+                                  s.diag;
+                sum += apply(i, j, gx, gy);
+              }
+              line_sum[static_cast<std::size_t>(j)] = sum;
+            },
+            8);
       }
     } else {
-      // Alternating line relaxation: eta-lines (implicit in j) for every interior i, then
-      // xi-lines (implicit in i) for every interior j.
-      resize(nj);
-      for (int i = 1; i < ni - 1; ++i) {
+      // Alternating zebra line relaxation: eta-lines (implicit in j) at odd, then even i; then
+      // xi-lines (implicit in i) at odd, then even j.
+      const auto unj = static_cast<std::size_t>(nj);
+      const auto uni = static_cast<std::size_t>(ni);
+      auto eta_line = [&](int i) {
+        const std::size_t o = static_cast<std::size_t>(i) * unj;
         for (int j = 1; j < nj - 1; ++j) {
           const Stencil s = stencil(i, j);
-          const auto k = static_cast<std::size_t>(j);
+          const std::size_t k = o + static_cast<std::size_t>(j);
           la[k] = -s.as;
           lb[k] = s.diag;
           lc[k] = -s.an;
           rx[k] = s.aw * x(i - 1, j) + s.ae * x(i + 1, j) + s.cross_x;
           ry[k] = s.aw * y(i - 1, j) + s.ae * y(i + 1, j) + s.cross_y;
         }
-        rx[0] = x(i, 0);
-        ry[0] = y(i, 0);
-        rx[static_cast<std::size_t>(nj - 1)] = x(i, nj - 1);
-        ry[static_cast<std::size_t>(nj - 1)] = y(i, nj - 1);
-        if (!solve_line(static_cast<std::size_t>(nj))) {
-          continue;
+        rx[o] = x(i, 0);
+        ry[o] = y(i, 0);
+        rx[o + unj - 1] = x(i, nj - 1);
+        ry[o + unj - 1] = y(i, nj - 1);
+        if (!solve_line(&la[o], &lb[o], &lc[o], &rx[o], &ry[o], unj)) {
+          return 0.0;
         }
+        double sum = 0.0;
         for (int j = 1; j < nj - 1; ++j) {
-          apply(i, j, rx[static_cast<std::size_t>(j)], ry[static_cast<std::size_t>(j)]);
+          sum +=
+              apply(i, j, rx[o + static_cast<std::size_t>(j)], ry[o + static_cast<std::size_t>(j)]);
         }
-      }
-      resize(ni);
-      for (int j = 1; j < nj - 1; ++j) {
+        return sum;
+      };
+      auto xi_line = [&](int j) {
+        const std::size_t o = static_cast<std::size_t>(j) * uni;
         for (int i = 1; i < ni - 1; ++i) {
           const Stencil s = stencil(i, j);
-          const auto k = static_cast<std::size_t>(i);
+          const std::size_t k = o + static_cast<std::size_t>(i);
           la[k] = -s.aw;
           lb[k] = s.diag;
           lc[k] = -s.ae;
           rx[k] = s.as * x(i, j - 1) + s.an * x(i, j + 1) + s.cross_x;
           ry[k] = s.as * y(i, j - 1) + s.an * y(i, j + 1) + s.cross_y;
         }
-        rx[0] = x(0, j);
-        ry[0] = y(0, j);
-        rx[static_cast<std::size_t>(ni - 1)] = x(ni - 1, j);
-        ry[static_cast<std::size_t>(ni - 1)] = y(ni - 1, j);
-        if (!solve_line(static_cast<std::size_t>(ni))) {
-          continue;
+        rx[o] = x(0, j);
+        ry[o] = y(0, j);
+        rx[o + uni - 1] = x(ni - 1, j);
+        ry[o + uni - 1] = y(ni - 1, j);
+        if (!solve_line(&la[o], &lb[o], &lc[o], &rx[o], &ry[o], uni)) {
+          return 0.0;
         }
+        double sum = 0.0;
         for (int i = 1; i < ni - 1; ++i) {
-          apply(i, j, rx[static_cast<std::size_t>(i)], ry[static_cast<std::size_t>(i)]);
+          sum +=
+              apply(i, j, rx[o + static_cast<std::size_t>(i)], ry[o + static_cast<std::size_t>(i)]);
         }
+        return sum;
+      };
+      std::vector<double> eta_sum(uni, 0.0);
+      for (int colour = 1; colour >= 0; --colour) {
+        const std::int64_t count = (ni - 2 - (1 - colour) + 1) / 2;
+        parallel_for(
+            0, count,
+            [&](std::int64_t m) {
+              const auto i = static_cast<int>(2 * m + 2 - colour);
+              eta_sum[static_cast<std::size_t>(i)] = eta_line(i);
+            },
+            8);
       }
+      for (int colour = 1; colour >= 0; --colour) {
+        const std::int64_t count = (nj - 2 - (1 - colour) + 1) / 2;
+        parallel_for(
+            0, count,
+            [&](std::int64_t m) {
+              const auto j = static_cast<int>(2 * m + 2 - colour);
+              line_sum[static_cast<std::size_t>(j)] = xi_line(j);
+            },
+            8);
+      }
+      for (const double value : eta_sum) {
+        line_sum[0] += value;
+      }
+    }
+    double sum = 0.0;
+    for (const double value : line_sum) {
+      sum += value;
     }
     const double residual = std::sqrt(sum / interior);
     if (!std::isfinite(residual)) {
@@ -433,6 +522,19 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
     }
     if (iteration == 0) {
       first_residual = residual;
+      best_residual = residual;
+    }
+    if (options.acceleration > 0) {
+      // Restart the history when the residual grows well above its best value.
+      if (residual > 4.0 * best_residual) {
+        anderson.reset();
+        best_residual = residual;
+      }
+      best_residual = std::min(best_residual, residual);
+      pack(after);
+      if (anderson.step(before, after)) {
+        unpack(after);
+      }
     }
     result.iterations = iteration + 1;
     // Relative convergence, with an absolute floor at round-off level of the grid size (a grid

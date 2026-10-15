@@ -70,6 +70,8 @@ will be decided then.
 | **Netgen** | 3D volume tet generation | LGPL-2.1 | dynamic, optional plugin | Phase 8 |
 | **mmg** (mmg3d/mmgs) | 3D tet optimisation / adaptation | LGPL-3.0 | dynamic, optional plugin | Phase 8 |
 | OpenCASCADE (OCCT 8) | STEP/IGES import | LGPL-2.1 + exception | dynamic, optional plugin | Phase 9a |
+| OpenMP runtime (libomp / libgomp) | parallel loops | Apache-2.0 w/ LLVM exc. / GPL w/ runtime exc. | dynamic | optional (Phase 9c) |
+| rattler-build, conda-pack | packaging | BSD-3 | build-time | packaging only (Phase 9c) |
 
 **Not used by default (license incompatible with closed in-house use):** TetGen (AGPL-3),
 Shewchuk's *Triangle* program (non-free for commercial use — note: only his *predicates* are
@@ -100,7 +102,8 @@ must keep Qt and backend libraries as separate replaceable shared libraries).
   and **`-ffp-contract=off`** everywhere to keep floating-point results identical between
   debug/release and independent of FMA contraction decisions (determinism requirement).
 - Options: `OG_BUILD_TESTS` (ON), `OG_BUILD_PYTHON` (ON), `OG_WITH_CGNS` (ON), `OG_WITH_OCCT`
-  (ON; skipped with a message when OpenCASCADE is not found). Netgen is a run-time Python
+  (ON; skipped with a message when OpenCASCADE is not found), `OG_WITH_OPENMP` (ON; serial
+  loops with a warning when OpenMP is not found; Phase 9c). Netgen is a run-time Python
   dependency, not a build option (Phase 8a); mmg is not used (Phase 8c).
 
 ## 4. C++ / Python boundary
@@ -843,6 +846,56 @@ segment, so derivative jumps at knots never cost accuracy.
   ignored `core/src/dist/` and `core/include/opengrid/core/dist/`; it is `/dist/` now and the
   distribution sources are tracked (earlier commits lacked them).
 
+### Performance and packaging (Phase 9c)
+- **Parallel loops** (`util/parallel.hpp`): `parallel_for(begin, end, body, grain)` is an
+  OpenMP `parallel for schedule(static)` when built with `OG_WITH_OPENMP` (default ON; serial
+  with a warning when OpenMP is not found), a plain loop otherwise. Determinism rule: a body
+  writes only its own outputs, and sums are formed afterwards in index order (per-line or
+  per-chunk partials with a partition that never depends on the thread count) — no OpenMP
+  `reduction` clauses. Bodies do not throw (input validated before). Apple Clang has no OpenMP
+  runtime: the conda environment's `llvm-openmp` (libomp) is used through `OpenMP_ROOT`
+  (`$CONDA_PREFIX` by default). `opengrid.threads()` / `opengrid.set_threads(n)`; meshes do
+  not depend on the count (tested on 1, 3, 4, 6, 8 and 10 threads).
+- **Parallel hot loops:** 2D elliptic smoothing (zebra ordering: odd lines, then even lines;
+  point SOR relaxes zebra rows because the cross-derivative term reaches the diagonal
+  neighbours), 3D elliptic smoothing (zebra k-planes), the volume quality metrics, the
+  optimiser's whole-mesh scans (quality summaries, floor counts, node ranking), the Anderson
+  dot products. Serial: Delaunay / advancing front insertion, the optimiser's node moves and
+  swaps (order-dependent), inflation.
+- **Anderson acceleration** (`util/anderson.hpp`, Walker & Ni 2011) of the elliptic iterations
+  (2D and 3D): the state is the node coordinates plus the wall-control sources, so the
+  Hilgenstock feedback is accelerated together with the grid; depth `acceleration` (default
+  5, 0 = plain relaxation), history restarted when the residual exceeds 4x its best value.
+  The relaxation sweeps themselves are unchanged (same discretisation, same fixed point).
+  500 x 200 cylinder O-grid with wall control: 402 iterations / 1.06 s (3.2 s on one thread);
+  plain relaxation reaches only 9e-3 of the first residual after 4000 iterations.
+- **Volume quality in C++** (`quality/volume_quality.cpp`): all per-cell metrics in one pass;
+  faces matched by a counting sort on their smallest node. Computed once per volume mesh
+  (`mesh["cell_quality"]`, read-only) and used for the floor check, the filled-volume check,
+  `volume_quality` and the exports. The NumPy implementation it replaces is kept as the test
+  reference (`tests/python/quality_reference.py`).
+- **Optimiser swap pass:** candidates are gathered from the tetrahedra below the threshold
+  through the node -> cell table instead of sorting every face and edge of the mesh; ordered
+  by the same keys, so the swaps (and meshes) are identical to the previous implementation.
+- **Netgen backend:** bulk transfer (`AddPoints` / `AddElements`, `Coordinates()` /
+  `Elements3D().NumPy()`) instead of per-element Python loops, and Netgen's own thread pool
+  (`pyngcore.TaskManager`, sized like OpenGrid's); its parallel passes give the same mesh as a
+  serial run (checked by digest). Assembled shells are cached by a digest of their face meshes
+  (assembly was repeated on every cache lookup).
+- **Benchmark:** `examples/09c_performance.py` (report `examples/output/09c_benchmark.txt`).
+  The 5M-tetrahedra target is missed: Netgen itself needs ~157 s on an M1 Max (serial Delaunay
+  insertion ~50 s, illegal-element removal ~37 s, optimisation ~68 s with threads); fewer
+  Netgen optimisation passes are faster but lower the minimum scaled Jacobian from 0.17 to
+  0.015 (one pass), so the default is kept.
+- **Packaging** (`packaging/`): a conda package (`packaging/conda/recipe.yaml`, rattler-build,
+  conda-forge dependencies; builds on linux-64 / linux-aarch64 / osx-arm64 / osx-64) — the
+  Linux deliverable; and a macOS app bundle (`packaging/macos/build_app.sh`): the package
+  installed into a fresh environment, made relocatable with conda-pack, placed in
+  `OpenGrid.app/Contents/Resources/env` behind a launcher script, signed ad hoc, and wrapped in
+  a DMG. Qt, VTK, Netgen and OpenCASCADE stay separate shared libraries inside the bundle
+  (LGPL relinking requirement, §2). An AppImage was not made: the conda package covers Linux,
+  and an AppImage of the same environment would need a Linux machine to build and test.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface
@@ -904,7 +957,8 @@ faces), with boundary faces preserved bit-for-bit.
    is always written as well, so meshio users get the patch information.
 5. **Performance target "3D 5M tets via backend < 2 min"** is at risk with Netgen, whose
    optimisation passes are largely serial; we will measure it in Phase 8 and may meet it only
-   with optimisation reduced or delegated to mmg.
+   with optimisation reduced or delegated to mmg. *Measured in Phase 9c:* missed — 176–186 s
+   on an M1 Max, of which Netgen ~157 s (with its thread pool); see the Phase 9c section.
 6. **Phase size.** Phase 5 (CDT + refinement + advancing front + quads + smoothing) and
    Phase 8 are large. Proposal: split Phase 5 into 5a CDT/refinement/size field, 5b advancing
    front, 5c quads + smoothing; split Phase 8 into 8a surface meshing + shell + backend,

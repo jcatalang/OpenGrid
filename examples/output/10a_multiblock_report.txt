@@ -1,0 +1,14 @@
+cylinder in a channel: 4 domains, 5412 points
+  per-domain smoothing (Laplace + wall control, interfaces fixed): 0.07 s
+    interface kink 89.6 deg, min scaled Jacobian 0.447, wall angle error 0.00 deg
+  smoothing group: 4 domains, 5248 nodes (4992 regular, 0 irregular, 124 sliding, 132 fixed), interface kink 0.99 deg, converged in 81 iterations, 0.06 s
+    interface kink 0.99 deg, min scaled Jacobian 0.365, wall angle error 0.00 deg
+    first-cell height on the cylinder 0.01000 .. 0.01000 (requested 0.01)
+    roles: c-arc0 wall, c-side0 sliding, c-diag0 interface, c-arc1 wall, c-side1 sliding, c-diag1 interface, c-arc2 wall, c-side2 sliding, c-diag2 interface, c-arc3 wall, c-side3 sliding, c-diag3 interface
+
+pipe (O-grid, core + 4): 
+  per-domain smoothing (Laplace, interfaces fixed): interface kink 76.0 deg, min scaled Jacobian 0.707
+  smoothing group: 5 domains, 1777 nodes (1677 regular, 4 irregular, 92 sliding, 4 fixed), interface kink 0.38 deg, converged in 81 iterations
+    interface kink 0.38 deg (away from the 4 irregular points), min scaled Jacobian 0.864
+    sliding nodes on the circle within 5.6e-17
+    initial core size 0.55 vs 0.35: grids differ by 9.6e-06 (solver tolerance)

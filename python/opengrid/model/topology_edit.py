@@ -216,6 +216,16 @@ def _redirect(store, old: int, new_ids: list[int]) -> None:
                 if item not in unique:
                     unique.append(item)
             params["members"] = tuple(unique)
+        elif dependent.kind == "smoothing_group":
+            walls = []
+            for wall in params["walls"]:
+                if wall["connector"] == old:
+                    walls.extend(dict(wall, connector=c) for c in new_ids)
+                else:
+                    walls.append(wall)
+            params["walls"] = tuple(walls)
+            if params["slide"] != "auto" and old in params["slide"]:
+                params["slide"] = tuple(c for c in params["slide"] if c != old) + tuple(new_ids)
         else:
             continue
         _update(store, dependent.id, params)
@@ -285,6 +295,12 @@ def _joined_user(dependent, a: int, b: int, b_first: bool, b_reversed: bool) -> 
         if (a in has) != (b in has):
             _fail(dependent.name, "holds only one of the connectors to join")
         params["members"] = tuple(m for m in params["members"] if m.get("connector") != b)
+        return params
+    if dependent.kind == "smoothing_group":
+        # The joined connector keeps a's role (wall settings, sliding); b's entries go.
+        params["walls"] = tuple(w for w in params["walls"] if w["connector"] != b)
+        if params["slide"] != "auto":
+            params["slide"] = tuple(c for c in params["slide"] if c != b)
         return params
     if dependent.kind not in ("domain", "unstructured_domain"):
         _fail(dependent.name, f"a {dependent.kind} uses the connectors; cannot join them")
@@ -443,6 +459,8 @@ def _add_to_users(store, old: int, new: int, skip_block=None) -> None:
             params["members"] = (*tuple(params["members"]), {"domain": new})
         elif dependent.kind == "volume":
             params["faces"] = (*tuple(params["faces"]), new)
+        elif dependent.kind == "smoothing_group":
+            params["domains"] = (*tuple(params["domains"]), new)
         else:
             continue
         _update(store, dependent.id, params)
@@ -641,6 +659,14 @@ def _replace_domain(store, old: int, new: int) -> None:
                 if f not in faces:
                     faces.append(f)
             params["faces"] = tuple(faces)
+        elif dependent.kind == "smoothing_group":
+            domains = []
+            for d in params["domains"]:
+                if d == old:
+                    d = new
+                if d not in domains:
+                    domains.append(d)
+            params["domains"] = tuple(domains)
         else:
             continue
         _update(store, dependent.id, params)
@@ -908,6 +934,8 @@ def ogrid_domain(store, name, fraction=0.5, radial_points=None, radial_spacing=N
             params["members"] = tuple(m for m in params["members"] if m.get("domain") != entity.id)
         elif dependent.kind == "volume":
             params["faces"] = tuple(f for f in params["faces"] if f != entity.id)
+        elif dependent.kind == "smoothing_group":
+            params["domains"] = tuple(d for d in params["domains"] if d != entity.id)
         _update(store, dependent.id, params)
     store.remove(entity.id)
     return [store.get(c).name for c in created], warnings

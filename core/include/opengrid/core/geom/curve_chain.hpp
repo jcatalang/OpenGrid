@@ -44,6 +44,9 @@ class CurveChain {
   [[nodiscard]] Vec3 point_at_param(double u) const;
   // Arc length from the start to chain parameter u.
   [[nodiscard]] double length_at_param(double u) const;
+  // Chain parameter of the point closest to p with u in [lo, hi]: each piece overlapping the
+  // range is sampled (16 points), the best sample is polished by Newton on its curve.
+  [[nodiscard]] double project_param(const Vec3& p, double lo = 0.0, double hi = 1.0) const;
 
  private:
   struct Piece {
@@ -53,6 +56,7 @@ class CurveChain {
   };
   [[nodiscard]] std::size_t piece_at_length(double s) const;
   [[nodiscard]] double piece_param(std::size_t k, double u) const;
+  [[nodiscard]] double chain_param(std::size_t k, double t) const;  // inverse of piece_param
 
   std::vector<Piece> segments_;
   std::vector<double> cumulative_;  // arc length at the start of each piece, plus total

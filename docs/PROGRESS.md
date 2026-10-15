@@ -848,6 +848,48 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10a — multi-block smoothing groups, 2D (2026-10-15) — approved (pre-authorised)
+
+### Built
+- C++ `structured/multiblock_elliptic.cpp`: one elliptic smoothing over the quads of several
+  planar structured domains — floating interfaces and block corners, grid lines continued
+  across domains and relaxed implicitly (greedily coloured, parallel, thread-independent),
+  irregular points, sliding boundary nodes on curve chains (`CurveChain::project_param`; the
+  curve's local Newton projection is now public), wall control carried along grid lines,
+  Anderson acceleration. Binding `_core.smooth_multiblock`.
+- Python `model/groups.py`: entity `smoothing_group` (validation, journal names, project
+  section "domains"), connector roles (interface / wall / sliding / fixed / outside), global
+  numbering, `GroupEvaluator` (cache, prepare / run / finish for the GUI thread), interface
+  kink metric. Session: `create_smoothing_group`, `smooth_group`, `group_status`,
+  `display_connector_nodes`; members' `domain_grid` / `domain_status` / `smooth_domain` go
+  through their group. Topology edits update groups.
+- GUI: Create → Smoothing group, property panel editor, smoother dock runs groups, model tree
+  entry, moved connectors drawn in place.
+- Demo `examples/10a_multiblock_smoothing.py`: cylinder in a channel and circle O-grid.
+- Fix in the 9b and 10a demo pictures: quality colours were assigned to the wrong cells
+  (PyVista orders structured cells with the first array axis fastest); `09b_topology.png`
+  regenerated.
+
+### Results
+| Case | Per-domain smoothing | Smoothing group |
+|---|---|---|
+| Split bump channel with wall (vs unsplit) | — | equal to 1e-11 |
+| Circle O-grid: interface kink | 76° (34° away from corners) | 0.38° |
+| Circle O-grid: min scaled Jacobian | 0.71 | 0.86 |
+| Cylinder in channel: interface kink | 90° | 0.99° |
+| Cylinder in channel: min scaled Jacobian | 0.45 | 0.36 (box corners, see OPEN_ISSUES) |
+| Cylinder: first-cell height on the wall | 0.01 | 0.01000 .. 0.01000 |
+
+- Sliding nodes stay on their curves to 1e-16; on a straight sliding wall (bump channel) the
+  orthogonality error is 2.6° (5.5° with fixed nodes).
+- 68k-node O-grid: 456 iterations, 1.5 s (10 threads; depth 10). Same digest on 1, 4 and 10
+  threads.
+
+### Verified
+- `ctest` +3 (split = single block with wall, O-grid irregular corners + sliding + thread
+  independence, input checks) → 133; `pytest` +10 (`test_groups.py`).
+- Strict CI build, clang-tidy, ruff, clang-format, ternary check, API docs; all demos run.
+
 ## Phase 9c — performance and packaging (2026-10-13) — approved
 
 ### Built

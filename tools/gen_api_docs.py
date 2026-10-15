@@ -66,6 +66,15 @@ GROUPS = [
         ],
     ),
     (
+        "Multi-block smoothing groups",
+        [
+            "create_smoothing_group",
+            "smooth_group",
+            "group_status",
+            "display_connector_nodes",
+        ],
+    ),
+    (
         "Blocks (structured 3D)",
         [
             "create_block",

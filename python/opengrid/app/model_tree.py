@@ -83,6 +83,15 @@ class ModelTree(QTreeWidget):
                 if len(mesh["quads"]):
                     parts.append(f"{len(mesh['quads'])} quads")
                 item = QTreeWidgetItem(domains, [entity.name, ", ".join(parts)])
+            elif entity.kind == "smoothing_group":
+                info = f"group of {len(entity.params['domains'])}"
+                try:
+                    status = session.group_status(entity.name)
+                    if "pending" in status or "NOT" in status:
+                        info += "  ⚠"
+                except ValidationError:
+                    info += "  ⚠"
+                item = QTreeWidgetItem(domains, [entity.name, info])
             elif entity.kind == "block":
                 info = "invalid"
                 try:

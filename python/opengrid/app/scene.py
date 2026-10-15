@@ -134,7 +134,7 @@ class Scene:
             self.plotter.remove_actor(actor_name, render=False)
 
     def _add_connector_actor(self, entity) -> None:
-        nodes = self.session.connector_nodes(entity.name)
+        nodes = self.session.display_connector_nodes(entity.name)
         selected = entity.id in self.selected_ids
         line_name = f"entity-{entity.id}"
         mesh = _polyline(nodes.points)

@@ -16,7 +16,16 @@ from opengrid.validation import Issue, ValidationError
 SURFACE_KINDS = ("plane", "ruled_surface", "extruded_surface", "revolved_surface", "nurbs_surface")
 DATABASE_KINDS = ("point", "line", "arc", "polyline", "spline", "nurbs", *SURFACE_KINDS)
 DOMAIN_KINDS = ("domain", "unstructured_domain")
-KINDS = (*DATABASE_KINDS, "connector", *DOMAIN_KINDS, "block", "volume", "patch", "zone")
+KINDS = (
+    *DATABASE_KINDS,
+    "connector",
+    *DOMAIN_KINDS,
+    "smoothing_group",
+    "block",
+    "volume",
+    "patch",
+    "zone",
+)
 # Surface parameters that reference curves (entity ids once canonical).
 SURFACE_CURVES = {
     "ruled_surface": ("curve0", "curve1"),
@@ -301,6 +310,12 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
         if store is None:
             raise ValueError("volume parameters need the store")
         return normalize_volume(raw, store, where)
+    if kind == "smoothing_group":
+        from opengrid.model.groups import normalize_group
+
+        if store is None:
+            raise ValueError("smoothing group parameters need the store")
+        return normalize_group(raw, store, where)
     if kind == "block":
         from opengrid.model.blocks import normalize_block
 
@@ -418,7 +433,16 @@ def build_geometry(kind: str, params: dict):
     """Construct the C++ curve for canonical parameters (None for a point)."""
     if kind == "point":
         return None
-    if kind in ("connector", "domain", "unstructured_domain", "block", "volume", "patch", "zone"):
+    if kind in (
+        "connector",
+        "domain",
+        "unstructured_domain",
+        "smoothing_group",
+        "block",
+        "volume",
+        "patch",
+        "zone",
+    ):
         raise ValueError(f"{kind}s have no single curve")
     if kind in SURFACE_KINDS:
         raise ValueError(f"{kind}: use build_surface (surfaces reference curves)")

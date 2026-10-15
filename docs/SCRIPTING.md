@@ -135,6 +135,21 @@ print(result.report())  # healing log, skipped faces, free edges
 og.create_volume(result.domains, name="solid")
 ```
 
+### Multi-block smoothing groups
+Several structured domains can be smoothed as one grid: interfaces and block corners move,
+grid lines cross interfaces smoothly, walls keep their first-cell height and other boundaries
+slide along their curves::
+
+    names = og.ogrid_domain("pipe", fraction=0.55)        # core + 4 domains
+    g = og.create_smoothing_group(names)                  # slide="auto", Laplace + walls
+    result = og.smooth_group(g)                           # cached; members' grids follow
+    print(og.group_status(g))                             # nodes, irregular points, kink
+    og.create_smoothing_group(["a", "b"], walls=[{"connector": "c-wall", "spacing": 1e-3}])
+
+`result.roles` tells what happened to each connector (interface, wall, sliding, fixed,
+outside: used by a domain outside the group). A member's own elliptic settings are ignored
+while it is in a group.
+
 ## Threads
 Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by
 default, or `OMP_NUM_THREADS`), `opengrid.set_threads(n)` changes it. Results never depend on

@@ -688,6 +688,7 @@ class DomainEvaluator:
         self.connectors = connectors
         self._boundaries: dict[int, tuple] = {}
         self._smoothed: OrderedDict[str, SmoothingResult] = OrderedDict()
+        self.groups = None  # GroupEvaluator: members of smoothing groups take their grids there
 
     def invalidate(self) -> None:
         self._boundaries.clear()
@@ -748,8 +749,25 @@ class DomainEvaluator:
         while len(self._smoothed) > self.CACHE_SIZE:
             self._smoothed.popitem(last=False)
 
+    def _group(self, entity_id: int) -> int | None:
+        if self.groups is None:
+            return None
+        return self.groups.group_of(entity_id)
+
     def smooth(self, entity_id: int, progress=None) -> SmoothingResult:
-        """Run (or reuse) the elliptic smoother; synchronous."""
+        """Run (or reuse) the elliptic smoother; synchronous. A member of a smoothing group
+        runs (or reuses) its group's smoothing and gets its own part of the result."""
+        group = self._group(entity_id)
+        if group is not None:
+            result = self.groups.smooth(group, progress)
+            return SmoothingResult(
+                result.grids[entity_id],
+                result.residuals,
+                result.iterations,
+                result.converged,
+                result.cancelled,
+                list(result.warnings),
+            )
         generator = self.store.get(entity_id).params["generator"]
         if generator["elliptic"] is None:
             raise ValueError(
@@ -782,6 +800,14 @@ class DomainEvaluator:
     def grid(self, entity_id: int, compute: bool = True) -> np.ndarray:
         """Final grid: TFI, or the smoothed grid (computed now if ``compute`` and missing;
         otherwise the TFI grid is returned while smoothing is pending)."""
+        group = self._group(entity_id)
+        if group is not None:
+            cached = self.groups.result(group)
+            if cached is None and compute:
+                cached = self.groups.smooth(group)
+            if cached is None:
+                return self.initial_grid(entity_id)
+            return cached.grids[entity_id]
         generator = self.store.get(entity_id).params["generator"]
         if generator["elliptic"] is None:
             return self.initial_grid(entity_id)
@@ -793,6 +819,15 @@ class DomainEvaluator:
         return self.initial_grid(entity_id)
 
     def status(self, entity_id: int) -> str:
+        group = self._group(entity_id)
+        if group is not None:
+            name = self.store.get(group).name
+            cached = self.groups.result(group)
+            if cached is None:
+                return f"in smoothing group {name}: smoothing pending (showing TFI)"
+            if cached.converged:
+                return f"in smoothing group {name}: converged in {cached.iterations} iterations"
+            return f"in smoothing group {name}: NOT converged after {cached.iterations} iterations"
         generator = self.store.get(entity_id).params["generator"]
         if generator["elliptic"] is None:
             return generator["method"]

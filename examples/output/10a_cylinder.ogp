@@ -1,0 +1,47 @@
+{
+ "blocks": [],
+ "connectors": [
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 2, "mode": "arc_length", "name": "c-arc0", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 4, "mode": "arc_length", "name": "c-side0", "propagate_spacing": true, "segments": [{"curve": 3, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.15, "growth_ratio": null, "type": "tanh"}, "id": 6, "mode": "arc_length", "name": "c-diag0", "propagate_spacing": true, "segments": [{"curve": 5, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 8, "mode": "arc_length", "name": "c-arc1", "propagate_spacing": true, "segments": [{"curve": 7, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 10, "mode": "arc_length", "name": "c-side1", "propagate_spacing": true, "segments": [{"curve": 9, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.15, "growth_ratio": null, "type": "tanh"}, "id": 12, "mode": "arc_length", "name": "c-diag1", "propagate_spacing": true, "segments": [{"curve": 11, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 14, "mode": "arc_length", "name": "c-arc2", "propagate_spacing": true, "segments": [{"curve": 13, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 16, "mode": "arc_length", "name": "c-side2", "propagate_spacing": true, "segments": [{"curve": 15, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.15, "growth_ratio": null, "type": "tanh"}, "id": 18, "mode": "arc_length", "name": "c-diag2", "propagate_spacing": true, "segments": [{"curve": 17, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 20, "mode": "arc_length", "name": "c-arc3", "propagate_spacing": true, "segments": [{"curve": 19, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 33, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 22, "mode": "arc_length", "name": "c-side3", "propagate_spacing": true, "segments": [{"curve": 21, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 41, "distribution": {"begin_spacing": 0.01, "end_spacing": 0.15, "growth_ratio": null, "type": "tanh"}, "id": 24, "mode": "arc_length", "name": "c-diag3", "propagate_spacing": true, "segments": [{"curve": 23, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"center": [0.0, 0.0, 0.0], "end_angle": -0.4636476090008061, "id": 1, "name": "arc0", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": -2.677945044588987, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 3, "name": "side0", "p0": [-3.0, -1.5, 0.0], "p1": [3.0, -1.5, 0.0], "type": "line"},
+  {"id": 5, "name": "diag0", "p0": [-0.4472135954999579, -0.22360679774997905, 0.0], "p1": [-3.0, -1.5, 0.0], "type": "line"},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 0.4636476090008061, "id": 7, "name": "arc1", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": -0.4636476090008061, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 9, "name": "side1", "p0": [3.0, -1.5, 0.0], "p1": [3.0, 1.5, 0.0], "type": "line"},
+  {"id": 11, "name": "diag1", "p0": [0.4472135954999579, -0.22360679774997896, 0.0], "p1": [3.0, -1.5, 0.0], "type": "line"},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 2.677945044588987, "id": 13, "name": "arc2", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": 0.4636476090008061, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 15, "name": "side2", "p0": [3.0, 1.5, 0.0], "p1": [-3.0, 1.5, 0.0], "type": "line"},
+  {"id": 17, "name": "diag2", "p0": [0.4472135954999579, 0.22360679774997896, 0.0], "p1": [3.0, 1.5, 0.0], "type": "line"},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 3.6052402625905993, "id": 19, "name": "arc3", "normal": [0.0, 0.0, 1.0], "radius": 0.5, "start_angle": 2.677945044588987, "type": "arc", "x_axis": [1.0, 0.0, 0.0]},
+  {"id": 21, "name": "side3", "p0": [-3.0, 1.5, 0.0], "p1": [-3.0, -1.5, 0.0], "type": "line"},
+  {"id": 23, "name": "diag3", "p0": [-0.4472135954999579, 0.22360679774997905, 0.0], "p1": [-3.0, 1.5, 0.0], "type": "line"}
+ ],
+ "domains": [
+  {"edges": [[{"connector": 2, "reversed": true}], [{"connector": 6, "reversed": false}], [{"connector": 4, "reversed": false}], [{"connector": 12, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 25, "name": "cyl0", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 8, "reversed": true}], [{"connector": 12, "reversed": false}], [{"connector": 10, "reversed": false}], [{"connector": 18, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 26, "name": "cyl1", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 14, "reversed": true}], [{"connector": 18, "reversed": false}], [{"connector": 16, "reversed": false}], [{"connector": 24, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 27, "name": "cyl2", "surface": null, "type": "domain"},
+  {"edges": [[{"connector": 20, "reversed": true}], [{"connector": 24, "reversed": false}], [{"connector": 22, "reversed": false}], [{"connector": 6, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 28, "name": "cyl3", "surface": null, "type": "domain"},
+  {"acceleration": 10, "domains": [25, 26, 27, 28], "id": 29, "max_iterations": 2000, "name": "cylinder", "omega": 1.0, "slide": "auto", "tolerance": 1e-06, "type": "smoothing_group", "walls": [{"connector": 2, "decay": 0.1, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"connector": 8, "decay": 0.1, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"connector": 14, "decay": 0.1, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"connector": 20, "decay": 0.1, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}
+ ],
+ "format": "opengrid-project",
+ "name_counters": {},
+ "next_id": 30,
+ "patches": [],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

@@ -233,6 +233,28 @@ history). Phase tags show where each item came from.
 - **Package metadata** [9c]: version 0.0.1, license `LicenseRef-OpenGrid` and a placeholder home
   page; set them before publishing.
 
+## Multi-block smoothing (Phase 10)
+- **Laplace control only in groups** [10a]: no Thomas-Middlecoff or attraction functions.
+  Clustering survives only at walls (first-cell height control); clustering on other
+  boundaries (e.g. a refined far field) is smoothed out. Make such connectors walls to keep
+  their first spacing.
+- **Sliding is local** [10a]: a sliding node stays within half its initial intervals of its
+  starting position (unbounded sliding piled nodes into 90° boundary corners: min scaled
+  Jacobian 0.08 on the cylinder demo). So orthogonality on sliding boundaries is improved,
+  not reached: 2.6° error on the bump channel's top wall (5.5° fixed). End nodes of boundary
+  connectors never slide, so an interface ending on a boundary keeps its end point.
+- **Topology decides the worst cells** [10a]: on the cylinder demo the group smooths the
+  diagonals (kink 90° → 1°) but the worst cell drops from 0.45 to 0.36, in the channel
+  corners, where a 90° boundary corner is split between two domains. Multi-block layouts
+  give such corners a single block; templates (10e) will.
+- **Kink near irregular points** [10a]: grid lines must turn there; the kink metric ignores
+  three nodes around them (up to 13° there on the circle O-grid).
+- **Group default wall spacing** [10a]: None keeps the initial first-cell height at each node
+  (the single-domain smoother interpolates it from the side boundaries).
+- **Planar groups only** [10a]: domains in a z = const plane; 3D blocks come in 10b.
+- **Picture bug in 9b** [10a]: `09b_topology.png` coloured cells by the wrong quality values
+  (structured cell order); fixed and regenerated in 10a.
+
 ## Design changes and deviations from the spec or the plan
 - **Phase splits:**
   - Phase 5 → 5a (Delaunay), 5b (advancing front), 5c (quads, smoothing, CGNS unstructured).

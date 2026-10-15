@@ -221,7 +221,8 @@ def render(pipe, ball, single_pipe, path) -> None:
     plotter = pv.Plotter(off_screen=True, shape=(2, 2), window_size=(2400, 1600), border=False)
 
     def domain_surface(grid, scalars):
-        surface = pv.StructuredGrid(grid[..., 0], grid[..., 1], grid[..., 2])
+        # Transposed: VTK orders points (and cells) with i fastest, as the quality arrays.
+        surface = pv.StructuredGrid(grid[..., 0].T, grid[..., 1].T, grid[..., 2].T)
         surface.cell_data["sj"] = scalars.ravel()
         return surface
 

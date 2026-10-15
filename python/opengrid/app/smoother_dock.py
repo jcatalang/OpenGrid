@@ -1,4 +1,5 @@
-"""Elliptic smoother dock: residual history plot, run and cancel.
+"""Elliptic smoother dock: residual history plot, run and cancel, for a structured domain or
+a smoothing group (a domain in a group runs its group).
 
 The smoother runs in a Python thread; the C++ solver releases the GIL, so the GUI stays
 responsive. The inputs (initial grid and settings) are taken on the GUI thread and the
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from opengrid import _core
 from opengrid.model.domains import run_smoother
+from opengrid.model.groups import run_group
 
 
 class _Emitter(QObject):
@@ -23,7 +25,7 @@ class _Emitter(QObject):
 
 
 class SmootherDock(QWidget):
-    finished = Signal(str, object)  # domain name, SmoothingResult (or exception)
+    finished = Signal(str, object)  # domain or group name, Smoothing/GroupResult (or exception)
 
     def __init__(self, session, parent=None):
         super().__init__(parent)
@@ -32,6 +34,7 @@ class SmootherDock(QWidget):
         self._progress = None
         self._thread: threading.Thread | None = None
         self._key = None
+        self._group = None  # (params, layout) while a group runs
         self._emitter = _Emitter()
         self._emitter.done.connect(self._on_done)
 
@@ -71,6 +74,15 @@ class SmootherDock(QWidget):
             self.run_button.setEnabled(False)
             return
         entity = self.session.entity(name)
+        group = self._group_of(name)
+        if group is not None:
+            self.domain_name = group
+            self.run_button.setEnabled(True)
+            self.status.setText(f"{group}: {self.session.group_status(group)}")
+            cached = self.session.groups.result(self.session.entity(group).id)
+            if cached is not None:
+                self._plot(cached.residuals)
+            return
         if entity.kind != "domain":
             self.domain_name = None
             self.status.setText(f"{name}: elliptic smoothing applies to structured domains only")
@@ -83,13 +95,32 @@ class SmootherDock(QWidget):
         if cached is not None:
             self._plot(cached.residuals)
 
+    def _group_of(self, name: str) -> str | None:
+        """The smoothing group a name stands for: the group itself, or a member domain's."""
+        entity = self.session.entity(name)
+        if entity.kind == "smoothing_group":
+            return name
+        if entity.kind != "domain":
+            return None
+        try:
+            group = self.session.groups.group_of(entity.id)
+        except Exception:  # a domain in several groups: reported when it is evaluated
+            return None
+        if group is None:
+            return None
+        return self.session.store.get(group).name
+
     def run_selected(self) -> bool:
         if self.domain_name is None or self.running:
             return False
         return self.start(self.domain_name)
 
     def start(self, name: str) -> bool:
+        group = self._group_of(name)
+        if group is not None:
+            return self._start_group(group)
         entity = self.session.entity(name)
+        self._group = None
         elliptic = entity.params["generator"]["elliptic"]
         if elliptic is None:
             self.status.setText(f"{name} has no elliptic smoothing configured")
@@ -111,6 +142,33 @@ class SmootherDock(QWidget):
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.status.setText(f"{name}: smoothing…")
+        self._timer.start()
+        self._thread.start()
+        return True
+
+    def _start_group(self, name: str) -> bool:
+        try:
+            key, layout, params = self.session.groups.prepare(self.session.entity(name).id)
+        except Exception as error:
+            self.status.setText(f"{name}: {error}")
+            return False
+        self.domain_name = name
+        self._key = key
+        self._group = (params, layout)
+        self._progress = _core.SmoothingProgress()
+        progress = self._progress
+
+        def work():
+            try:
+                result = run_group(layout, params, progress)
+            except Exception as error:  # reported on the GUI thread
+                result = error
+            self._emitter.done.emit(result)
+
+        self._thread = threading.Thread(target=work, name="opengrid-group", daemon=True)
+        self.run_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status.setText(f"{name}: smoothing {len(params['domains'])} domains…")
         self._timer.start()
         self._thread.start()
         return True
@@ -137,9 +195,17 @@ class SmootherDock(QWidget):
             self.status.setText(f"{name}: smoothing failed: {result}")
             self.finished.emit(name, result)
             return
+        group = self._group
+        self._group = None
+        if group is not None:
+            params, layout = group
+            result = self.session.groups.finish(params, layout, result)
         self._plot(result.residuals)
         if result.cancelled:
             self.status.setText(f"{name}: cancelled after {result.iterations} iterations")
+        elif group is not None:
+            self.session.groups.store_result(self._key, result)
+            self.status.setText(f"{name}: {self.session.group_status(name)}")
         else:
             self.session.domains.store_result(self._key, result)
             self.status.setText(f"{name}: {self.session.domain_status(name)}")

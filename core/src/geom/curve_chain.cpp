@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -99,6 +100,50 @@ double CurveChain::length_at_param(double u) const {
   const std::size_t k = piece_at_length(u * length());
   const ChainSegment& seg = segments_[k].segment;
   return cumulative_[k] + std::fabs(seg.curve->length_between(seg.t0, piece_param(k, u)));
+}
+
+double CurveChain::chain_param(std::size_t k, double t) const {
+  const Piece& piece = segments_[k];
+  const double u0 = cumulative_[k] / length();
+  const double u1 = cumulative_[k + 1] / length();
+  const double frac = (t - piece.segment.t0) / (piece.segment.t1 - piece.segment.t0);
+  return u0 + std::clamp(frac, 0.0, 1.0) * (u1 - u0);
+}
+
+double CurveChain::project_param(const Vec3& p, double lo, double hi) const {
+  lo = std::clamp(lo, 0.0, 1.0);
+  hi = std::clamp(hi, lo, 1.0);
+  constexpr int kSamples = 16;
+  double best_u = lo;
+  double best_d = std::numeric_limits<double>::infinity();
+  for (std::size_t k = 0; k < segments_.size(); ++k) {
+    const double u0 = std::max(lo, cumulative_[k] / length());
+    const double u1 = std::min(hi, cumulative_[k + 1] / length());
+    if (u1 < u0) {
+      continue;
+    }
+    const Curve& curve = *segments_[k].segment.curve;
+    const double ta = piece_param(k, u0);
+    const double tb = piece_param(k, u1);
+    double t_best = ta;
+    double d_best = std::numeric_limits<double>::infinity();
+    for (int m = 0; m <= kSamples; ++m) {
+      const double t = ta + (tb - ta) * static_cast<double>(m) / kSamples;
+      const double d = distance(curve.eval(t), p);
+      if (d < d_best) {
+        d_best = d;
+        t_best = t;
+      }
+    }
+    const double t =
+        curve.polish_projection(p, t_best, std::min(ta, tb), std::max(ta, tb));
+    const double d = distance(curve.eval(t), p);
+    if (d < best_d) {
+      best_d = d;
+      best_u = std::clamp(chain_param(k, t), u0, u1);
+    }
+  }
+  return best_u;
 }
 
 }  // namespace og

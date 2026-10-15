@@ -34,6 +34,7 @@
 #include "opengrid/core/quality/quality_cells.hpp"
 #include "opengrid/core/quality/quality_tri.hpp"
 #include "opengrid/core/structured/elliptic.hpp"
+#include "opengrid/core/structured/multiblock_elliptic.hpp"
 #include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/topo/connector_nodes.hpp"
 #include "opengrid/core/unstructured/advancing_front.hpp"
@@ -440,6 +441,79 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       nb::arg("progress") = nb::none(), nb::arg("acceleration") = 0,
       "Elliptic smoothing (GIL released); returns (grid, residuals, iterations, converged, "
       "cancelled, warnings).");
+
+  m.def(
+      "smooth_multiblock",
+      [](const PointsIn& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 4>, nb::c_contig, nb::device::cpu>&
+             quads,
+         const nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>& fixed,
+         const std::vector<std::shared_ptr<og::CurveChain>>& chains,
+         const std::vector<std::tuple<std::int64_t, std::size_t>>& slides,
+         const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
+         double omega, int max_iterations, double tolerance, int acceleration,
+         og::SmoothingProgress* progress) {
+        const std::size_t n = points.shape(0);
+        if (fixed.shape(0) != n) {
+          throw std::invalid_argument("fixed must have one entry per point");
+        }
+        og::MultiblockInput input;
+        input.xy.resize(2 * n);
+        for (std::size_t k = 0; k < n; ++k) {
+          input.xy[2 * k] = points(k, 0);
+          input.xy[2 * k + 1] = points(k, 1);
+        }
+        if (n > 0) {
+          input.z = points(0, 2);
+        }
+        input.quads.resize(quads.shape(0));
+        for (std::size_t q = 0; q < quads.shape(0); ++q) {
+          for (std::size_t c = 0; c < 4; ++c) {
+            input.quads[q][c] = quads(q, c);
+          }
+        }
+        input.fixed.assign(fixed.data(), fixed.data() + n);
+        for (const auto& chain : chains) {
+          input.chains.push_back(chain);
+        }
+        for (const auto& [node, chain] : slides) {
+          input.slides.push_back({node, chain});
+        }
+        for (const auto& [node, spacing, decay, relaxation, max_source] : walls) {
+          input.walls.push_back({node, spacing, decay, relaxation, max_source});
+        }
+        og::MultiblockOptions options;
+        options.omega = omega;
+        options.max_iterations = max_iterations;
+        options.tolerance = tolerance;
+        options.acceleration = acceleration;
+        og::MultiblockResult result;
+        {
+          const nb::gil_scoped_release release;
+          result = og::smooth_multiblock(input, options, progress);
+        }
+        std::vector<og::Vec3> out(n);
+        for (std::size_t k = 0; k < n; ++k) {
+          out[k] = {result.xy[2 * k], result.xy[2 * k + 1], input.z};
+        }
+        auto* classes = new std::uint8_t[n];
+        std::copy(result.node_class.begin(), result.node_class.end(), classes);
+        const nb::capsule owner(classes,
+                                [](void* ptr) noexcept { delete[] static_cast<std::uint8_t*>(ptr); });
+        nb::ndarray<nb::numpy, std::uint8_t, nb::ndim<1>> node_class(classes, {n}, owner);
+        return std::make_tuple(to_numpy(out), node_class, to_numpy(result.residuals),
+                               result.iterations, result.converged, result.cancelled,
+                               result.lines, result.colours, result.warnings);
+      },
+      nb::arg("points"), nb::arg("quads"), nb::arg("fixed"), nb::arg("chains"),
+      nb::arg("slides"), nb::arg("walls"), nb::arg("omega") = 1.0,
+      nb::arg("max_iterations") = 2000, nb::arg("tolerance") = 1e-6,
+      nb::arg("acceleration") = 10, nb::arg("progress") = nb::none(),
+      "Elliptic smoothing of a planar multi-block grid as one grid (GIL released). quads are "
+      "counter-clockwise node ids; slides are (node, chain index); walls are (node, spacing "
+      "(<= 0: initial), decay, relaxation, max_source). Returns (points, node_class "
+      "(0 fixed, 1 regular, 2 irregular, 3 sliding), residuals, iterations, converged, "
+      "cancelled, lines, colours, warnings).");
 
   m.def(
       "quality_2d",

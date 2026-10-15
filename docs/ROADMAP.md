@@ -204,7 +204,7 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
 
-## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress)*
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a done)*
 
 Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
 user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
@@ -231,16 +231,20 @@ the existing patches, exports and quality checks keep working on the result.
 - **Acceptance:**
   - A domain split in two (9b) and smoothed as a group matches the smoothed single domain to
     the solver tolerance, so the interface leaves no trace.
-  - On the O-grid of a circle (core + 4, four valence-3 corners), the largest turn of a grid
-    line at an interface drops from the per-domain value to < 2°, and the minimum scaled
-    Jacobian does not decrease.
+  - On the O-grid of a circle (core + 4, four valence-3 corners), the largest *kink* of a grid
+    line at an interface (its turn there minus the mean turn at its neighbours, ignoring three
+    nodes next to irregular points, where lines must turn) drops from the per-domain value
+    (34°) to < 0.5°, and the minimum scaled Jacobian does not decrease. (Planned as "turn <
+    2°"; the turn includes the curvature of the lines, 2.8° per node on a 128-node circle.)
   - Sliding nodes stay on their curve within 1e-10·L.
   - Exported 1-to-1 interfaces stay valid (cgnscheck clean).
   - Undo is one step; journals replay.
 - **GUI:** create a group from the selected domains, set slide/fixed per boundary connector,
   live residual plot.
-- **Demo:** multi-element airfoil (main element + flap) in a multi-block topology, comparing
-  per-domain smoothing with group smoothing.
+- **Demo:** a cylinder in a channel (four domains, wall control, sliding channel walls) and
+  the circle O-grid, comparing per-domain smoothing with group smoothing (built:
+  `examples/10a_multiblock_smoothing.py`; the multi-element airfoil was replaced by these two,
+  which show interfaces, irregular points, walls and sliding in a small setup).
 
 ### 10b — Global multi-block smoothing, 3D
 - Groups of six-face blocks. Interface faces, interface edges and corners float. Irregular

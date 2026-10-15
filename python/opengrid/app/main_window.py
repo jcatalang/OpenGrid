@@ -226,6 +226,12 @@ class MainWindow(QMainWindow):
             self.extrude_selection,
             tip="Block by extruding the selected structured domain (edit the extrusion afterwards)",
         )
+        self.group_action = self._action(
+            "Smoothing group",
+            self.create_group_on_selection,
+            tip="Smooth the selected structured domains together as one grid (interfaces move); "
+            "selected connectors become walls",
+        )
         self.volume_action = self._action(
             "Volume from faces",
             self.create_volume_on_selection,
@@ -302,6 +308,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.chain_action)
         create_menu.addAction(self.domain_action)
         create_menu.addAction(self.unstructured_action)
+        create_menu.addAction(self.group_action)
         create_menu.addAction(self.block_action)
         create_menu.addAction(self.extrude_action)
         create_menu.addAction(self.volume_action)
@@ -491,7 +498,10 @@ class MainWindow(QMainWindow):
             self.property_panel.show_entity(None)
         self.delete_action.setEnabled(bool(ids))
         domains = self._selected_domains()
-        if len(domains) == 1:
+        groups = self._selected_of_kind("smoothing_group")
+        if len(groups) == 1 and not domains:
+            self.smoother_dock.set_domain(groups[0])
+        elif len(domains) == 1:
             self.smoother_dock.set_domain(domains[0])
         else:
             self.smoother_dock.set_domain(None)
@@ -668,6 +678,19 @@ class MainWindow(QMainWindow):
             self.set_selection([self.session.store.get(name).id])
         return name
 
+    def create_group_on_selection(self) -> str | None:
+        domains = self._selected_of_kind("domain")
+        if not domains:
+            self.statusBar().showMessage("Select the structured domains of the group", 5000)
+            return None
+        walls = self._selected_of_kind("connector")
+        name = self._run(lambda: self.session.create_smoothing_group(domains, walls=walls))
+        if name:
+            log.info("created %s from %d domains", name, len(domains))
+            self.set_selection([self.session.store.get(name).id])
+            self.run_smoother(name)
+        return name
+
     def create_unstructured_on_selection(self) -> str | None:
         connectors = self._selected_of_kind("connector")
         if not connectors:
@@ -694,10 +717,19 @@ class MainWindow(QMainWindow):
             log.warning("%s: %s", name, warning)
         if result.cancelled:
             log.info("%s: smoothing cancelled after %d iterations", name, result.iterations)
+        elif self.session.store.get(name).kind == "smoothing_group":
+            log.info("%s: %s", name, self.session.group_status(name))
         else:
             log.info("%s: %s", name, self.session.domain_status(name))
         if name in self.session.store:
-            self.scene.update_entities([self.session.store.get(name).id])
+            entity = self.session.store.get(name)
+            ids = [entity.id]
+            if entity.kind == "smoothing_group":
+                ids = list(entity.params["domains"])
+                cached = self.session.groups.result(entity.id)
+                if cached is not None:
+                    ids += sorted(cached.roles)  # moved interfaces and sliding connectors
+            self.scene.update_entities(ids)
         self.model_tree.populate(self.session)
         self.property_panel.refresh()
         self.refresh_quality()

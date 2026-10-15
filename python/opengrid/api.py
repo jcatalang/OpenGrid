@@ -32,6 +32,7 @@ from opengrid.io.cad import CadImport, cad_entities, check_options, read_cad_mod
 from opengrid.model.blocks import BlockEvaluator
 from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
+from opengrid.model.groups import GroupEvaluator, GroupResult
 from opengrid.model.store import Entity, Store
 from opengrid.model.unstructured import UnstructuredEvaluator, assemble_loops
 from opengrid.model.volumes import VolumeEvaluator
@@ -47,6 +48,8 @@ class Session:
         self.commands = CommandStack(self.store)
         self.connectors = ConnectorEvaluator(self.store)
         self.domains = DomainEvaluator(self.store, self.connectors)
+        self.groups = GroupEvaluator(self.store, self.connectors, self.domains)
+        self.domains.groups = self.groups
         self.unstructured = UnstructuredEvaluator(self.store, self.connectors)
         self.blocks = BlockEvaluator(self.store, self.domains)
         self.volumes = VolumeEvaluator(self)
@@ -422,6 +425,65 @@ class Session:
         """Run the domain's elliptic smoother (cached); ``progress`` is an optional
         ``opengrid._core.SmoothingProgress`` for monitoring and cancelling from another thread."""
         return self.domains.smooth(self._domain_id(name), progress)
+
+    # ------------------------------------------------------- smoothing groups
+    def create_smoothing_group(
+        self,
+        domains,
+        walls=(),
+        slide="auto",
+        name: str | None = None,
+        omega: float = 1.0,
+        max_iterations: int = 2000,
+        tolerance: float = 1e-6,
+        acceleration: int = 10,
+    ) -> str:
+        """Smooth planar structured ``domains`` together as one grid: interfaces
+        and block corners move, grid lines continue across interfaces, and irregular points
+        (3 or 5+ domains around a node) are relaxed too. ``walls``: connectors (or dicts
+        ``{"connector", "spacing" (None: the initial first-cell height), "decay",
+        "relaxation", "max_source"}``) with first-cell height and orthogonality control; they
+        stay fixed. ``slide``: boundary connectors whose nodes slide along their curves ("auto":
+        every boundary connector that is not a wall; () for none). Connectors used by domains
+        outside the group stay fixed. Members' own elliptic settings are ignored. The control
+        is Laplace plus the wall sources; ``acceleration`` is the Anderson depth (default 10;
+        0: plain relaxation)."""
+        params = {
+            "domains": domains,
+            "walls": walls,
+            "slide": slide,
+            "omega": omega,
+            "max_iterations": max_iterations,
+            "tolerance": tolerance,
+            "acceleration": acceleration,
+        }
+        return self._create("smoothing_group", params, name)
+
+    def smooth_group(self, name: str, progress=None) -> GroupResult:
+        """Run (or reuse) a smoothing group; ``progress``: optional
+        ``opengrid._core.SmoothingProgress``. Returns grids per member domain id, residuals,
+        node counts (regular, irregular, sliding, fixed) and the connector roles."""
+        return self.groups.smooth(self._group_id(name), progress)
+
+    def display_connector_nodes(self, name: str) -> ConnectorNodes:
+        """Connector nodes as drawn: where a smoothed group moved them (interfaces, sliding
+        boundaries), else the connector's own nodes."""
+        nodes = self.connector_nodes(name)
+        moved = self.groups.moved_connector_points(self.store.get(name).id)
+        if moved is None:
+            return nodes
+        arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(moved, axis=0), axis=1))])
+        return ConnectorNodes(moved, arc, list(nodes.warnings), nodes.max_stretching_ratio)
+
+    def group_status(self, name: str) -> str:
+        """One-line summary of a smoothing group."""
+        return self.groups.status(self._group_id(name))
+
+    def _group_id(self, name: str) -> int:
+        entity = self.store.get(name)
+        if entity.kind != "smoothing_group":
+            raise ValueError(f"{name!r} is a {entity.kind}, not a smoothing group")
+        return entity.id
 
     def domain_status(self, name: str) -> str:
         """One-line summary of a structured or unstructured domain."""
@@ -1166,6 +1228,8 @@ class Session:
         self.store = store
         self.connectors = ConnectorEvaluator(store)
         self.domains = DomainEvaluator(store, self.connectors)
+        self.groups = GroupEvaluator(store, self.connectors, self.domains)
+        self.domains.groups = self.groups
         self.unstructured = UnstructuredEvaluator(store, self.connectors)
         self.blocks = BlockEvaluator(store, self.domains)
         self.volumes = VolumeEvaluator(self)

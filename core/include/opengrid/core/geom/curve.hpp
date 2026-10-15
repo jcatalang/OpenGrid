@@ -48,11 +48,12 @@ class Curve {
   // Adaptive polyline approximation: chord deviation <= rel_tol * length(). Returns the
   // parameters of the vertices (including 0 and 1).
   [[nodiscard]] std::vector<double> tessellate(double rel_tol) const;
+  // Local projection: Newton on the stationarity condition from t, kept in [lo, hi].
+  [[nodiscard]] double polish_projection(const Vec3& p, double t, double lo, double hi) const;
 
  private:
   void build_length_table() const;
   [[nodiscard]] double speed(double t) const;
-  [[nodiscard]] double polish_projection(const Vec3& p, double t, double lo, double hi) const;
 
   mutable std::once_flag length_once_;
   mutable std::vector<double> segment_params_;  // breakpoints

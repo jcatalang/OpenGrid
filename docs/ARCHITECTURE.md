@@ -896,6 +896,51 @@ segment, so derivative jumps at knots never cost accuracy.
   (LGPL relinking requirement, §2). An AppImage was not made: the conda package covers Linux,
   and an AppImage of the same environment would need a Linux machine to build and test.
 
+### Multi-block smoothing groups (Phase 10a)
+- **Entity** `smoothing_group` (`model/groups.py`, section "domains" of the project): planar
+  structured `domains`, `walls` (connector, spacing — None: the initial first-cell height —,
+  decay, relaxation, max_source), `slide` ("auto" | connector tuple), `omega`,
+  `max_iterations`, `tolerance`, `acceleration` (default 10). A member's grid is its part of
+  the group result (`DomainEvaluator` asks `GroupEvaluator`); its own `elliptic` setting is
+  ignored. A domain in two groups is reported when evaluated. Topology edits keep groups up
+  to date (split parts join the group, joined / O-gridded domains are replaced, split or
+  joined connectors keep their wall / slide role).
+- **Connector roles** (from the uses inside and outside the group): used twice inside →
+  interface (nodes float; a cut used twice by one domain too, so O-type domains smooth
+  periodically across their cut); used by a domain outside → fixed ("outside"); once inside →
+  wall (fixed, wall control), sliding, or fixed. End nodes of non-interface connectors are
+  fixed.
+- **Global numbering:** member grid nodes are merged through the connector nodes they share
+  (union-find on boundary keys only, then NumPy for the compact ids in order of first
+  appearance), so shared nodes are one node and stay bitwise identical in all members.
+  Quads are passed counter-clockwise (domains with a negative signed area are flipped).
+- **Solver** (`structured/multiblock_elliptic.cpp`): node fans (incident quads chained
+  counter-clockwise) give each node with four quads a 3 x 3 stencil in a local frame (the
+  quad where the node is the first corner sets E/N, so a single block keeps its (i, j)
+  frame). Laplace equation in that frame plus Hilgenstock wall sources. Grid lines are traced
+  through regular free nodes across domains and solved implicitly; the lines are coloured
+  greedily so that lines of one colour never read each other's nodes (one block: the 4
+  colours of zebra ADI) and solved in parallel. Irregular nodes (3 or 5+ quads): mean of the
+  edge-neighbour average and the parallelogram completions. Sliding nodes: foot of the grid
+  line leaving the boundary, under-relaxed by 1/2, kept between their neighbours and within
+  half their initial intervals. Wall sources travel along the grid line leaving each wall
+  node (through regular nodes, across interfaces) with weight exp(-decay * lines), labels
+  transported from frame to frame. Anderson acceleration over positions and wall sources;
+  sliding nodes re-projected after each extrapolation (curve-chain projection
+  `CurveChain::project_param`, sampled then Newton on the piece's curve). Deterministic for
+  any thread count (tested).
+- **Diagnostics:** node counts per class, line count and colours, and the interface *kink*:
+  the turn of a grid line at an interface node minus the mean of its turns at the
+  neighbouring nodes (zero for a line crossing smoothly, whatever its curvature), ignoring
+  three nodes next to irregular points where lines must turn.
+- **Results:** a split domain smoothed as a group matches the unsplit domain to 1e-11 (with
+  wall control); the circle O-grid (core + 4): kink 34 → 0.38 degrees, min scaled Jacobian
+  0.71 → 0.86, the same grid from different initial core sizes; a 68k-node O-grid converges
+  in 456 iterations / 1.5 s (depth 10; 1367 at depth 5).
+- **GUI:** Create → Smoothing group (selected domains; selected connectors become walls),
+  property panel (domains, walls "connector [spacing]", slide, settings), the smoother dock
+  runs groups (live residual), connectors are drawn where the group moved them.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

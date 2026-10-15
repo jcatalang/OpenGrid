@@ -27,6 +27,7 @@ add_library(og_core STATIC
   src/topo/connector_nodes.cpp
   src/structured/tfi.cpp
   src/structured/elliptic.cpp
+  src/structured/multiblock_elliptic.cpp
   src/quality/quality2d.cpp
   src/quality/quality_tri.cpp
   src/quality/quality_cells.cpp

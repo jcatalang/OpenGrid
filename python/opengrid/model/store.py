@@ -38,6 +38,10 @@ def references(entity: Entity) -> set[int]:
         return refs
     if entity.kind == "volume":
         return set(entity.params["faces"])
+    if entity.kind == "smoothing_group":
+        from opengrid.model.groups import group_references
+
+        return group_references(entity.params)
     if entity.kind == "block":
         from opengrid.model.blocks import block_references
 

@@ -37,6 +37,10 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
         from opengrid.model.volumes import volume_script_params
 
         return volume_script_params(params, store)
+    if kind == "smoothing_group":
+        from opengrid.model.groups import group_script_params
+
+        return group_script_params(params, store)
     if kind == "block":
         from opengrid.model.blocks import block_script_params
 

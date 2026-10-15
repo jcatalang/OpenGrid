@@ -328,6 +328,49 @@ class ParseError(ValueError):
     pass
 
 
+def format_group_walls(walls, store) -> str:
+    lines = []
+    for wall in walls:
+        line = store.get(wall["connector"]).name
+        if wall["spacing"] is not None:
+            line += f" {format_number(wall['spacing'])}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def parse_group_walls(text: str) -> tuple:
+    """'connector [spacing]' per line -> wall dicts (decay etc. at their defaults)."""
+    walls = []
+    for raw in text.splitlines():
+        parts = raw.split()
+        if not parts:
+            continue
+        spacing = None
+        if len(parts) == 2:
+            spacing = parse_numbers(parts[1], f"walls: {parts[0]}")[0]
+        elif len(parts) > 2:
+            raise ParseError(f"walls: expected 'connector [spacing]', got {raw.strip()!r}")
+        walls.append({"connector": parts[0], "spacing": spacing})
+    return tuple(walls)
+
+
+def format_slide(slide, store) -> str:
+    if slide == "auto":
+        return "auto"
+    if not slide:
+        return "none"
+    return ", ".join(store.get(c).name for c in slide)
+
+
+def parse_slide(text: str):
+    text = text.strip()
+    if text in ("", "auto"):
+        return "auto"
+    if text == "none":
+        return ()
+    return tuple(part.strip() for part in text.split(",") if part.strip())
+
+
 def format_optional(value) -> str:
     if value is None:
         return ""
@@ -872,6 +915,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "smoothing_group":
+            self._smoothing_group_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         if entity.kind in ("patch", "zone"):
             self._group_rows(entity)
             self.apply_button.setEnabled(True)
@@ -947,6 +995,49 @@ class PropertyPanel(QWidget):
         editor = ExtrusionEditor(params["extrusion"])
         self._form.addRow("extrusion", editor)
         self._editors["extrusion"] = ("extrusion", editor)
+
+    def _smoothing_group_rows(self, entity) -> None:
+        params = entity.params
+        store = self.session.store
+        try:
+            text = self.session.group_status(entity.name)
+        except ValidationError as error:
+            text = str(error)
+        status = QLabel(text)
+        status.setWordWrap(True)
+        self._form.addRow("status", status)
+        domains = QPlainTextEdit("\n".join(store.get(d).name for d in params["domains"]))
+        domains.setPlaceholderText("one structured domain per line")
+        domains.setMinimumHeight(60)
+        self._form.addRow("domains", domains)
+        self._editors["domains"] = ("names", domains)
+        walls = QPlainTextEdit(format_group_walls(params["walls"], store))
+        walls.setPlaceholderText("connector [spacing] per line (no spacing: keep the initial)")
+        walls.setMinimumHeight(50)
+        self._form.addRow("walls", walls)
+        self._editors["walls"] = ("group_walls", walls)
+        slide = QLineEdit(format_slide(params["slide"], store))
+        slide.setToolTip("auto (every non-wall boundary connector), none, or connector names")
+        self._form.addRow("slide", slide)
+        self._editors["slide"] = ("slide", slide)
+        for field in ("omega", "tolerance"):
+            editor = QLineEdit(format_number(params[field]))
+            self._form.addRow(field, editor)
+            self._editors[field] = ("number", editor)
+        iterations = QSpinBox()
+        iterations.setRange(1, 1_000_000)
+        iterations.setValue(params["max_iterations"])
+        self._form.addRow("max iterations", iterations)
+        self._editors["max_iterations"] = ("spin", iterations)
+        acceleration = QSpinBox()
+        acceleration.setRange(0, MAX_ACCELERATION)
+        acceleration.setValue(params["acceleration"])
+        acceleration.setToolTip("Anderson acceleration depth (0: plain relaxation)")
+        self._form.addRow("acceleration", acceleration)
+        self._editors["acceleration"] = ("spin", acceleration)
+        self.smooth_button = QPushButton("Run smoother")
+        self.smooth_button.clicked.connect(lambda: self.smooth_requested.emit(entity.name))
+        self._form.addRow("", self.smooth_button)
 
     def _group_rows(self, entity) -> None:
         key = "domain"
@@ -1102,9 +1193,28 @@ class PropertyPanel(QWidget):
             value = self._read_editor(field, kind, editor)
             if value != entity.params[field]:
                 changes[field] = value
+        if entity.kind == "smoothing_group" and changes:
+            # Names in the editors vs ids in the model: compare canonical parameters.
+            from opengrid.model.groups import normalize_group
+
+            merged = dict(entity.params)
+            merged.update(changes)
+            try:
+                canonical = normalize_group(merged, self.session.store, entity.name)
+            except ValidationError:
+                return new_name, changes  # reported by apply
+            changes = {k: v for k, v in changes.items() if canonical[k] != entity.params[k]}
         return new_name, changes
 
     def _read_editor(self, field: str, kind: str, editor: QWidget):
+        if kind == "names":
+            return tuple(line.strip() for line in editor.toPlainText().splitlines() if line.strip())
+        if kind == "group_walls":
+            return parse_group_walls(editor.toPlainText())
+        if kind == "slide":
+            return parse_slide(editor.text())
+        if kind == "spin":
+            return editor.value()
         if kind == "patch_type":
             return editor.currentText()
         if kind.startswith("members:"):

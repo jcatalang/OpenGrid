@@ -89,8 +89,6 @@ history). Phase tags show where each item came from.
 - **Hyperbolic extrusion** [7b]:
   - An explicit marching variant, not the implicit Chan–Steger scheme.
   - Concave regions rely on dissipation; inverted layers are reported, not repaired.
-- **3D elliptic smoothing** [7b]: point SOR only, so it is slow on large blocks (about 850
-  iterations for 18 000 cells).
 - **Surface smoothing** [7b]: no wall control.
 
 ## Unstructured 3D

@@ -203,3 +203,158 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
   removed (identical meshes).
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
+
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress)*
+
+Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
+user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
+whole grid; templates and automatic topology cover common cases. Each sub-phase builds on the
+one before. Everything stays a Command (undo, journal), deterministic for any thread count, and
+the existing patches, exports and quality checks keep working on the result.
+
+### 10a — Global multi-block smoothing, 2D
+- A `smoothing group` entity: a set of structured domains smoothed together. Domains in a group
+  are evaluated by the group: TFI from their connectors first (the initial guess), then one
+  elliptic smoothing of all domains together. The connectors' nodes on interfaces and at
+  corners are only that initial guess.
+- **Interfaces float:** the domains' nodes are merged into one global node array (connectivity
+  from `model/topology.py`). A node on an interface is relaxed with a stencil that continues
+  across into the neighbour (ghost rows with the index transform), so grid lines stay smooth
+  across the interface instead of turning there.
+- **Irregular points:** corners where 3 or 5+ domains meet have no (i, j) stencil. They move by
+  a length- and angle-weighted average of their neighbours (Spekreijse-type treatment).
+- **Boundary nodes slide** along their database curve (curve projection, warm-started), under
+  an orthogonality condition (Neumann slip), or stay fixed. This is chosen per connector, and
+  wall control (first-cell height and orthogonality) keeps working on walls.
+- **Solver:** the zebra line relaxation and Anderson acceleration from 9c, applied to the
+  global state. Results are bit-identical on 1–10 threads.
+- **Acceptance:**
+  - A domain split in two (9b) and smoothed as a group matches the smoothed single domain to
+    the solver tolerance, so the interface leaves no trace.
+  - On the O-grid of a circle (core + 4, four valence-3 corners), the largest turn of a grid
+    line at an interface drops from the per-domain value to < 2°, and the minimum scaled
+    Jacobian does not decrease.
+  - Sliding nodes stay on their curve within 1e-10·L.
+  - Exported 1-to-1 interfaces stay valid (cgnscheck clean).
+  - Undo is one step; journals replay.
+- **GUI:** create a group from the selected domains, set slide/fixed per boundary connector,
+  live residual plot.
+- **Demo:** multi-element airfoil (main element + flap) in a multi-block topology, comparing
+  per-domain smoothing with group smoothing.
+
+### 10b — Global multi-block smoothing, 3D
+- Groups of six-face blocks. Interface faces, interface edges and corners float. Irregular
+  edges (3 or 5+ blocks around an edge) and irregular vertices get the averaged update from
+  10a, extended to 3D.
+- **Boundary nodes slide:** boundary faces slide on their surface (surface projection
+  warm-started from the previous (u, v)), and boundary edges slide on their curves. Wall
+  control works on any boundary face, as in 7b.
+- **Acceptance:**
+  - A split block smoothed as a group matches the smoothed single block.
+  - On the ball O-grid (core + 6 shells), the largest turn of a grid line at an interface is
+    < 3° and the min scaled Jacobian is ≥ the 9b value (0.58).
+  - Sliding nodes stay on the sphere within 1e-9·R.
+  - A 1M-cell group converges in < 10 s on the M1 (Release); results are identical for any
+    thread count.
+- **Demo:** sphere in a box and cylinder in a channel, all-hexahedral, CGNS multi-block.
+
+### 10c — Live mouse editing and freehand drawing
+- **Drag handles** (Select tool; a drag on empty space still pans) for:
+  - point entities;
+  - the defining points of lines, arcs, polylines and splines;
+  - the control points of NURBS curves (control polygon shown; weights in the property
+    panel);
+  - connector break points.
+- **Live updates while dragging:** the dependent connectors, domains, blocks and groups
+  regenerate as the handle moves.
+  - During the drag: a fast preview (TFI only, or the last converged smoothing as the initial
+    guess with a few sweeps), throttled to the frame rate.
+  - On release: full regeneration (smoothing to tolerance). One drag is one undo step, and the
+    journal records the final position only.
+  - Grid nodes themselves are not dragged. They are derived from the geometry (and from 10d
+    sketch vertices), so a dragged node would be overwritten by the next regeneration.
+- **Freehand drawing:** a Freehand tool records the pointer stroke and fits a cubic NURBS curve
+  to it.
+  - Fit: least squares with chord-length parameters; knots are added where the error exceeds
+    the tolerance (default 0.5 % of the stroke length, set in the tool bar).
+  - Corners are detected from the turning angle and kept as C0 breaks (optional).
+  - Strokes start and end with snapping to existing points and curve ends.
+  - A NURBS tool also creates a curve by clicking its control points.
+- **Blocks from curves:**
+  - "Domain from curves": select 4 curves (or one closed curve, split at its four sharpest
+    corners), and connectors (dimension from the average spacing) plus one structured domain
+    are created in one undo step. Three-sided selections are reported, with the option of an
+    unstructured domain.
+  - "Domains from curve network": strokes that cross are split at their intersections (curve
+    intersection by subdivision, then Newton). The faces of the resulting planar network
+    become domains: four-sided faces structured, the others reported or unstructured on
+    request. Dimensions propagate across shared edges and conflicts are reported. The domains
+    can go straight into a 10a smoothing group.
+  - In 3D: "Block from curves" builds a six-face block from 12 edge curves (or 4 base curves
+    plus an extrusion).
+- **Acceptance:**
+  - Dragging a spline point updates the dependent structured domain at ≥ 10 frames/s for a
+    200×100 grid (preview mode, measured in an offscreen test with simulated drag events).
+  - A drag undoes in one step and the journal replays to the same grid.
+  - Freehand: synthetic strokes (sampled circle, NACA section, S-curve with noise) are fitted
+    within tolerance with ≤ 12 control points per quarter circle, and corners at ≥ 60° turns
+    are found.
+  - Curve network: a hand-drawn 3×2 lattice of crossing strokes gives 6 structured domains with
+    conforming 1-to-1 interfaces (cgnscheck clean after export), and a network containing a
+    five-sided face reports it by name.
+  - Trackpad and mouse dragging checked by hand *(manual)*.
+- **Demo:** an airfoil-like body and its block layout drawn freehand, turned into domains,
+  group-smoothed (10a), with the drag recorded as before/after screenshots.
+
+### 10d — Sketch topology (floating wireframe)
+- A `sketch` entity: a coarse block lattice defined by vertices (points) and blocks (4 vertex
+  ids in 2D, 8 in 3D). It is drawn loosely around the geometry, as a wireframe.
+- **Dimensions:** set on one edge of each edge family and propagated through the lattice.
+  Conflicting dimensions are reported by name.
+- **Association with geometry:** sketch edges are assigned to database curves and sketch faces
+  to surfaces. An unassigned vertex or edge within a tolerance of geometry is offered for
+  assignment (reported, never snapped silently).
+- **Generation:** straight-edged TFI from the lattice, assigned nodes projected onto their
+  geometry, then the 10a/10b group smoothing with sliding.
+- **Output:** ordinary connectors, domains and blocks (explicit distributions) that the sketch
+  owns and regenerates. Patches, exports, quality and the topology helpers work on them
+  unchanged. Editing them directly is refused, with a message pointing to the sketch.
+- **Acceptance:**
+  - Moving sketch vertices by up to 20 % of the local block size changes the final grid by
+    < 1 % of the local spacing. The result depends on the topology, not on where the sketch
+    was drawn.
+  - 2D: an airfoil in a C-topology sketch gives a min scaled Jacobian ≥ 0.5. 3D: a sphere in a
+    box gives ≥ 0.5.
+  - Projected nodes lie on their geometry within 1e-9·L.
+  - Undo is one step per edit; journals replay; the `.ogp` round-trips.
+- **GUI:** place and drag sketch vertices in the viewport (2D; 3D with axis handles), assign
+  geometry from the selection, regenerate with live progress.
+- **Demo:** a 2D airfoil and a 3D wing stub, each sketched by hand around CAD geometry imported
+  in 9a.
+
+### 10e — Templates and automatic topology
+- **Templates:** parametrised generators that create a 10d sketch from the selected geometry:
+  - 2D: O-grid and C-grid around a closed body, H-grid channel, body in channel.
+  - 3D: pipe / duct (butterfly), sphere in box, cylinder in channel, bump channel, wing in box
+    (C-H).
+- **Automatic 2D topology:** a cross-field (frame-field) decomposition of a multiply connected
+  planar region into four-sided blocks. Separatrices are traced from the field's singularities
+  and converted into a sketch, which the user can edit afterwards.
+- **No automatic 3D topology:** that is open research. 3D relies on the templates and on
+  sweeping or extruding 2D sketches.
+- **Acceptance:**
+  - Every template meshes its golden geometry with min scaled Jacobian ≥ 0.4 and no
+    user-placed vertices.
+  - The 2D cross-field topology produces a valid all-quad block decomposition (every block
+    four-sided, conforming) for: an airfoil in a box, a two-element airfoil, a plate with three
+    holes, and the 9a bracket section.
+  - Singularity counts satisfy the index theorem (tested).
+- **GUI:** Topology → Templates menu, and an Automatic topology action (2D).
+- **Demo:** each template on its geometry, and automatic topology for the two-element airfoil
+  and the plate with holes.
+
+References: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
+ch. VI–VII (multiblock); W. A. Spekreijse, J. Comput. Phys. 118 (1995) 38–61 (irregular points);
+P. R. Eiseman, "Multiblock grid generation with automatic zoning", NASA CP-3291 (1995);
+N. Kowalski, F. Ledoux, P. Frey, IMR 2012 (cross fields for block decomposition); D. Bommes
+et al., Computer Graphics Forum 32 (2013) 51–76 (quad layouts).

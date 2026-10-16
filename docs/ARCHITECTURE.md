@@ -1121,6 +1121,32 @@ segment, so derivative jumps at knots never cost accuracy.
   must have four (else reported by position). The sketch's interior edges are assigned to the
   separatrix polylines.
 
+### Wall layers (Phase 11a)
+- `structured/wall_layers.cpp` (`march_wall_layers`), called by both group smoothers before
+  their grid lines are built: on the cell complex (quads, or hexahedra), lines start at every
+  wall node with `layers` > 0 towards each free non-wall edge neighbour and continue through a
+  node to the one edge neighbour sharing no cell with the arriving edge (frame-free, so it works
+  across blocks, at irregular wall nodes such as a sharp trailing edge, at internal walls and on
+  symmetry planes). Layer k is placed from layer k - 1: direction = normalised sum of the unit
+  normals of the facets at the line's node that lie in layer k - 1 (one per cell around the
+  line's edge), blended 1/10 with the neighbouring lines' directions, projected into a symmetry
+  plane where the node lies on one; height spacing * growth^(k-1). Then every cell made of wall
+  and layer nodes must have positive corner Jacobians (else: an exception naming the layer and
+  position), and the free nodes beyond each line are shifted by the last layer's displacement,
+  decaying linearly in initial arc length to the line's end (the starting grid).
+- In the smoothers the layer nodes become node class `Layer` (4; kept fixed); a wall with
+  layers gets no wall node of its own; instead each line's last layer node carries the wall
+  control for the cell beyond (height spacing * growth^N, normal along the line), so the
+  Hilgenstock feedback and its reach work unchanged. Python: wall dicts gain `layers` (default
+  0) and `growth` (1.2) in groups and sketches; templates take `layers` / `growth` for all
+  their walls (a C-grid's wake cut then takes the wall spacing: a 2x step of the layer front at
+  the trailing edge made the iteration diverge); the GUI wall text is
+  `name [spacing [layers [growth]]]`.
+- Anderson guard, extended: a non-finite residual, or 200 iterations without a 10 % drop of the
+  residual, restarts from the best iterate like a blow-up (after two restarts the plain
+  iteration continues). The plain iteration converged on layered grids where the mixing
+  stalled near 1e-2 and then jumped to NaN in one step.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

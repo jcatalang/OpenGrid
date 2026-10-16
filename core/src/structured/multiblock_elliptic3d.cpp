@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include "opengrid/core/structured/wall_layers.hpp"
 #include "opengrid/core/util/anderson.hpp"
 #include "opengrid/core/util/parallel.hpp"
 
@@ -416,6 +417,76 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     size = std::max(size, distance(p, x.front()));
   }
 
+  // Symmetry-plane nodes (flagged face nodes sliding on a plane): interior nodes for the
+  // smoothing, so wall control reaches them too.
+  std::vector<std::uint8_t> symmetric(n, 0);
+  for (std::size_t g = 0; g < n; ++g) {
+    if (!is(static_cast<std::int64_t>(g), MultiblockNode::Sliding) ||
+        topo[g].shape != Shape::Face || slide_of[g] < 0) {
+      continue;
+    }
+    const Multiblock3DSlide& slide = input.slides[static_cast<std::size_t>(slide_of[g])];
+    if (g < input.symmetric.size() && input.symmetric[g] != 0 &&
+        slide.target == SlideTarget::Surface &&
+        dynamic_cast<const PlaneSurface*>(input.surfaces[slide.index].get()) != nullptr) {
+      symmetric[g] = 1;
+    }
+  }
+  auto is_symmetric = [&](std::int64_t g) {
+    return g >= 0 && symmetric[static_cast<std::size_t>(g)] != 0;
+  };
+
+  // ------------------------------------------------------------------ wall layers
+  std::vector<WallLayerLine> layer_lines;
+  {
+    WallLayerInput layers;
+    layers.dim = 3;
+    layers.movable.assign(n, 0);
+    layers.on_wall.assign(n, 0);
+    for (std::size_t g = 0; g < n; ++g) {
+      if (is(static_cast<std::int64_t>(g), MultiblockNode::Regular) || symmetric[g] != 0) {
+        layers.movable[g] = 1;
+      }
+    }
+    for (std::size_t w = 0; w < input.walls.size(); ++w) {
+      const MultiblockWall& wall = input.walls[w];
+      if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
+        throw std::invalid_argument("multiblock 3D: wall node out of range");
+      }
+      layers.on_wall[static_cast<std::size_t>(wall.node)] = 1;
+      if (wall.layers > 0) {
+        layers.walls.push_back({wall.node, wall.spacing, wall.layers, wall.growth, w});
+      }
+    }
+    if (!layers.walls.empty()) {
+      layers.cells = input.hexes;
+      // Symmetry-plane nodes stay in their plane.
+      layers.plane.assign(n, -1);
+      for (std::size_t g = 0; g < n; ++g) {
+        if (symmetric[g] == 0) {
+          continue;
+        }
+        const Multiblock3DSlide& slide = input.slides[static_cast<std::size_t>(slide_of[g])];
+        const Surface& surface = *input.surfaces[slide.index];
+        const SurfaceProjection foot = surface.project(x[g]);
+        const Vec3 nrm = cross(surface.du(foot.u, foot.v), surface.dv(foot.u, foot.v));
+        const double length = norm(nrm);
+        if (length > 0.0) {
+          layers.plane[g] = static_cast<std::int32_t>(layers.planes.size());
+          layers.planes.push_back({x[g], (1.0 / length) * nrm});
+        }
+      }
+      WallLayerResult marched = march_wall_layers(layers, x);
+      for (const WallLayerLine& line : marched.lines) {
+        for (const std::int64_t g : line.nodes) {
+          cls[static_cast<std::size_t>(g)] = static_cast<std::uint8_t>(MultiblockNode::Layer);
+          symmetric[static_cast<std::size_t>(g)] = 0;
+        }
+      }
+      layer_lines = std::move(marched.lines);
+    }
+  }
+
   // ------------------------------------------------------------------- grid lines
   std::vector<std::int64_t> slot(3 * n, -1);  // line through (node, axis); -2: opening node
   std::vector<std::int64_t> line_nodes;
@@ -553,32 +624,14 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     std::array<int, 2> tangent;  // positive directions of the two other axes
   };
   std::vector<WallNode> walls;
-  // Symmetry-plane nodes (flagged face nodes sliding on a plane): interior nodes for the
-  // smoothing, so wall control reaches them too.
-  std::vector<std::uint8_t> symmetric(n, 0);
-  for (std::size_t g = 0; g < n; ++g) {
-    if (!is(static_cast<std::int64_t>(g), MultiblockNode::Sliding) ||
-        topo[g].shape != Shape::Face || slide_of[g] < 0) {
-      continue;
-    }
-    const Multiblock3DSlide& slide = input.slides[static_cast<std::size_t>(slide_of[g])];
-    if (g < input.symmetric.size() && input.symmetric[g] != 0 &&
-        slide.target == SlideTarget::Surface &&
-        dynamic_cast<const PlaneSurface*>(input.surfaces[slide.index].get()) != nullptr) {
-      symmetric[g] = 1;
-    }
-  }
-  auto is_symmetric = [&](std::int64_t g) {
-    return g >= 0 && symmetric[static_cast<std::size_t>(g)] != 0;
-  };
   std::vector<std::uint8_t> on_wall(n, 0);
   for (const MultiblockWall& wall : input.walls) {
-    if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
-      throw std::invalid_argument("multiblock 3D: wall node out of range");
-    }
     on_wall[static_cast<std::size_t>(wall.node)] = 1;
   }
   for (const MultiblockWall& wall : input.walls) {
+    if (wall.layers > 0) {
+      continue;  // controlled at its last layer, below
+    }
     const auto g = static_cast<std::size_t>(wall.node);
     const NodeTopo& t = topo[g];
     // A wall node on the boundary controls the grid line leaving it; a fixed regular node
@@ -626,6 +679,28 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       }
       walls.push_back({g, spacing, wall.decay, wall.relaxation, wall.max_source, d, tangent});
     }
+  }
+  // Walls with layers: the first cell beyond the last layer.
+  for (const WallLayerLine& line : layer_lines) {
+    const MultiblockWall& wall = input.walls[line.source];
+    const auto g = static_cast<std::size_t>(line.nodes.back());
+    std::int64_t prev = line.base;
+    if (line.nodes.size() >= 2) {
+      prev = line.nodes[line.nodes.size() - 2];
+    }
+    const int back = dir_to(topo[g].nb, prev);
+    if (back < 0) {
+      continue;
+    }
+    const int d = dir_opposite(back);
+    const std::int64_t next = nb_dir(g, d);
+    if (!is(next, MultiblockNode::Regular) && !is_symmetric(next)) {
+      continue;
+    }
+    const int axis = dir_axis(d);
+    const std::array<int, 2> tangent = {dir_of((axis + 1) % 3, 1), dir_of((axis + 2) % 3, 1)};
+    walls.push_back(
+        {g, line.next_spacing, wall.decay, wall.relaxation, wall.max_source, d, tangent});
   }
   std::vector<std::vector<WallReach>> reach(n);
   for (std::size_t w = 0; w < walls.size(); ++w) {
@@ -1269,6 +1344,16 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       sum += value;
     }
     const double residual = std::sqrt(sum / updates);
+    if (!std::isfinite(residual) && options.acceleration > 0) {
+      // An extrapolation blew up within one step: back to the best iterate.
+      pack(after);
+      if (anderson.guarded_step(before, after, residual)) {
+        unpack(after);
+        reproject();
+        result.iterations = iteration + 1;
+        continue;
+      }
+    }
     if (!std::isfinite(residual)) {
       result.warnings.emplace_back("multiblock 3D: iteration diverged; returning the initial grid");
       result.xyz = input.xyz;

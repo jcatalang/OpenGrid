@@ -15,9 +15,11 @@
 // §5; it can diverge where the plain iteration contracts, e.g. elliptic smoothing with stiff
 // wall sources at wall spacings of 1e-5 body lengths). The history restarts when the residual
 // grows above 4x its best value since the last restart; the iterate of lowest residual is
-// kept, and when the residual exceeds kBlowup times that lowest value the iteration restarts
-// from it with an empty history. After kMaxRestarts such restarts acceleration is switched off
-// and the plain iteration continues, which converges where its map contracts.
+// kept, and when the residual exceeds kBlowup times that lowest value, is not finite, or has
+// not fallen by 10 % for kStall steps (mixing that stagnates while the plain iteration would
+// converge, e.g. with fixed wall layers), the iteration restarts from it with an empty history.
+// After kMaxRestarts such restarts acceleration is switched off and the plain iteration
+// continues, which converges where its map contracts.
 #pragma once
 
 #include <cstddef>
@@ -53,6 +55,7 @@ class AndersonAccelerator {
   [[nodiscard]] std::string restart_note() const;
 
   static constexpr double kBlowup = 100.0;
+  static constexpr int kStall = 200;
   static constexpr int kMaxRestarts = 2;
 
  private:
@@ -72,6 +75,8 @@ class AndersonAccelerator {
   bool started_ = false;  // a residual has been seen
   double best_ = 0.0;     // best residual since the last history restart
   double lowest_ = 0.0;   // lowest residual of the run
+  double mark_ = 0.0;     // residual of the last 10 % improvement
+  int since_mark_ = 0;
   std::vector<double> best_state_;
   int restarts_ = 0;
   bool enabled_ = true;

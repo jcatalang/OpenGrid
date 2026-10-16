@@ -250,7 +250,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::shared_ptr<og::Surface>>& surfaces,
          const std::vector<std::shared_ptr<og::CurveChain>>& chains,
          const std::vector<std::tuple<std::int64_t, std::string, std::size_t>>& slides,
-         const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
+         const std::vector<std::tuple<std::int64_t, double, double, double, double, int, double>>&
+             walls,
          double omega, int max_iterations, double tolerance, int acceleration,
          og::SmoothingProgress* progress, double slide_limit, double absolute_tolerance,
          const std::optional<nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig,
@@ -284,8 +285,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
           }
           input.slides.push_back(slide);
         }
-        for (const auto& [node, spacing, decay, relaxation, max_source] : walls) {
-          input.walls.push_back({node, spacing, decay, relaxation, max_source});
+        for (const auto& [node, spacing, decay, relaxation, max_source, layers, growth] : walls) {
+          input.walls.push_back({node, spacing, decay, relaxation, max_source, layers, growth});
         }
         og::MultiblockOptions options;
         options.omega = omega;
@@ -324,9 +325,10 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("symmetric") = nb::none(),
       "Elliptic smoothing of a multi-block hexahedral grid as one grid (GIL released). hexes: "
       "corner c = i + 2 j + 4 k, right-handed; slides: (node, 'surface' | 'chain', index); "
-      "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source); symmetric: per "
-      "node, 1 on symmetry planes. Returns (points, "
-      "node_class (0 fixed, 1 regular, 2 irregular, 3 sliding), residuals, iterations, "
+      "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source, layers, growth); "
+      "symmetric: per node, 1 on symmetry planes. Returns (points, "
+      "node_class (0 fixed, 1 regular, 2 irregular, 3 sliding, 4 wall layer), residuals, "
+      "iterations, "
       "converged, cancelled, lines, colours, warnings).");
 
   m.def(

@@ -76,6 +76,8 @@ DEFAULT_GROUP_WALL3D = {
     "decay": 0.1,
     "relaxation": 0.1,
     "max_source": 100.0,
+    "layers": 0,
+    "growth": 1.2,
 }
 DEFAULT_GROUP_WALL = {
     "connector": None,
@@ -83,8 +85,10 @@ DEFAULT_GROUP_WALL = {
     "decay": 0.1,
     "relaxation": 0.1,
     "max_source": 100.0,
+    "layers": 0,
+    "growth": 1.2,
 }
-NODE_CLASSES = ("fixed", "regular", "irregular", "sliding")
+NODE_CLASSES = ("fixed", "regular", "irregular", "sliding", "layer")
 JOINTS = ("fixed", "slide")
 
 
@@ -101,6 +105,23 @@ def _number(value, label, issues, positive=False, optional=False):
         issues.append(Issue(label, f"must be positive, got {value!r}"))
         return None
     return float(value)
+
+
+def _count(value, label, issues):
+    if hasattr(value, "item") and not isinstance(value, int):
+        value = value.item()
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        issues.append(Issue(label, f"expected a whole number >= 0, got {value!r}"))
+        return 0
+    return int(value)
+
+
+def _growth(value, label, issues):
+    growth = _number(value, label, issues)
+    if growth is not None and growth < 1.0:
+        issues.append(Issue(label, f"must be at least 1, got {value!r}"))
+        return None
+    return growth
 
 
 def _ref(store, raw, kind, label, issues):
@@ -213,6 +234,8 @@ def normalize_group(raw: dict, store, where: str) -> dict:
                 "max_source": _number(
                     wall["max_source"], f"{label}.max_source", issues, positive=True
                 ),
+                "layers": _count(wall["layers"], f"{label}.layers", issues),
+                "growth": _growth(wall["growth"], f"{label}.growth", issues),
             }
         )
     slide = merged["slide"]
@@ -533,7 +556,17 @@ def build_layout(store, connectors, grids: dict[int, np.ndarray], params: dict) 
                 if node in wall_nodes:
                     continue
                 wall_nodes.add(node)
-                walls.append((node, spacing, w["decay"], w["relaxation"], w["max_source"]))
+                walls.append(
+                    (
+                        node,
+                        spacing,
+                        w["decay"],
+                        w["relaxation"],
+                        w["max_source"],
+                        w.get("layers", 0),
+                        w.get("growth", 1.2),
+                    )
+                )
     if params.get("joints") == "slide":
         slides = _slide_joints(store, roles, node_of, fixed, chains, slides)
     # A node that both slides and is fixed (end of another connector) stays fixed.
@@ -855,7 +888,7 @@ class GroupEvaluator:
             colours,
             warnings,
         ) = raw
-        counts = np.bincount(np.asarray(classes, dtype=np.int64), minlength=4)
+        counts = np.bincount(np.asarray(classes, dtype=np.int64), minlength=len(NODE_CLASSES))
         grids = {d: points[layout.ids[d]] for d in params["domains"]}
         # Singular: irregular points, and fixed points where three or more member domains meet
         # (e.g. a C-grid's trailing edge); grid lines must turn there.
@@ -976,10 +1009,13 @@ class GroupEvaluator:
         if cached is None:
             return f"{count} {unit}, smoothing pending (showing TFI)"
         nodes = cached.node_counts
+        layers = ""
+        if nodes.get("layer", 0) > 0:
+            layers = f", {nodes['layer']} in wall layers"
         text = (
             f"{count} {unit}, {sum(nodes.values())} nodes ({nodes['regular']} regular, "
-            f"{nodes['irregular']} irregular, {nodes['sliding']} sliding, {nodes['fixed']} fixed), "
-            f"interface kink {cached.max_kink:.2g} deg"
+            f"{nodes['irregular']} irregular, {nodes['sliding']} sliding, {nodes['fixed']} fixed"
+            f"{layers}), interface kink {cached.max_kink:.2g} deg"
         )
         if cached.converged:
             return f"{text}, converged in {cached.iterations} iterations"

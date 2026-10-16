@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from opengrid.model.connectors import CHAIN_TOLERANCE
+from opengrid.model.groups import _count, _growth
 from opengrid.validation import Issue, ValidationError
 
 KIND = "sketch"
@@ -76,7 +77,15 @@ DEFAULT_SKETCH = {
     "extrude": None,
     "outputs": (),
 }
-DEFAULT_SKETCH_WALL = {"spacing": None, "decay": 0.1, "relaxation": 0.1, "max_source": 100.0}
+DEFAULT_SKETCH_WALL = {
+    "spacing": None,
+    "decay": 0.1,
+    "relaxation": 0.1,
+    "max_source": 100.0,
+    "layers": 0,
+    "growth": 1.2,
+}
+WALL_KEYS = ("spacing", "decay", "relaxation", "max_source", "layers", "growth")
 # Hexahedron (VTK order): edges and faces by local vertex indices.
 HEX_EDGES = (
     (0, 1),
@@ -308,7 +317,9 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
         ref_key = "edge"
         if lattice.dim == 3:
             ref_key = "face"
-        if key is not None:
+        if key is not None and isinstance(item, dict):
+            item = {ref_key: key, **item}  # {edge: {"spacing": h, "layers": n, ...}}
+        elif key is not None:
             item = {ref_key: key, "spacing": item}
         if not isinstance(item, dict) or ref_key not in item:
             issues.append(Issue(label, f"expected {{'{ref_key}': ..., 'spacing': h}}"))
@@ -332,6 +343,8 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
             "decay": _number(wall["decay"], f"{label}.decay", issues, True),
             "relaxation": _number(wall["relaxation"], f"{label}.relaxation", issues, True),
             "max_source": _number(wall["max_source"], f"{label}.max_source", issues, True),
+            "layers": _count(wall["layers"], f"{label}.layers", issues),
+            "growth": _growth(wall["growth"], f"{label}.growth", issues),
         }
     fixed = set()
     for index, item in enumerate(merged["fixed"]):
@@ -974,7 +987,7 @@ def plan(
         for wall in params["walls"]:
             a, b = wall["edge"]
             if walls_on:
-                entry = {k: wall[k] for k in ("spacing", "decay", "relaxation", "max_source")}
+                entry = {k: wall[k] for k in WALL_KEYS}
                 entry["connector"] = f"@c{a}-{b}"
                 walls.append(entry)
             elif wall["edge"] not in lattice.boundary_edges:
@@ -1021,7 +1034,7 @@ def plan(
         pinned = list(params["pinned"])
         for wall in params["walls"]:
             if walls_on:
-                entry = {k: wall[k] for k in ("spacing", "decay", "relaxation", "max_source")}
+                entry = {k: wall[k] for k in WALL_KEYS}
                 entry["domain"] = f"@{face_role[wall['face']]}"
                 walls.append(entry)
             elif wall["face"] not in lattice.boundary_faces:

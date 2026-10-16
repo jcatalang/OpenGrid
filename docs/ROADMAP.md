@@ -375,3 +375,52 @@ ch. VI–VII (multiblock); W. A. Spekreijse, J. Comput. Phys. 118 (1995) 38–61
 P. R. Eiseman, "Multiblock grid generation with automatic zoning", NASA CP-3291 (1995);
 N. Kowalski, F. Ledoux, P. Frey, IMR 2012 (cross fields for block decomposition); D. Bommes
 et al., Computer Graphics Forum 32 (2013) 51–76 (quad layouts).
+
+## Phase 11 — CFD boundary layers, performance, GPU, high-order meshes *(requested 2026-10-16, beyond SPEC.md)*
+
+Goal: grids for wall-resolved CFD (grid lines normal to walls through the boundary layer at
+y+ ~ 1), faster smoothing (CPU first, then the GPU where it pays), and high-order elements for
+continuous and discontinuous Galerkin solvers. Same rules as before: Commands, determinism
+(per backend for the GPU), validators that report.
+
+### 11a — Wall layers
+- Per wall (groups, sketches, templates): `layers` N and `growth`; the first N layers off the
+  wall are marched along the front normals (heights spacing * growth^k) and kept; the elliptic
+  smoothing controls the first cell beyond them. 2D and 3D, internal walls (wake cuts) and
+  symmetry planes included; overlapping or folding layers are reported.
+- **Acceptance:** C-grid template at a 1e-5 first cell with 30 layers: mean deviation of the
+  grid lines from the wall normal < 0.2° in every layer (> 10° at layer 16 with wall control
+  only), first cell exact; the 3D tapered wing likewise; min scaled Jacobian >= 0.4.
+  *(Built: `examples/11a_wall_layers.py`: 0.05-0.09° mean in all 30 layers in 2D and 3D, max
+  1.1° at the leading edge; min scaled Jacobian 0.47 (2D) and 0.41 (3D).)*
+
+### 11b — CPU performance
+- Load-balanced parallel loops (the static schedule left 69 % of the threads idle on the wing
+  stub), allocation-free curve and surface evaluation (half of the busy time was malloc/free
+  in NURBS evaluation), the remaining serial sections of the group smoothers.
+- **Acceptance:** results bit-identical for 1-10 threads; the 10d wing stub group smoothing at
+  least 2x faster (39 s); the 9c benchmark not slower.
+
+### 11c — Coarse-to-fine group smoothing
+- Grid sequencing (smooth a coarsened copy, interpolate, finish on the fine grid) and/or
+  multigrid for the group smoothers.
+- **Acceptance:** at least 2x fewer fine-grid iterations on the 1M-cell ball (10b) and the
+  wing stub, same converged grid (to the tolerance).
+
+### 11d — GPU assessment (and backend if it pays)
+- Precision study: the elliptic update in float32, in double-float (two float32) positions with
+  float32 stencil arithmetic on differences, and in float64, on y+ ~ 1 grids. An OpenCL
+  prototype of the interior sweep against the CPU kernels after 11b/11c on this M1 Max (no
+  float64 on the GPU). Decision from the measurements; if the GPU pays: an optional backend
+  with runtime detection (device, float64 support, a self-test against the CPU) and CPU
+  fallback, results equal to the CPU within tolerance.
+
+### 11e — High-order elements (CG / DG)
+- Curved high-order elements from the meshes: quadrilaterals and hexahedra of order p from the
+  structured grids (agglomerating p x p sub-cells of a p-times finer grid, nodes moved to the
+  chosen node set, boundary nodes on the CAD geometry), later triangles, tetrahedra and
+  prisms (straight-sided elements curved at the boundary and untangled). Node sets:
+  equispaced (file formats), Gauss-Lobatto-Legendre (CG, spectral elements; DGSEM), Gauss-
+  Legendre (DG solution points); warp-and-blend points for simplices. Validity: the Jacobian
+  determinant at the nodes / quadrature points (scaled Jacobian of curved elements). Exports:
+  VTK Lagrange cells (VTKHDF), Gmsh high-order .msh, CGNS where its element types allow.

@@ -321,7 +321,15 @@ def build_layout_3d(store, connectors, domains, blocks, params: dict) -> Layout3
                 continue
             seen.add(int(node))
             walls.append(
-                (int(node), spacing, wall["decay"], wall["relaxation"], wall["max_source"])
+                (
+                    int(node),
+                    spacing,
+                    wall["decay"],
+                    wall["relaxation"],
+                    wall["max_source"],
+                    wall.get("layers", 0),
+                    wall.get("growth", 1.2),
+                )
             )
     interfaces = []
     holders: dict[int, list[tuple[int, str]]] = {}
@@ -433,7 +441,7 @@ def finish_3d(layout: Layout3D, params: dict, raw) -> GroupResult3D:
 
     points, classes, residuals, iterations, converged, cancelled, lines, colours, warnings = raw
     classes = np.asarray(classes)
-    counts = np.bincount(classes.astype(np.int64), minlength=4)
+    counts = np.bincount(classes.astype(np.int64), minlength=len(NODE_CLASSES))
     # Singular nodes: any number of hexahedra around them other than a regular interior (8),
     # boundary face (4), boundary edge (2) or boundary corner (1) - irregular edges, and
     # boundary points where three blocks meet (e.g. a box corner); grid lines must turn there.

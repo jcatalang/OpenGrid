@@ -848,6 +848,42 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11a — wall layers (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `structured/wall_layers.cpp` (`march_wall_layers`): the first N layers off a wall marched
+  along the front normals (facet-normal bisectors, 1/10 neighbour blending, symmetry planes
+  kept), heights spacing * growth^k, folds / overlaps / short lines reported; the grid beyond
+  shifted along its lines. Used by the 2D and 3D group smoothers before their line setup; layer
+  nodes are node class 4 (`layer`, kept fixed); the wall control moves to each line's last layer
+  node (next height spacing * growth^N).
+- Python: `layers` / `growth` on group walls, sketch walls (also `{edge: {"spacing", "layers",
+  ...}}`) and templates (all walls; a C-grid's wake cut then takes the wall spacing). GUI wall
+  text `name [spacing [layers [growth]]]` (groups and sketches); group status counts the layer
+  nodes.
+- Anderson guard: a non-finite residual or 200 iterations without a 10 % drop also restart
+  from the best iterate.
+- Demo `examples/11a_wall_layers.py`; tests `core/tests/test_wall_layers.cpp`,
+  `tests/python/test_wall_layers.py`.
+
+### Results (first cell 1e-5 chords, growth 1.2; deviation of grid lines from the wall normal)
+| Case | Layer 8 | Layer 16 | Layer 29 | Iterations | min SJ |
+|---|---|---|---|---|---|
+| 2D C-grid, wall control only | 2.4° (max 12°) | 10.2° | 18.8° | 630 | 0.576 |
+| 2D C-grid, 30 layers | 0.09° (max 1.1°) | 0.09° | 0.07° | 142 | 0.468 |
+| 3D tapered + swept wing, wall control only | 3.2° | 11.7° | 20.8° | not converged (4000) | 0.434 |
+| 3D tapered + swept wing, 30 layers | 0.07° | 0.07° | 0.05° | 1770 (15.7 s) | 0.407 |
+
+- First cells exactly the requested height; the cell beyond the layers is controlled
+  (2.5-2.8° mean deviation at layer 32 in the outer grid).
+- 1e-6 with 30 layers: 0.24° (±2-node tangents) / converged in 147 iterations; 40 layers:
+  converged after the stall guard (min SJ 0.29: only 21 lines left for the outer grid).
+
+### Verified
+- `ctest` +4 (curved and sheared 2D/3D marching, one-sided ends, reports) -> 143; `pytest` +4
+  -> 356 passed, 1 xfailed; strict CI build, clang-tidy on the new and changed C++, ruff,
+  format, ternary check, API docs; all demos 01-11a run.
+
 ## Phase 10e follow-up — extruded templates, symmetry planes, wall control fixes (2026-10-16) — approved (pre-authorised)
 
 ### Built

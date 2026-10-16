@@ -22,6 +22,9 @@
 //    leaving the boundary (orthogonal projection of the inward neighbour), under-relaxed by 1/2
 //    (a Neumann/slip condition); each stays between its boundary neighbours and within half
 //    its initial intervals of its initial position (so nodes cannot pile up into a corner).
+//  * Wall layers (MultiblockWall::layers): the first layers off a wall are marched along the
+//    front normals before the iteration and kept (structured/wall_layers.hpp); the wall control
+//    below then acts at the last layer.
 //  * Wall control (fixed wall nodes): Hilgenstock feedback sources as in the single-block
 //    smoother, p (tangential) and q (normal) per wall node, carried along the grid line that
 //    leaves the wall (through regular free nodes, across interfaces) with weight
@@ -57,6 +60,11 @@ struct MultiblockWall {
   double decay = 0.1;
   double relaxation = 0.1;
   double max_source = 100.0;
+  // Wall layers (structured/wall_layers.hpp): the first `layers` grid layers off the wall are
+  // marched along the front normals (heights spacing * growth^k) and kept; the wall control
+  // then acts on the first cell beyond them. 0: none.
+  int layers = 0;
+  double growth = 1.2;
 };
 
 struct MultiblockInput {
@@ -83,7 +91,13 @@ struct MultiblockOptions {
 };
 
 // Node classes reported per node.
-enum class MultiblockNode : std::uint8_t { Fixed = 0, Regular = 1, Irregular = 2, Sliding = 3 };
+enum class MultiblockNode : std::uint8_t {
+  Fixed = 0,
+  Regular = 1,
+  Irregular = 2,
+  Sliding = 3,
+  Layer = 4,  // in the wall layers (placed by the marching, then kept)
+};
 
 struct MultiblockResult {
   std::vector<double> xy;

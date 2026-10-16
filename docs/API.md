@@ -236,26 +236,30 @@ step.
 
 ### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5, symmetry=()) -> str`
 
-Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
-grid (as one grid): interfaces and block corners move, grid lines continue across
+Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one grid
+: interfaces and block corners move, grid lines continue across
 interfaces, and irregular points (3 or 5+ domains around a node) are relaxed too.
 ``walls``: connectors (or dicts ``{"connector", "spacing" (None: the initial
-first-cell height), "decay", "relaxation", "max_source"}``) with first-cell height and
-orthogonality control; they stay fixed. ``slide``: boundary connectors whose nodes
-slide along their curves ("auto": every boundary connector that is not a wall; () for
-none). Connectors used by domains outside the group stay fixed. Members' own elliptic
-settings are ignored. The control is Laplace plus the wall sources; ``acceleration``
-is the Anderson depth (default 20; 0: plain relaxation). With ``blocks``: ``walls``
-and ``slide`` name block faces (domains); sliding faces move on their surface (or
-plane), boundary edges between faces on different surfaces along their connectors;
-faces shared with blocks or volumes outside the group stay fixed. Members' own
-smoothing settings are ignored. ``joints="slide"``: block corners between two sliding
-connectors on one curve slide along it (3D: face corners inside one sliding surface
-slide on it); ``pinned``: connectors (3D: faces) kept fixed even between members, e.g.
-a wake cut (a wall between members is an internal wall: fixed, with wall control on
-both sides, 2D); ``slide_limit``: how far a sliding node may move, in initial
-intervals; ``symmetry`` (3D): planar faces that are symmetry planes (nodes move as
-interior nodes mirrored across the plane, without the slide limit).
+first-cell height), "decay", "relaxation", "max_source", "layers", "growth"}``) with
+first-cell height and orthogonality control; they stay fixed. ``layers`` > 0: the
+first layers off the wall are marched along the front normals (heights spacing *
+growth^k, default growth 1.2) and kept, so grid lines stay normal to the wall
+through them; the control then acts on the first cell beyond. ``slide``: boundary
+connectors whose nodes slide along their curves ("auto": every boundary connector
+that is not a wall; () for none). Connectors used by domains outside the group stay
+fixed. Members' own elliptic settings are ignored. The control is Laplace plus the
+wall sources; ``acceleration`` is the Anderson depth (default 20; 0: plain
+relaxation). With ``blocks``: ``walls`` and ``slide`` name block faces (domains);
+sliding faces move on their surface (or plane), boundary edges between faces on
+different surfaces along their connectors; faces shared with blocks or volumes
+outside the group stay fixed. Members' own smoothing settings are ignored.
+``joints="slide"``: block corners between two sliding connectors on one curve slide
+along it (3D: face corners inside one sliding surface slide on it); ``pinned``:
+connectors (3D: faces) kept fixed even between members, e.g. a wake cut (a wall
+between members is an internal wall: fixed, with wall control on both sides, 2D);
+``slide_limit``: how far a sliding node may move, in initial intervals; ``symmetry``
+(3D): planar faces that are symmetry planes (nodes move as interior nodes mirrored
+across the plane, without the slide limit).
 
 ### `smooth_group(name: str, progress=None) -> opengrid.model.groups.GroupResult`
 
@@ -284,7 +288,9 @@ families without one); ``curves``: ``{(a, b): curve}`` assigns edges to database
 curves, ``surfaces``: ``{(a, b, c, d): surface}`` 3D boundary faces to surfaces;
 ``walls``: ``{(a, b): first-cell height or None}`` (edges, 2D; faces, 3D) or dicts
 with ``"edge"``/``"face"``, ``"spacing"``, ``"decay"``, ``"relaxation"``,
-``"max_source"``; ``fixed``: vertices that must not float; ``distributions``:
+``"max_source"``, ``"layers"``, ``"growth"`` (wall layers, as in
+``create_smoothing_group``; ``{(a, b): {"spacing": h, "layers": n}}`` works too);
+``fixed``: vertices that must not float; ``distributions``:
 ``{(a, b): distribution}`` from a to b. Generates connectors, domains (3D: also
 blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
 ``relax`` (2D) vertices joining two edges on one curve slide along it until the
@@ -335,10 +341,11 @@ outer), wall, wake), ``"hgrid"`` (bottom, right, top, left, blocks=(nx, ny),
 normal_points, wall, wall_sides), ``"body_in_channel"`` (body, bottom, right, top,
 left, margin, radial_points, wall). 3D: ``"pipe"``, ``"cylinder_in_channel"``,
 ``"bump_channel"``, ``"wing_in_box"`` (the 2D template's options plus ``length`` and
-``span_points``: extruded along z) and ``"sphere_in_box"`` (center, radius, box, cube,
-points, radial_points, outer_points, wall). All take ``spacing`` (default: a
-twentieth of the median boundary edge) and ``relax``. One undo step; returns the
-sketch.
+``span_points``: extruded along z; ``wing_in_box`` also ``taper`` and ``sweep``) and
+``"sphere_in_box"`` (center, radius, box, cube, points, radial_points, outer_points,
+wall). All take ``spacing`` (default: a twentieth of the median boundary edge),
+``relax``, and ``layers`` / ``growth`` (wall layers on every wall; a C-grid's wake cut
+then takes the wall spacing). One undo step; returns the sketch.
 
 ### `auto_topology(curves, size: float | None = None, spacing: float | None = None, relax: bool = False, name: str | None = None) -> str`
 

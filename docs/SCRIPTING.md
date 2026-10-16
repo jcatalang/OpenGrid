@@ -172,6 +172,11 @@ print(og.sketch_report("c"))  # where each vertex went
 og.smooth_group("c-group")
 og.move_handle("c", "vertices", 9, (0.8, 0.65))  # as a mouse drag
 ```
+Wall layers keep grid lines normal to a wall through the boundary layer (11a): a wall entry
+`{"spacing": 1e-5, "layers": 30, "growth": 1.2}` (sketches: `walls={(1, 2): {...}}`; groups:
+`{"connector": ..., ...}`; templates: `layers=30, growth=1.2` for all walls); the first 30 layers
+are marched along the wall normals and kept, the smoothing does the rest. Leave about 20 grid
+lines beyond the layers.
 A 2D sketch with `extrude={"vector": (0, 0, 2), "points": 13}` sweeps its smoothed grid into
 blocks; a 3D sketch takes `symmetry=[(a, b, c, d), ...]` for planar boundary faces that are
 symmetry planes (grid lines cross them straight; their nodes move freely in the plane).

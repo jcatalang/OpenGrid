@@ -509,6 +509,15 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
       sum += value;
     }
     const double residual = std::sqrt(sum / interior);
+    if (!std::isfinite(residual) && options.acceleration > 0) {
+      // An extrapolation blew up within one step: back to the best iterate.
+      pack(after);
+      if (anderson.guarded_step(before, after, residual)) {
+        unpack(after);
+        result.iterations = iteration + 1;
+        continue;
+      }
+    }
     if (!std::isfinite(residual)) {
       result.warnings.emplace_back("elliptic: iteration diverged; returning the initial grid");
       result.grid = initial;

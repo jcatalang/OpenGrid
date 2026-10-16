@@ -27,7 +27,8 @@ which make it such a 3D sketch with the wing on ruled surfaces between root and 
 creates.
 Boundary edges are assigned to the curves (surfaces) that contain them; the template places
 the boundary vertices exactly on the geometry (fixed) and the interior ones float in the
-smoothing group (10d), so nothing is placed by hand.
+smoothing group (10d), so nothing is placed by hand. ``layers`` / ``growth`` (every template):
+wall layers on all its walls (11a: the first layers marched normal to the wall and kept).
 
 Method: the standard multi-block topologies of Thompson, Warsi and Mastin;
 references: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
@@ -987,6 +988,12 @@ def create_template(store, kind: str, name=None, **options):
     if kind not in KINDS_2D and kind not in KINDS_3D:
         _fail("create_template", f"unknown template {kind!r} ({', '.join(KINDS_2D + KINDS_3D)})")
     relax = options.pop("relax", True)
+    layers = options.pop("layers", 0)
+    growth = options.pop("growth", 1.2)
+    if layers != 0 and "wall" in options and "wake" not in options:
+        # A wake cut with layers takes the wall's spacing: twice it (the default without
+        # layers) steps the layer front by 2x where the cut meets the body.
+        options["wake"] = options["wall"]
     if kind == "sphere_in_box":
         params = _sphere_in_box(store, options)
     elif kind in EXTRUDED:
@@ -1033,6 +1040,12 @@ def create_template(store, kind: str, name=None, **options):
     # Builder notes for the 3D variants (body curves, leading edge, chord) are not sketch
     # parameters.
     params = {k: v for k, v in params.items() if not k.startswith("_")}
+    if layers != 0:
+        # Wall layers on every wall (the wake cut of a C-grid too).
+        params["walls"] = {
+            key: {"spacing": spacing, "layers": layers, "growth": growth}
+            for key, spacing in params["walls"].items()
+        }
     if options:
         _fail("create_template", f"unexpected options for {kind}: {', '.join(sorted(options))}")
     if name is None:

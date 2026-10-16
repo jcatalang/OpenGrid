@@ -18,6 +18,7 @@ add_executable(og_core_tests
   test_3d.cpp
   test_3d_smoothing.cpp
   test_performance.cpp
-  test_multiblock.cpp)
+  test_multiblock.cpp
+  test_wall_layers.cpp)
 target_link_libraries(og_core_tests PRIVATE og_core og_options GTest::gtest_main)
 gtest_discover_tests(og_core_tests)

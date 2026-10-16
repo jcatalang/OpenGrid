@@ -317,21 +317,38 @@ history). Phase tags show where each item came from.
 - **Symmetry planes** [10e follow-up]: planar faces only (a flagged face on a curved surface
   is an ordinary sliding face), listed explicitly (`symmetry`; templates set their end planes);
   2D groups have none (their boundaries slide as before).
-- **Wall orthogonality is controlled at the first cell only** [10e follow-up, measured]:
-  Steger-Sorenson sources with Hilgenstock feedback make the first-cell height and the angle
-  of the first grid line exact at convergence (0.0-0.1° mean on the 2D C-grid and the 3D
-  wings; 3° at the trailing-edge node). Further out the lines bend: wall spacing 1e-3 - mean
-  0.8° at layer 1, 4° at layer 4, 9° at layer 8, 14-17° at layer 16 (max 17-20° at layer 8);
-  1e-5 / 1e-6 (y+ ~ 1) - mean below 0.5° to layer 4, 1-2° at layer 8, 7-10° at layer 16 (max
-  15-19°). No control keeps lines normal over N layers (no boundary-layer block marched
-  normally inside a group).
+- **Wall orthogonality without wall layers is controlled at the first cell only** [10e
+  follow-up, measured]: Steger-Sorenson sources with Hilgenstock feedback make the first-cell
+  height and the angle of the first grid line exact at convergence; further out the lines bend
+  (1e-5 wall: mean 2.4° at layer 8, 10° at layer 16, 19° at layer 29 on the C-grid). Wall
+  layers (11a) keep them normal: 0.05-0.09° mean through 30 layers.
+- **Wall layers: corners between two walls are refused** [11a]: where two walls with layers
+  meet at a convex corner of the domain (a duct or cavity corner) their lines cross in the
+  corner region; this is reported as overlapping layers, not built (no corner blending).
+- **Wall layers: front ends lean** [11a]: where a wall with layers meets a non-wall boundary
+  (an inflow, a far field) the last line sees one facet and leans by up to about half a cell's
+  turning angle (2.25° on the test arc; 0 on straight walls).
+- **Wall layers: spacing steps** [11a]: neighbouring walls with different spacings (or layer
+  counts) step the layer front where they meet; with the C-grid's default 2x wake spacing the
+  iteration diverged, so templates with layers give the wake cut the wall spacing. No height
+  blending across a junction.
+- **Wall layers: what they replace** [11a]: inside the layers the heights are the geometric
+  series spacing * growth^k, not the connectors' own distribution; the layers are fixed during
+  the smoothing (they do not adapt to the outer grid); lines need about layers + 20 nodes for
+  a good outer grid (C-grid at 1e-5: 30 layers with 31 inner radial points gave 0.21, with 61
+  0.47). The deviation reported in the layers is the angle to the central-difference tangent;
+  at the leading edge, where the front turns 14° per node, it reaches 1.1°. Single-domain
+  elliptic smoothing (outside groups) has no layers.
 - **Sharp trailing edge** [10e follow-up]: C-grid lines turn from the wedge faces (±8°) into
   the wake within ~0.005 chords of the trailing edge: interface kink 20° at a 1e-3 wall
   spacing, 53-60° at 1e-5 - 1e-6 (the group status reports it).
-- **Accelerated smoothing can diverge** [10e follow-up]: undamped Anderson mixing blew up on
-  the C-grid at wall spacings <= 1e-5 (and returned the TFI grid). Now guarded: restart from
-  the best iterate, plain iteration after two blow-ups (warning); the plain iteration needs
-  more iterations (C-grid at 1e-6: ~2100-3100).
+- **Accelerated smoothing can diverge or stall** [10e follow-up, 11a]: undamped Anderson mixing
+  blew up on the C-grid at wall spacings <= 1e-5 (and returned the TFI grid), and stalled near
+  1e-2 before jumping to NaN on layered grids. Now guarded: restart from the best iterate on a
+  blow-up, a non-finite residual or 200 iterations without a 10 % drop; plain iteration after
+  two restarts (warning). The plain iteration needs more iterations (C-grid at 1e-6: ~2100-
+  3100). 3D wall control alone at 1e-5 (the tapered wing) does not converge in 4000
+  iterations (min scaled Jacobian 0.43); with wall layers it converges in 1770.
 - **Automatic topology: two-element airfoil fails** [10e]: the cross field is right (index sum
   -1) but in the slot between main element and flap the separatrices from the flap's leading
   edge and the main trailing edge leave a five-cornered face and a triangle. No repair of

@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include "opengrid/core/structured/wall_layers.hpp"
 #include "opengrid/core/util/anderson.hpp"
 #include "opengrid/core/util/parallel.hpp"
 
@@ -331,6 +332,58 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     size = std::max(size, std::hypot(x[g] - x[0], y[g] - y[0]));
   }
 
+  // ---------------------------------------------------------------- wall layers
+  std::vector<WallLayerLine> layer_lines;
+  {
+    WallLayerInput layers;
+    layers.dim = 2;
+    layers.movable.assign(n, 0);
+    layers.on_wall.assign(n, 0);
+    for (std::size_t g = 0; g < n; ++g) {
+      if (cls[g] == static_cast<std::uint8_t>(MultiblockNode::Regular)) {
+        layers.movable[g] = 1;
+      }
+    }
+    for (std::size_t w = 0; w < input.walls.size(); ++w) {
+      const MultiblockWall& wall = input.walls[w];
+      if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
+        throw std::invalid_argument("multiblock: wall node out of range");
+      }
+      layers.on_wall[static_cast<std::size_t>(wall.node)] = 1;
+      if (wall.layers > 0) {
+        layers.walls.push_back({wall.node, wall.spacing, wall.layers, wall.growth, w});
+      }
+    }
+    if (!layers.walls.empty()) {
+      layers.cells.resize(input.quads.size());
+      for (std::size_t q = 0; q < input.quads.size(); ++q) {
+        layers.cells[q] = {input.quads[q][0],
+                           input.quads[q][1],
+                           input.quads[q][2],
+                           input.quads[q][3],
+                           kNone,
+                           kNone,
+                           kNone,
+                           kNone};
+      }
+      std::vector<Vec3> p(n);
+      for (std::size_t g = 0; g < n; ++g) {
+        p[g] = {x[g], y[g], input.z};
+      }
+      WallLayerResult marched = march_wall_layers(layers, p);
+      for (std::size_t g = 0; g < n; ++g) {
+        x[g] = p[g].x;
+        y[g] = p[g].y;
+      }
+      for (const WallLayerLine& line : marched.lines) {
+        for (const std::int64_t g : line.nodes) {
+          cls[static_cast<std::size_t>(g)] = static_cast<std::uint8_t>(MultiblockNode::Layer);
+        }
+      }
+      layer_lines = std::move(marched.lines);
+    }
+  }
+
   // ---------------------------------------------------------------- grid lines
   std::vector<std::int64_t> slot(2 * n, -1);  // line through (node, axis); -2: opening node
   std::vector<std::int64_t> line_nodes;
@@ -487,8 +540,8 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     return id >= 0 && on_wall[static_cast<std::size_t>(id)] != 0;
   };
   for (const MultiblockWall& wall : input.walls) {
-    if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
-      throw std::invalid_argument("multiblock: wall node out of range");
+    if (wall.layers > 0) {
+      continue;  // controlled at its last layer, below
     }
     const auto g = static_cast<std::size_t>(wall.node);
     std::vector<std::pair<int, int>> sides;
@@ -523,6 +576,26 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     }
   }
   (void)bad_walls;  // corners of blocks on walls are expected (as i = 0, imax in one block)
+  // Walls with layers: the first cell beyond the last layer (height spacing * growth^N,
+  // orthogonal to the last layer).
+  for (const WallLayerLine& line : layer_lines) {
+    const MultiblockWall& wall = input.walls[line.source];
+    const auto g = static_cast<std::size_t>(line.nodes.back());
+    std::int64_t prev = line.base;
+    if (line.nodes.size() >= 2) {
+      prev = line.nodes[line.nodes.size() - 2];
+    }
+    const int back = label_of(topo.nb[g], prev);
+    if (back < 0 || back > kS) {
+      continue;
+    }
+    const int normal = opposite(back);
+    if (!is(topo.nb[g][static_cast<std::size_t>(normal)], MultiblockNode::Regular)) {
+      continue;
+    }
+    walls.push_back({g, line.next_spacing, wall.decay, wall.relaxation, wall.max_source, normal,
+                     (normal + 3) % 4});
+  }
   // Grid lines leaving each wall, through regular free nodes (across interfaces).
   std::vector<std::vector<WallReach>> reach(n);
   for (std::size_t w = 0; w < walls.size(); ++w) {
@@ -900,6 +973,16 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
       sum += value;
     }
     const double residual = std::sqrt(sum / updates);
+    if (!std::isfinite(residual) && options.acceleration > 0) {
+      // An extrapolation blew up within one step: back to the best iterate.
+      pack(after);
+      if (anderson.guarded_step(before, after, residual)) {
+        unpack(after);
+        reproject();
+        result.iterations = iteration + 1;
+        continue;
+      }
+    }
     if (!std::isfinite(residual)) {
       result.warnings.emplace_back("multiblock: iteration diverged; returning the initial grid");
       result.xy = input.xy;

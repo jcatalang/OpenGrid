@@ -121,20 +121,32 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
 
 bool AndersonAccelerator::guarded_step(const std::vector<double>& u, std::vector<double>& g,
                                        double residual) {
-  if (!started_) {
+  if (!started_ && std::isfinite(residual)) {
     started_ = true;
     best_ = residual;
     lowest_ = residual;
+    mark_ = residual;
     best_state_ = g;
   }
   if (!enabled_) {
     return false;
   }
-  if (residual > kBlowup * lowest_) {
+  if (residual < 0.9 * mark_) {
+    mark_ = residual;
+    since_mark_ = 0;
+  } else {
+    since_mark_ += 1;
+  }
+  if (!started_) {
+    return false;  // no finite residual yet: nothing to restore
+  }
+  if (!std::isfinite(residual) || residual > kBlowup * lowest_ || since_mark_ > kStall) {
     restarts_ += 1;
     reset();
     g = best_state_;
     best_ = lowest_;
+    mark_ = lowest_;
+    since_mark_ = 0;
     if (restarts_ >= kMaxRestarts) {
       enabled_ = false;
     }
@@ -157,7 +169,7 @@ std::string AndersonAccelerator::restart_note() const {
   if (restarts_ == 0) {
     return "";
   }
-  std::string note = "acceleration diverged " + std::to_string(restarts_) +
+  std::string note = "acceleration diverged or stalled " + std::to_string(restarts_) +
                      " time(s); restarted from the best iterate";
   if (!enabled_) {
     note += " and continued without acceleration";

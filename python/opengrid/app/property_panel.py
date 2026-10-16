@@ -335,26 +335,41 @@ def format_group_walls(walls, store) -> str:
         if "domain" in wall:
             key = "domain"
         line = store.get(wall[key]).name
+        layers = wall.get("layers", 0)
         if wall["spacing"] is not None:
             line += f" {format_number(wall['spacing'])}"
+        elif layers > 0:
+            line += " -"
+        if layers > 0:
+            line += f" {layers} {format_number(wall.get('growth', 1.2))}"
         lines.append(line)
     return "\n".join(lines)
 
 
 def parse_group_walls(text: str, key: str = "connector") -> tuple:
-    """'name [spacing]' per line -> wall dicts (decay etc. at their defaults); ``key`` is
-    "connector" (2D groups) or "domain" (block faces, 3D groups)."""
+    """'name [spacing [layers [growth]]]' per line -> wall dicts (decay etc. at their
+    defaults; spacing "-" = the initial height); ``key`` is "connector" (2D groups) or
+    "domain" (block faces, 3D groups)."""
     walls = []
     for raw in text.splitlines():
         parts = raw.split()
         if not parts:
             continue
-        spacing = None
-        if len(parts) == 2:
-            spacing = parse_numbers(parts[1], f"walls: {parts[0]}")[0]
-        elif len(parts) > 2:
-            raise ParseError(f"walls: expected 'connector [spacing]', got {raw.strip()!r}")
-        walls.append({key: parts[0], "spacing": spacing})
+        if len(parts) > 4:
+            raise ParseError(
+                f"walls: expected '{key} [spacing [layers [growth]]]', got {raw.strip()!r}"
+            )
+        wall = {key: parts[0], "spacing": None}
+        if len(parts) >= 2:
+            wall["spacing"] = parse_optional(parts[1], f"walls: {parts[0]}")
+        if len(parts) >= 3:
+            try:
+                wall["layers"] = int(parts[2])
+            except ValueError as error:
+                raise ParseError(f"walls: {parts[0]}: layers must be a whole number") from error
+        if len(parts) == 4:
+            wall["growth"] = parse_numbers(parts[3], f"walls: {parts[0]}")[0]
+        walls.append(wall)
     return tuple(walls)
 
 
@@ -1070,11 +1085,18 @@ class PropertyPanel(QWidget):
         for wall in params["walls"]:
             ref = wall.get("edge", wall.get("face"))
             text = " ".join(str(v) for v in ref)
+            layers = wall.get("layers", 0)
             if wall["spacing"] is not None:
                 text += f" {format_number(wall['spacing'])}"
+            elif layers > 0:
+                text += " -"
+            if layers > 0:
+                text += f" {layers} {format_number(wall.get('growth', 1.2))}"
             lines.append(text)
         walls = QPlainTextEdit("\n".join(lines))
-        walls.setPlaceholderText("edge a b (3D: face a b c d) [first-cell height] per line")
+        walls.setPlaceholderText(
+            "edge a b (3D: face a b c d) [first-cell height [layers [growth]]] per line"
+        )
         walls.setMinimumHeight(50)
         self._form.addRow("walls", walls)
         self._editors["walls"] = ("sketch_walls", walls)
@@ -1358,7 +1380,8 @@ class PropertyPanel(QWidget):
 
 
 def parse_sketch_lines(text: str, kind: str, entity) -> tuple:
-    """Sketch dimensions ("a b points") or walls ("a b [spacing]", 3D "a b c d [spacing]")."""
+    """Sketch dimensions ("a b points") or walls ("a b [spacing [layers [growth]]]", 3D
+    "a b c d [...]"; spacing "-": the initial height)."""
     size = 2
     key = "edge"
     if len(entity.params["blocks"][0]) == 8:
@@ -1375,13 +1398,17 @@ def parse_sketch_lines(text: str, kind: str, entity) -> tuple:
                     raise ValueError
                 out.append({"edge": (int(parts[0]), int(parts[1])), "points": int(parts[2])})
                 continue
-            if len(parts) not in (size, size + 1):
+            if not size <= len(parts) <= size + 3:
                 raise ValueError
             ref = tuple(int(v) for v in parts[:size])
-            spacing = None
-            if len(parts) == size + 1:
-                spacing = float(parts[size])
-            out.append({key: ref, "spacing": spacing})
+            wall = {key: ref, "spacing": None}
+            if len(parts) > size and parts[size] != "-":
+                wall["spacing"] = float(parts[size])
+            if len(parts) > size + 1:
+                wall["layers"] = int(parts[size + 1])
+            if len(parts) > size + 2:
+                wall["growth"] = float(parts[size + 2])
+            out.append(wall)
         except ValueError:
             raise ParseError(f"line {number}: cannot read {line!r}") from None
     return tuple(out)

@@ -848,6 +848,31 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 12a — GUI reliability (2026-10-17) — requested by the user, committed when its checks passed
+
+### Built
+- `tests/python/test_gui_events.py`: a `Live` harness that gives the off-screen window a real
+  interactor on its widget (as the on-screen window has) so `QTest` mouse and key events on
+  the viewport run through VTK's interactor, the window's observers and the camera style;
+  17 tests: the chain itself, click / Shift-click selection, the line tool with its preview,
+  a drag in a drawing tool (zooms, adds no point), Esc and Return in the viewport, handle
+  drags, freehand strokes, the sketch tool, tool switches, the boundary dock's buttons, the
+  Delete key, model-tree clicks, wheel zoom and F, Shift-drag panning, a property edit typed
+  into the panel and applied.
+- Found and changed: a click in the viewport picks the connector lying on a curve, never the
+  curve, so its control points could not be dragged from the viewport (only after selecting
+  the curve in the tree). A selected connector now offers the handles of its curves too
+  (`handles_for`); a drag moves the curve and the connector and domains follow.
+- View -> "Show high-order elements…" (`app/high_order_view.py`, `Scene.show_high_order`,
+  `MainWindow.show_high_order`): the element edges sampled along their curves and the
+  high-order nodes drawn over the mesh (2D: all edges; 3D: the patches' faces), refreshed on
+  every model change, with the count, node count and the curved elements' scaled Jacobian in
+  the status bar; `curved=False` shows the straight-sided elements.
+
+### Verified
+- `pytest` +18; no other interaction bug was found by the chain tests (the earlier
+  world-space tests remain). Lint, ternary check, API docs, launcher check.
+
 ## GUI navigation, docks and a launcher app (2026-10-16) — requested by the user
 
 - Zoom to a window (`app/zoom_box.py`): a left-drag (a three-finger drag on a trackpad) draws a

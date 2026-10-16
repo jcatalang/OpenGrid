@@ -51,11 +51,23 @@ def entity_handles(session, name: str) -> list[Handle]:
 
 
 def handles_for(session, names) -> list[Handle]:
+    """Handles of the selected entities. A selected connector also offers the handles of the
+    curves it runs on (a click in the viewport picks the connector, not the curve beneath it):
+    dragging one moves the curve, and the connector and its domains follow."""
     out = []
+    seen = set()
     for name in names:
         entity = session.store.get(name)
-        if entity.kind in CURVE_KINDS or entity.kind in ("point", "connector", "sketch"):
+        editable = entity.kind in CURVE_KINDS or entity.kind in ("point", "connector", "sketch")
+        if editable and name not in seen:
+            seen.add(name)
             out.extend(entity_handles(session, name))
+        if entity.kind == "connector":
+            for segment in entity.params["segments"]:
+                curve = session.store.get(segment["curve"])
+                if curve.kind in CURVE_KINDS and curve.name not in seen:
+                    seen.add(curve.name)
+                    out.extend(entity_handles(session, curve.name))
     return out
 
 

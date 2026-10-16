@@ -21,6 +21,8 @@ SELECTED_COLOR = "#ffd60a"
 PREVIEW_COLOR = "#ff9f43"
 SNAP_COLOR = "#2ee59d"
 HANDLE_COLOR = "#ffb000"
+HIGH_ORDER_COLOR = "#ff9f1c"  # curved element edges
+HIGH_ORDER_NODE_COLOR = "#ffd166"
 ENDPOINT_COLOR = "#8a96a3"
 CONNECTOR_COLOR = "#ff9f43"
 NODE_COLOR = "#e8e8e8"
@@ -200,6 +202,36 @@ class Scene:
                 pickable=False,
                 reset_camera=False,
             )
+        self.plotter.render()
+
+    def show_high_order(self, mesh) -> None:
+        """Overlay of a high-order mesh (app/high_order_view.py), or none."""
+        from opengrid.app.high_order_view import edge_polydata, node_polydata
+
+        self.plotter.remove_actor("high-order-edges", render=False)
+        self.plotter.remove_actor("high-order-nodes", render=False)
+        if mesh is not None:
+            edges = edge_polydata(mesh)
+            if edges is not None:
+                self.plotter.add_mesh(
+                    edges,
+                    color=HIGH_ORDER_COLOR,
+                    line_width=1.5,
+                    name="high-order-edges",
+                    pickable=False,
+                    reset_camera=False,
+                )
+            nodes = node_polydata(mesh)
+            if nodes is not None:
+                self.plotter.add_mesh(
+                    nodes,
+                    color=HIGH_ORDER_NODE_COLOR,
+                    point_size=5,
+                    render_points_as_spheres=True,
+                    name="high-order-nodes",
+                    pickable=False,
+                    reset_camera=False,
+                )
         self.plotter.render()
 
     def fit(self) -> None:

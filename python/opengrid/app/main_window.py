@@ -359,6 +359,13 @@ class MainWindow(QMainWindow):
         self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
         self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.viewport.addAction(self.fit_action)
+        self.high_order_action = QAction("Show high-order elements…", self)
+        self.high_order_action.setCheckable(True)
+        self.high_order_action.setStatusTip(
+            "Overlay the curved (or straight-sided) high-order elements of the mesh"
+        )
+        self.high_order_action.toggled.connect(self._toggle_high_order)
+        self._high_order_settings = (4, True)  # order, curved
         self.zoom_window_action = QAction("Left-drag zooms to a window", self)
         self.zoom_window_action.setCheckable(True)
         self.zoom_window_action.setChecked(True)
@@ -479,6 +486,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.threshold_action)
         view_menu.addAction(self.quality_action)
         view_menu.addAction(self.patch_color_action)
+        view_menu.addAction(self.high_order_action)
         view_menu.addSeparator()
         view_menu.addAction(self.cut_action)
         view_menu.addAction(self.shrink_action)
@@ -860,6 +868,8 @@ class MainWindow(QMainWindow):
         self._update_edit_actions()
         if not had_geometry and len(self.session.store) > 0:
             self.scene.fit()
+        if self.high_order_action.isChecked():
+            self.refresh_high_order()
 
     def _report_connector_warnings(self, ids) -> None:
         for entity_id in ids:
@@ -885,6 +895,82 @@ class MainWindow(QMainWindow):
         self.set_selection([])
         self._update_edit_actions()
         self._update_tool_feedback(None)
+        action = getattr(self, "high_order_action", None)
+        if action is not None and action.isChecked():
+            self.refresh_high_order()
+
+    # ------------------------------------------------------ high-order overlay
+    def _toggle_high_order(self, on: bool) -> None:
+        if not on:
+            self.scene.show_high_order(None)
+            return
+        if self.sender() is self.high_order_action and not self._high_order_prompted:
+            from PySide6.QtWidgets import QInputDialog
+
+            order, ok = QInputDialog.getInt(
+                self, "High-order elements", "Order:", self._high_order_settings[0], 1, 6
+            )
+            if ok:
+                choices = ["curved boundary elements", "straight-sided elements"]
+                choice, ok = QInputDialog.getItem(
+                    self, "High-order elements", "Elements:", choices, 0, False
+                )
+                if ok:
+                    self._high_order_settings = (order, choice == choices[0])
+            if not ok:
+                self.high_order_action.blockSignals(True)
+                self.high_order_action.setChecked(False)
+                self.high_order_action.blockSignals(False)
+                return
+        self.refresh_high_order()
+
+    _high_order_prompted = False  # True while show_high_order sets the settings itself
+    _last_high_order = None
+
+    def show_high_order(self, order: int = 4, curved: bool = True):
+        """Overlay the order-p elements (curved onto the geometry, or straight-sided); the
+        overlay follows every model change until hidden. Returns the mesh, or None when it
+        cannot be built (reported)."""
+        self._high_order_settings = (order, curved)
+        self._high_order_prompted = True
+        try:
+            if self.high_order_action.isChecked():
+                return self.refresh_high_order()
+            self.high_order_action.setChecked(True)  # refreshes through _toggle_high_order
+        finally:
+            self._high_order_prompted = False
+        return self._last_high_order
+
+    def hide_high_order(self) -> None:
+        self.high_order_action.setChecked(False)
+
+    def refresh_high_order(self):
+        import time
+
+        order, curved = self._high_order_settings
+        started = time.perf_counter()
+        mesh = self._run(lambda: self.session.high_order(order, curved))
+        self._last_high_order = mesh
+        if mesh is None:
+            self.scene.show_high_order(None)
+            return None
+        self.scene.show_high_order(mesh)
+        report = mesh.curving
+        message = f"order {order}: {mesh.elements} elements, {len(mesh.points)} nodes"
+        if curved:
+            message += f", {report['moved']} boundary nodes on the geometry"
+            if report.get("min_scaled_jacobian") is not None:
+                message += (
+                    f", scaled Jacobian of the curved elements "
+                    f"{report['min_scaled_jacobian']:.3f} "
+                    f"(straight-sided {report['min_scaled_jacobian_straight']:.3f})"
+                )
+        else:
+            message += ", straight-sided"
+        message += f" ({time.perf_counter() - started:.2f} s)"
+        self.statusBar().showMessage(message)
+        log.info("high-order overlay: %s", message)
+        return mesh
 
     def _update_edit_actions(self) -> None:
         commands = self.session.commands

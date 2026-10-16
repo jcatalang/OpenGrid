@@ -135,3 +135,39 @@ def test_zoom_window_through_the_event_chain(qtbot):
         event("MouseMoveEvent", 350, 330, shift=1)
         event("LeftButtonReleaseEvent", 350, 330, shift=1)
     assert camera.GetPosition() != position and not box.active  # Shift + drag pans
+
+
+def test_high_order_overlay(qtbot):
+    """View -> Show high-order elements: the curved edges follow the geometry; straight-sided
+    ones are chords; the overlay follows model changes and goes away when hidden."""
+    from test_curved_elements import ring
+
+    window = MainWindow(off_screen=True)
+    qtbot.addWidget(window)
+    og = ring(16, og=window.session)  # in the window's own session (it listens to it)
+    from opengrid.app.high_order_view import SAMPLES, element_edges
+
+    def wall_samples(mesh):
+        """Sampled points of the drawn edges whose ends are on the wall circle."""
+        edges = element_edges(mesh)
+        actor = window.viewport.renderer.actors["high-order-edges"]
+        points = np.asarray(actor.mapper.dataset.points).reshape(len(edges), SAMPLES, 3)
+        ends = np.linalg.norm(mesh.points[edges[:, :2], :2], axis=2)
+        wall = np.all(np.abs(ends - 1.0) < 1e-9, axis=1)
+        assert wall.sum() == 16
+        return np.linalg.norm(points[wall][..., :2], axis=-1)
+
+    mesh = window.show_high_order(order=4, curved=True)
+    assert mesh is not None and mesh.order == 4
+    assert np.abs(wall_samples(mesh) - 1.0).max() < 1e-6  # on the circle between the nodes
+    assert "high-order-nodes" in window.viewport.renderer.actors
+    assert "order 4" in window.statusBar().currentMessage()
+    flat = window.show_high_order(order=4, curved=False)
+    assert flat is not None
+    assert np.abs(wall_samples(flat) - 1.0).max() > 1e-3  # chords
+    before = len(element_edges(flat))
+    og.modify("c-cut", dimension=9)  # a model change refreshes the overlay
+    actor = window.viewport.renderer.actors["high-order-edges"]
+    assert len(np.asarray(actor.mapper.dataset.points)) > before * SAMPLES
+    window.hide_high_order()
+    assert "high-order-edges" not in window.viewport.renderer.actors

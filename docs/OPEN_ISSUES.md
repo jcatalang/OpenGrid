@@ -269,6 +269,12 @@ history). Phase tags show where each item came from.
   can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
   moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
   the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
+- **High-order overlay cost** [12a]: the overlay recomputes the whole high-order mesh on every
+  model change (0.5 s for the C-grid template at order 4, 10 s for a 32k-hexahedron ball);
+  switch it off while editing large models. It draws the patches' faces in 3D, or every cell
+  edge without patches. Pyramids' curved edges are drawn (VTK files write them linear).
+- **Viewport picking** [12a]: a click picks connectors before curves and domains; curves under
+  a connector are edited through the connector's handles or the model tree.
 - **Trackpad gestures** [GUI]: the zoom window is a left-drag; a three-finger drag is one only
   with macOS's "Three Finger Drag" (System Settings -> Accessibility -> Pointer Control ->
   Trackpad Options). Two-finger scroll zooms (as a wheel); pinch gestures are not mapped by

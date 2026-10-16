@@ -54,8 +54,9 @@ def test_extend_displacement_binding():
 
 
 # ------------------------------------------------------------------ 2D
-def ring(n: int, first: float = 0.002, radial: int = 0) -> opengrid.Session:
-    og = opengrid.Session()
+def ring(n: int, first: float = 0.002, radial: int = 0, og=None) -> opengrid.Session:
+    if og is None:
+        og = opengrid.Session()
     og.create_circle((0, 0), 1.0, name="wall")
     og.create_circle((0, 0), 4.0, name="far")
     og.create_line((1, 0), (4, 0), name="cut")

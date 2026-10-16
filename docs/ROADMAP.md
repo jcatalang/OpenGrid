@@ -473,3 +473,24 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   displacement of the boundary nodes extended by a stiffened graph Laplacian within three
   boundary-element lengths; boundary layers of 1e-5 under a sagitta 1900 cells thick stay
   valid. Faces without a surface are curved from their own grid; planar faces stay.)*
+
+## Phase 12 — Hardening (requested by the user, 2026-10-17)
+After the first real use of the GUI found three problems in ten minutes and an export bug
+surfaced by accident, the user chose four of the improvements proposed: GUI reliability,
+end-to-end tests of feature combinations, repair of curved elements, 3D speed.
+
+### 12a — GUI reliability
+- Tests that drive the real event chain (Qt events on the viewport widget -> VTK's
+  interactor -> the window's observers and the camera style) for selection, drawing tools,
+  handle drags, freehand strokes, the sketch tool, keys, the boundary dock and property edits;
+  what they find fixed. The curved high-order elements visible in the viewport. Acceptance:
+  the tests reach the chain (the zoom-window bug fails them without its fix).
+### 12b — End-to-end tests of feature combinations
+- Golden cases combining templates, smoothing groups, wall layers, patches, periodicity and
+  every export, read back by the reference readers.
+### 12c — Repair of curved elements
+- Local optimisation of the elements that fold or lose quality after curving (Jacobian-based,
+  Toulorge et al. 2013), validity by Bezier bounds.
+### 12d — 3D speed
+- Profile the 1M-cell group and the Netgen path again; implement what pays.
+

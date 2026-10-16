@@ -229,9 +229,9 @@ element and flux-reconstruction solvers read:
   structured domains / blocks into one element, so the smoothed grid places every node.
 
 ```python
-mesh = og.high_order(order=4)              # an ElementMesh
-print(mesh.counts(), mesh.curving)         # elements per kind; moved nodes, quality curved vs straight
-conn = mesh.connectivity("quad", "cgns")   # any kind, in any format's node order
+mesh = og.high_order(order=4)  # an ElementMesh
+print(mesh.counts(), mesh.curving)  # elements per kind; moved nodes, quality curved vs straight
+conn = mesh.connectivity("quad", "cgns")  # any kind, in any format's node order
 og.export_high_order("case_p4.cgns", order=4)
 og.export_high_order("case_p4_gll.h5", order=4, nodes="gll")
 ```

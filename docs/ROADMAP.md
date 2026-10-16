@@ -422,7 +422,12 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   prototype of the interior sweep against the CPU kernels after 11b/11c on this M1 Max (no
   float64 on the GPU). Decision from the measurements; if the GPU pays: an optional backend
   with runtime detection (device, float64 support, a self-test against the CPU) and CPU
-  fallback, results equal to the CPU within tolerance.
+  fallback, results equal to the CPU within tolerance. *(Assessment done, `tools/gpu/`:
+  float64 hardware is not needed - positions as two float32 with float32 arithmetic on
+  differences are accurate to 2e-7 of the local cell height at a 1e-6 wall, plain float32 is
+  off by 6 %. Kernels on a 1M-node block: GPU 7.4x (line relaxation) and 9x (point Jacobi)
+  faster than the same kernels in float64 on the 10 CPU threads; launch overhead cancels the
+  gain below ~200k nodes. Decision: build the backend for large 3D groups.)*
 
 ### 11e — High-order elements (CG / DG)
 - Curved high-order elements from the meshes: quadrilaterals and hexahedra of order p from the

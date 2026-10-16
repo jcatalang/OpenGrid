@@ -848,6 +848,39 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11d (assessment) — GPU precision and speed (2026-10-16)
+
+Tools in `tools/gpu/` (not part of the package; `opencl_bench.py` needs pyopencl):
+- `precision_study.py`: an O-grid with a 1e-6 first cell at radius 1 (outer radius 20),
+  inverse control functions so that the exact polar grid is the discrete solution, a sheared
+  start, radial line relaxation in delta form, as the CPU smoother does:
+
+| Variant | Error at the wall row (local cell heights) | First cell (exact 1e-6) | Residual floor |
+|---|---|---|---|
+| float64 | 1.6e-8 | exact | (6000 iterations: 8e-9) |
+| float32 arithmetic, positions in double (two float32 on a GPU) | 2.0e-7 | 0.9999998e-6 - 1e-6 | 2.6e-6 |
+| float32 throughout | 5.7e-2 | 0.954e-6 - 1.029e-6 | 2.3e-5 |
+
+- `opencl_bench.py` / `cpu_bench.cpp`: 3D Winslow sweeps on a 128 x 128 x 64 block, the same
+  kernels on both sides (the CPU line kernel eliminates plane by plane, i innermost):
+
+| Kernel | M1 Max GPU (OpenCL 1.2) | 10 CPU threads, float64 |
+|---|---|---|
+| point Jacobi, float32 | 0.29 ns/node | - |
+| point Jacobi, float-float positions | 0.45 ns/node | 4.1 ns/node (9x) |
+| line relaxation (Thomas along k), float-float | 0.71 ns/node | 5.2 ns/node (7.4x) |
+
+  GPU float-float and CPU float64 agree to 2.8e-7 of the local cell height after 200 line
+  sweeps; on a 40k-node block the GPU loses its lead (launch overhead, 0.2 ms per sweep). The
+  current general multi-block smoother spends ~36 ns per node and iteration on its sweeps and
+  coefficients (indirect neighbour access, per-node frames).
+- Decision: the backend pays for large 3D groups. Plan: OpenCL (Apple, NVIDIA, AMD, Intel;
+  OpenCL is deprecated but working on macOS), positions as float-float, float32 arithmetic in
+  delta form, coefficients + line relaxation + Anderson mixing on the GPU, sliding,
+  irregular and wall-control updates on the CPU through shared buffers, a float64 CPU finish
+  below the float32 residual floor; runtime detection, a self-test against the CPU and a size
+  threshold, CPU fallback. Expected 2-7x end to end (sliding projections stay on the CPU).
+
 ## Phase 11c — coarse-to-fine smoothing (2026-10-16) — assessed, not built
 
 - Prototype (scratch, not in the code): the coarse grid is every other node of each block of

@@ -234,7 +234,7 @@ step.
 
 ## Multi-block smoothing groups
 
-### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=()) -> str`
+### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5) -> str`
 
 Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
 grid (as one grid): interfaces and block corners move, grid lines continue across
@@ -249,7 +249,12 @@ is the Anderson depth (default 20; 0: plain relaxation). With ``blocks``: ``wall
 and ``slide`` name block faces (domains); sliding faces move on their surface (or
 plane), boundary edges between faces on different surfaces along their connectors;
 faces shared with blocks or volumes outside the group stay fixed. Members' own
-smoothing settings are ignored.
+smoothing settings are ignored. ``joints="slide"``: block corners between two sliding
+connectors on one curve slide along it (3D: face corners inside one sliding surface
+slide on it); ``pinned``: connectors (3D: faces) kept fixed even between members, e.g.
+a wake cut (a wall between members is an internal wall: fixed, with wall control on
+both sides, 2D); ``slide_limit``: how far a sliding node may move, in initial
+intervals.
 
 ### `smooth_group(name: str, progress=None) -> opengrid.model.groups.GroupResult`
 
@@ -265,6 +270,57 @@ One-line summary of a smoothing group.
 
 Connector nodes as drawn: where a smoothed group moved them (interfaces, sliding
 boundaries), else the connector's own nodes.
+
+## Sketch topology (floating wireframe)
+
+### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, name: str | None = None) -> str`
+
+Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
+(points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
+2D, counter-clockwise or not; 8 in 3D, VTK hexahedron order). ``dimensions``: points
+per edge, ``{(a, b): n}`` on any edge of each edge family (or ``spacing`` for the
+families without one); ``curves``: ``{(a, b): curve}`` assigns edges to database
+curves, ``surfaces``: ``{(a, b, c, d): surface}`` 3D boundary faces to surfaces;
+``walls``: ``{(a, b): first-cell height or None}`` (edges, 2D; faces, 3D) or dicts
+with ``"edge"``/``"face"``, ``"spacing"``, ``"decay"``, ``"relaxation"``,
+``"max_source"``; ``fixed``: vertices that must not float; ``distributions``:
+``{(a, b): distribution}`` from a to b. Generates connectors, domains (3D: also
+blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
+``relax`` (2D) vertices joining two edges on one curve slide along it until the
+grid stops moving them. One undo step; warnings (e.g. unassigned edges lying on
+geometry) are in ``last_warnings``.
+
+### `edit_sketch(name: str, **changes) -> str`
+
+Change sketch parameters (any of those of create_sketch) and regenerate its
+outputs in place (same names: patches and other references to them stay valid).
+One undo step.
+
+### `regenerate_sketch(name: str) -> str`
+
+Generate a sketch's outputs again (e.g. after its geometry changed).
+
+### `sketch_report(name: str) -> str`
+
+Vertices (where they went and whether they float), edge families with their
+dimensions, errors and suggested assignments of a sketch.
+
+### `sketch_suggestions(name: str, tolerance: float | None = None) -> list[dict]`
+
+Unassigned boundary edges (3D: faces) of a sketch lying near a curve (surface):
+``{"what", "edge" | "face", "curve" | "surface", "message"}``. Nothing is assigned;
+see accept_sketch_suggestions.
+
+### `accept_sketch_suggestions(name: str, tolerance: float | None = None) -> str`
+
+Assign every suggested curve and surface (sketch_suggestions) in one edit.
+
+### `assign_sketch_geometry(name: str, geometry, tolerance: float | None = None) -> str`
+
+Assign the given curves (and 3D: surfaces) to the unassigned boundary edges (faces)
+of a sketch that lie near them - within ``tolerance``, by default the ends within a
+fifth of the edge length and the middle within half of it (the nearest of them; the
+GUI's "assign selected geometry"). One edit.
 
 ## Blocks (structured 3D)
 
@@ -513,7 +569,8 @@ blocks, the blocks (3D).
 
 ### `modify(name: str, **params) -> str`
 
-Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))``.
+Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))`` (a
+sketch: edit_sketch, which regenerates it).
 
 ### `rename(name: str, new_name: str) -> str`
 

@@ -83,6 +83,18 @@ GROUPS = [
         ],
     ),
     (
+        "Sketch topology (floating wireframe)",
+        [
+            "create_sketch",
+            "edit_sketch",
+            "regenerate_sketch",
+            "sketch_report",
+            "sketch_suggestions",
+            "accept_sketch_suggestions",
+            "assign_sketch_geometry",
+        ],
+    ),
+    (
         "Blocks (structured 3D)",
         [
             "create_block",

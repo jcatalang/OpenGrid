@@ -277,6 +277,7 @@ class MainWindow(QMainWindow):
             "spline": "Spline",
             "nurbs": "NURBS",
             "freehand": "Freehand",
+            "sketch": "Sketch block",
         }
         for name, label in labels.items():
             action = QAction(label, self)
@@ -311,7 +312,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.delete_action)
 
         create_menu = self.menuBar().addMenu("&Create")
-        for name in ("point", "line", "arc", "polyline", "spline"):
+        for name in ("point", "line", "arc", "polyline", "spline", "nurbs", "freehand", "sketch"):
             create_menu.addAction(self.tool_actions[name])
         create_menu.addSeparator()
         create_menu.addAction(self.connectors_action)
@@ -336,9 +337,16 @@ class MainWindow(QMainWindow):
             "split_block": self._action("Split block…", self.split_block),
             "join_blocks": self._action("Join two blocks", self.join_blocks),
             "ogrid": self._action("O-grid (butterfly) domain or block…", self.ogrid),
+            "sketch_assign": self._action(
+                "Assign selected geometry to sketch",
+                self.assign_selected_geometry,
+                tip="Assign the selected curves (surfaces) to the sketch edges (faces) near them",
+            ),
+            "sketch_regenerate": self._action("Regenerate sketch", self.regenerate_sketch),
+            "sketch_report": self._action("Sketch report", self.sketch_report),
         }
         for key, action in self.topology_actions.items():
-            if key in ("split_domain", "split_block", "ogrid"):
+            if key in ("split_domain", "split_block", "ogrid", "sketch_assign"):
                 topology_menu.addSeparator()
             topology_menu.addAction(action)
 
@@ -459,7 +467,7 @@ class MainWindow(QMainWindow):
             return
         if self._drag is None:
             return
-        self._drag.preview(xyz, self.scene.update_entities)
+        self._drag.preview(xyz, self.scene.preview_entities)
 
     def handle_release(self, xyz) -> list[str]:
         """Finish a stroke (returns the curves) or a drag (returns [entity])."""
@@ -476,6 +484,7 @@ class MainWindow(QMainWindow):
         drag = self._drag
         self._drag = None
         name = self._run(lambda: drag.finish(xyz))
+        self.scene.end_preview()
         self.scene.update_entities(drag.affected)
         self._show_handles()
         if not name:
@@ -557,6 +566,8 @@ class MainWindow(QMainWindow):
         created = self._run(lambda: self.tool.click(snapped))
         if created:
             log.info("created %s", created)
+            if self.session.store.get(created).kind == "sketch":
+                self._after_sketch(created)
         self._update_tool_feedback(snapped)
 
     def handle_move(self, xyz) -> None:
@@ -589,6 +600,11 @@ class MainWindow(QMainWindow):
     def set_tool(self, name: str) -> None:
         self.tool.cancel()
         self.tool = TOOLS[name](self.session)
+        if name == "sketch":
+            sketches = self._selected_of_kind("sketch")
+            if sketches:
+                self.tool.sketch = sketches[0]
+            self.tool.points_per_edge = self.dimension_box.value()
         self._stroke = None
         self._drag = None
         self._show_handles()
@@ -1189,6 +1205,57 @@ class MainWindow(QMainWindow):
             log.warning("%s", text)
             self.statusBar().showMessage(text.splitlines()[0], 8000)
             return None
+
+    # --------------------------------------------------------------- sketches
+    def _after_sketch(self, name: str) -> None:
+        """After a sketch changed (its warnings are logged by the session): redraw it and smooth
+        its group (live progress)."""
+        entity = self.session.store.get(name)
+        ids = [entity.id] + [i for _role, i in entity.params["outputs"]]
+        self.scene.update_entities(ids)
+        self.model_tree.populate(self.session)
+        for role, entity_id in entity.params["outputs"]:
+            if role == "group":
+                self.run_smoother(self.session.store.get(entity_id).name)
+
+    def assign_selected_geometry(self) -> str | None:
+        from opengrid.model.connectors import CURVE_KINDS
+        from opengrid.model.entities import SURFACE_KINDS
+
+        sketch = self._one("sketch", "sketch (and the curves or surfaces to assign)")
+        if sketch is None:
+            return None
+        geometry = [
+            n
+            for n in self.selected_names()
+            if self.session.store.get(n).kind in (*CURVE_KINDS, *SURFACE_KINDS)
+        ]
+        if not geometry:
+            self.statusBar().showMessage("Select curves or surfaces with the sketch", 5000)
+            return None
+        name = self._run(lambda: self.session.assign_sketch_geometry(sketch, geometry))
+        if name:
+            log.info("%s: assigned %s", name, ", ".join(geometry))
+            self._after_sketch(name)
+        return name
+
+    def regenerate_sketch(self) -> str | None:
+        sketch = self._one("sketch", "sketch")
+        if sketch is None:
+            return None
+        name = self._run(lambda: self.session.regenerate_sketch(sketch))
+        if name:
+            self._after_sketch(name)
+        return name
+
+    def sketch_report(self) -> str | None:
+        sketch = self._one("sketch", "sketch")
+        if sketch is None:
+            return None
+        text = self.session.sketch_report(sketch)
+        for line in text.splitlines():
+            log.info("%s", line)
+        return text
 
     # ------------------------------------------------------- topology editing
     def _one(self, kind: str, label: str) -> str | None:

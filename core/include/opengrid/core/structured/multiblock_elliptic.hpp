@@ -75,8 +75,11 @@ struct MultiblockOptions {
   double tolerance = 1e-6;
   int acceleration = 20;  // Anderson depth (0: plain relaxation)
   // Sliding nodes stay within this fraction of their initial boundary intervals of their
-  // initial position (3D; the 2D smoother uses 1/2 of the intervals towards each neighbour).
+  // initial position (2D: of the interval towards each neighbour, in curve parameter).
   double slide_limit = 0.5;
+  // Also converged when the RMS update falls below this length (0: off), so that a run
+  // warm-started from a nearly converged grid stops at the same accuracy as a cold one.
+  double absolute_tolerance = 0.0;
 };
 
 // Node classes reported per node.

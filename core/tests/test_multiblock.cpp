@@ -364,3 +364,121 @@ TEST(Multiblock3D, RejectsBadSlides) {
   EXPECT_THROW((void)og::smooth_multiblock_3d(input, og::MultiblockOptions{}),
                std::invalid_argument);
 }
+
+// Phase 10d: internal walls (a fixed row inside the grid, controlled on both sides), the
+// absolute tolerance of warm-started runs and the slide limit.
+namespace {
+
+// A unit square, (ni x nj) uniform, the middle row j = nj / 2 fixed (an internal wall).
+og::MultiblockInput square_with_middle_row(int ni, int nj, double wall_spacing) {
+  og::MultiblockInput input;
+  std::vector<std::int64_t> ids(ix(ni) * ix(nj));
+  for (int j = 0; j < nj; ++j) {
+    for (int i = 0; i < ni; ++i) {
+      const std::size_t index = (ix(j) * ix(ni)) + ix(i);
+      ids[index] = static_cast<std::int64_t>(index);
+      input.xy.push_back(static_cast<double>(i) / (ni - 1));
+      input.xy.push_back((2.0 * j / (nj - 1)) - 1.0);
+      const bool boundary = i == 0 || j == 0 || i == ni - 1 || j == nj - 1 || j == nj / 2;
+      input.fixed.push_back(static_cast<std::uint8_t>(boundary));
+    }
+  }
+  for (int j = 0; j + 1 < nj; ++j) {
+    for (int i = 0; i + 1 < ni; ++i) {
+      input.quads.push_back(quad(ids, ni, i, j));
+    }
+  }
+  for (int i = 0; i < ni; ++i) {
+    input.walls.push_back({ids[(ix(nj / 2) * ix(ni)) + ix(i)], wall_spacing, 0.1, 0.1, 100.0});
+  }
+  return input;
+}
+
+TEST(Multiblock, InternalWallControlsBothSides) {
+  const int ni = 21;
+  const int nj = 41;
+  const double h = 0.01;  // the uniform grid has 0.05
+  const og::MultiblockInput input = square_with_middle_row(ni, nj, h);
+  og::MultiblockOptions options;
+  options.tolerance = 1e-10;
+  options.max_iterations = 20000;
+  const og::MultiblockResult r = og::smooth_multiblock(input, options);
+  ASSERT_TRUE(r.converged);
+  auto y = [&](int i, int j) { return r.xy[(2 * ((ix(j) * ix(ni)) + ix(i))) + 1]; };
+  for (int i = 4; i < ni - 4; ++i) {
+    EXPECT_NEAR(y(i, (nj / 2) + 1) - y(i, nj / 2), h, 0.05 * h) << i;
+    EXPECT_NEAR(y(i, nj / 2) - y(i, (nj / 2) - 1), h, 0.05 * h) << i;
+    EXPECT_EQ(y(i, nj / 2), 0.0);
+  }
+}
+
+TEST(Multiblock, AbsoluteToleranceStopsAWarmStart) {
+  const int ni = 21;
+  const int nj = 41;
+  og::MultiblockInput input = square_with_middle_row(ni, nj, 0.01);
+  input.walls.clear();  // wall sources restart from zero: positions only here
+  og::MultiblockOptions options;
+  options.tolerance = 1e-9;
+  options.max_iterations = 20000;
+  const og::MultiblockResult cold = og::smooth_multiblock(input, options);
+  ASSERT_TRUE(cold.converged);
+  // From the converged grid, relative to its own (tiny) first update the run would go on;
+  // the absolute tolerance (the cold run's final accuracy) stops it at once.
+  input.xy = cold.xy;
+  options.absolute_tolerance = options.tolerance * cold.residuals.front();
+  const og::MultiblockResult warm = og::smooth_multiblock(input, options);
+  EXPECT_TRUE(warm.converged);
+  EXPECT_LE(warm.iterations, 3);
+}
+
+TEST(Multiblock3D, InternalWallControlsBothSides) {
+  const int n = 13;
+  const int nk = 21;
+  const double h = 0.02;  // the uniform grid has 0.1
+  og::Multiblock3DInput input;
+  auto id = [&](int i, int j, int k) {
+    const std::size_t index = (((ix(k) * ix(n)) + ix(j)) * ix(n)) + ix(i);
+    return static_cast<std::int64_t>(index);
+  };
+  for (int k = 0; k < nk; ++k) {
+    for (int j = 0; j < n; ++j) {
+      for (int i = 0; i < n; ++i) {
+        input.xyz.insert(input.xyz.end(),
+                         {static_cast<double>(i) / (n - 1), static_cast<double>(j) / (n - 1),
+                          (2.0 * k / (nk - 1)) - 1.0});
+        const bool fixed =
+            i == 0 || j == 0 || k == 0 || i == n - 1 || j == n - 1 || k == nk - 1 || k == nk / 2;
+        input.fixed.push_back(static_cast<std::uint8_t>(fixed));
+        if (k == nk / 2) {
+          input.walls.push_back({id(i, j, k), h, 0.1, 0.1, 100.0});
+        }
+      }
+    }
+  }
+  for (int k = 0; k + 1 < nk; ++k) {
+    for (int j = 0; j + 1 < n; ++j) {
+      for (int i = 0; i + 1 < n; ++i) {
+        std::array<std::int64_t, 8> hex{};
+        for (unsigned c = 0; c < 8; ++c) {
+          hex[c] = id(i + static_cast<int>(c & 1U), j + static_cast<int>((c >> 1U) & 1U),
+                      k + static_cast<int>((c >> 2U) & 1U));
+        }
+        input.hexes.push_back(hex);
+      }
+    }
+  }
+  og::MultiblockOptions options;
+  options.tolerance = 1e-10;
+  options.max_iterations = 20000;
+  const og::Multiblock3DResult r = og::smooth_multiblock_3d(input, options);
+  ASSERT_TRUE(r.converged);
+  auto z = [&](int i, int j, int k) {
+    return r.xyz[(3 * static_cast<std::size_t>(id(i, j, k))) + 2];
+  };
+  for (int i = 3; i < n - 3; ++i) {
+    EXPECT_NEAR(z(i, n / 2, (nk / 2) + 1) - z(i, n / 2, nk / 2), h, 0.05 * h) << i;
+    EXPECT_NEAR(z(i, n / 2, nk / 2) - z(i, n / 2, (nk / 2) - 1), h, 0.05 * h) << i;
+  }
+}
+
+}  // namespace

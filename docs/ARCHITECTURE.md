@@ -1013,6 +1013,56 @@ segment, so derivative jumps at knots never cost accuracy.
   (85 frames/s, offscreen); a six-domain freehand network: 83 ms (12 frames/s). Quarter
   circle stroke: 4 control points within 0.5 %.
 
+### Sketch topology (Phase 10d)
+- **Entity** `sketch` (`model/sketch.py`, stored in the project section "groups"): vertices,
+  blocks (4 vertex indices in 2D, 8 in 3D, VTK order; orientation fixed automatically),
+  `dimensions` on one edge per edge family (union-find over opposite block edges; two values
+  in one family are reported with both edges; `spacing` fills the rest), assignments
+  `curves` (edges -> curves) and `surfaces` (3D boundary faces -> surfaces), `walls` (edges /
+  faces with a first-cell height; between two blocks: internal walls), `pinned`, `fixed`
+  vertices, `distributions`, `relax`, smoothing tolerance, and `outputs` (role, id) of the
+  generated entities. References: the assigned geometry only.
+- **Placement:** a vertex on edges assigned to two or more curves goes to the point where the
+  curves meet (curve ends and projections tried, nearest to the drawn point; reported when
+  they do not meet); on one curve to its projection; on assigned faces only (3D) to the
+  surface. Closed curves: an edge's parameters are chosen so its arc contains the projection
+  of its midpoint.
+- **Generation** (`generate`, inside the command's transaction): edges -> connectors on the
+  assigned curve between the vertices' parameters, else on an owned line (3D, between faces
+  on one surface: a spline through the line projected onto it); 2D blocks -> domains; 3D
+  faces -> domains (on their surface), blocks -> six-face blocks; one smoothing group (walls,
+  slide "auto", joints "slide"). Edges leaving a wall get a tanh distribution with the wall
+  spacing. `write_plan` updates the outputs in place (same ids and names) and removes the
+  ones no longer generated (refused while something else uses them).
+- **Vertex passes** (with `relax`): sliding vertices (2D joints of two edges on one curve; 3D
+  vertices whose boundary faces lie on one surface or plane) are moved to where the group
+  puts them, on a coarser copy (every family with half the intervals), walls sliding and
+  internal walls pinned, interior nodes warm-started from the last pass with an absolute
+  tolerance; positions mixed by Anderson (depth 5, plain step when a vertex would move more
+  than a quarter of its block) and projected back; stop at 1e-3 local spacings (60 passes at
+  most). The positions read back through the solver's node ids of each block corner.
+- **Group extensions** (`groups.py`, `groups3d.py`, C++): `joints="slide"` (2D: a node joining
+  two sliding connectors on one curve slides on one chain over the curve; 3D: a face corner
+  inside one sliding surface or plane), `pinned` connectors / faces (fixed interfaces),
+  walls on interfaces = internal walls (C++: a fixed regular node in the wall list gets wall
+  control on both sides along its one non-wall axis), `slide_limit` (2D now too),
+  `absolute_tolerance` (RMS update). Coplanar sliding faces share one plane patch fitted to
+  all of them; wall faces on a surface have their nodes projected onto it.
+- **Ownership:** `CommandStack.run` calls `check_ownership` after every command: a changed
+  output whose sketch was not touched by the same command is refused ("edit the sketch
+  instead"). Deleting a sketch deletes its outputs. `Store.rollback` restores `next_id` and
+  the name counters, so a refused command leaves no trace in later ids. `Session.modify` of
+  a sketch is `edit_sketch`.
+- **Editing:** `move_handle(sketch, "vertices", k, xyz)` regenerates the sketch (previews
+  without the passes); moving a curve regenerates the sketches that use it (their connectors
+  are left out of the crossing re-solve). Drag previews draw all affected entities as one
+  merged wireframe actor (pyvista's per-actor cost dominated: 558 -> 95 ms per frame on the
+  12-block airfoil sketch).
+- **Suggestions:** unassigned boundary edges (faces) whose ends (corners) and middle (centre)
+  lie within 5 % of their length (size) of a curve (surface) are listed as warnings, never
+  assigned; `assign_sketch_geometry` (GUI: "assign selected geometry") assigns the given
+  geometry with ends within 20 % and the middle within 50 % (chords of curves sag).
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

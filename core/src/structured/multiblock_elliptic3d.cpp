@@ -553,25 +553,52 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     std::array<int, 2> tangent;  // positive directions of the two other axes
   };
   std::vector<WallNode> walls;
+  std::vector<std::uint8_t> on_wall(n, 0);
   for (const MultiblockWall& wall : input.walls) {
     if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
       throw std::invalid_argument("multiblock 3D: wall node out of range");
     }
+    on_wall[static_cast<std::size_t>(wall.node)] = 1;
+  }
+  for (const MultiblockWall& wall : input.walls) {
     const auto g = static_cast<std::size_t>(wall.node);
     const NodeTopo& t = topo[g];
-    if (!t.consistent || t.shape != Shape::Face) {
-      continue;  // block edges and corners on a wall (as the wall face's edges in one block)
+    // A wall node on the boundary controls the grid line leaving it; a fixed regular node
+    // inside the grid (an internal wall, e.g. a pinned wake cut) controls the lines leaving
+    // it on both sides, along the one axis whose neighbours are not wall nodes.
+    std::vector<int> inward;
+    if (t.consistent && t.shape == Shape::Face) {
+      inward.push_back(t.inward);
+    } else if (t.consistent && t.shape == Shape::Interior && input.fixed[g] != 0) {
+      int normal_axis = -1;
+      int count = 0;
+      for (int a = 0; a < 3; ++a) {
+        const std::int64_t plus = nb_dir(g, dir_of(a, 1));
+        const std::int64_t minus = nb_dir(g, dir_of(a, -1));
+        const bool wall_plus = plus >= 0 && on_wall[static_cast<std::size_t>(plus)] != 0;
+        const bool wall_minus = minus >= 0 && on_wall[static_cast<std::size_t>(minus)] != 0;
+        if (!wall_plus && !wall_minus) {
+          normal_axis = a;
+          count += 1;
+        }
+      }
+      if (count == 1) {
+        inward.push_back(dir_of(normal_axis, 1));
+        inward.push_back(dir_of(normal_axis, -1));
+      }
     }
-    const int axis = dir_axis(t.inward);
-    const std::array<int, 2> tangent = {dir_of((axis + 1) % 3, 1), dir_of((axis + 2) % 3, 1)};
-    double spacing = wall.spacing;
-    if (!(spacing > 0.0)) {
-      spacing = distance(x[static_cast<std::size_t>(nb_dir(g, t.inward))], x[g]);
+    for (const int d : inward) {
+      const int axis = dir_axis(d);
+      const std::array<int, 2> tangent = {dir_of((axis + 1) % 3, 1), dir_of((axis + 2) % 3, 1)};
+      double spacing = wall.spacing;
+      if (!(spacing > 0.0)) {
+        spacing = distance(x[static_cast<std::size_t>(nb_dir(g, d))], x[g]);
+      }
+      if (!(spacing > 0.0)) {
+        continue;
+      }
+      walls.push_back({g, spacing, wall.decay, wall.relaxation, wall.max_source, d, tangent});
     }
-    if (!(spacing > 0.0)) {
-      continue;
-    }
-    walls.push_back({g, spacing, wall.decay, wall.relaxation, wall.max_source, t.inward, tangent});
   }
   std::vector<std::vector<WallReach>> reach(n);
   for (std::size_t w = 0; w < walls.size(); ++w) {
@@ -1094,7 +1121,8 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       }
     }
     result.iterations = iteration + 1;
-    if (residual <= options.tolerance * first_residual || residual <= 1e-13 * size) {
+    if (residual <= options.tolerance * first_residual || residual <= 1e-13 * size ||
+        residual <= options.absolute_tolerance) {
       result.converged = true;
       break;
     }

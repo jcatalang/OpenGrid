@@ -462,12 +462,17 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
   result.colours = colours;
 
   // ------------------------------------------------------------- wall control
+  // A wall node on the boundary (two quads) controls the grid line leaving it; a fixed node
+  // inside the grid (four quads: an internal wall such as a pinned wake cut) controls the
+  // lines leaving it on both sides, as two walls.
   struct WallNode {
     std::size_t node;
     double spacing;
     double decay;
     double relaxation;
     double max_source;
+    int normal;   // label of the wall-normal direction at the wall node
+    int tangent;  // label of the wall-tangent direction (normal turned clockwise)
   };
   std::vector<WallNode> walls;
   int bad_walls = 0;
@@ -476,29 +481,37 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
       throw std::invalid_argument("multiblock: wall node out of range");
     }
     const auto g = static_cast<std::size_t>(wall.node);
-    if (topo.manifold[g] == 0 || topo.closed[g] != 0 || topo.fans[g].size() != 2) {
+    std::vector<std::pair<int, int>> sides;
+    if (topo.manifold[g] != 0 && topo.closed[g] == 0 && topo.fans[g].size() == 2) {
+      sides.emplace_back(kN, kE);
+    } else if (topo.manifold[g] != 0 && topo.closed[g] != 0 && topo.fans[g].size() == 4 &&
+               input.fixed[g] != 0) {
+      sides.emplace_back(kN, kE);
+      sides.emplace_back(kS, kW);
+    } else {
       bad_walls += 1;  // a block corner on the wall: no grid line leaves it normally
       continue;
     }
-    double spacing = wall.spacing;
-    if (!(spacing > 0.0)) {
-      const std::int64_t inward = topo.nb[g][kN];
-      spacing = std::hypot(x[static_cast<std::size_t>(inward)] - x[g],
-                           y[static_cast<std::size_t>(inward)] - y[g]);
+    for (const auto& [normal, tangent] : sides) {
+      double spacing = wall.spacing;
+      if (!(spacing > 0.0)) {
+        const auto inward = static_cast<std::size_t>(topo.nb[g][static_cast<std::size_t>(normal)]);
+        spacing = std::hypot(x[inward] - x[g], y[inward] - y[g]);
+      }
+      if (!(spacing > 0.0)) {
+        bad_walls += 1;
+        continue;
+      }
+      walls.push_back({g, spacing, wall.decay, wall.relaxation, wall.max_source, normal, tangent});
     }
-    if (!(spacing > 0.0)) {
-      bad_walls += 1;
-      continue;
-    }
-    walls.push_back({g, spacing, wall.decay, wall.relaxation, wall.max_source});
   }
   (void)bad_walls;  // corners of blocks on walls are expected (as i = 0, imax in one block)
   // Grid lines leaving each wall, through regular free nodes (across interfaces).
   std::vector<std::vector<WallReach>> reach(n);
   for (std::size_t w = 0; w < walls.size(); ++w) {
     auto cur = static_cast<std::int64_t>(walls[w].node);
-    int normal = kN;
-    int tangent = kE;
+    int normal = walls[w].normal;
+    int tangent = walls[w].tangent;
     for (std::size_t steps = 1; steps <= n; ++steps) {
       const auto& nb = topo.nb[static_cast<std::size_t>(cur)];
       const std::int64_t next = nb[static_cast<std::size_t>(normal)];
@@ -532,9 +545,10 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     for (std::size_t w = 0; w < walls.size(); ++w) {
       const WallNode& wall = walls[w];
       const auto& nb = topo.nb[wall.node];
-      const auto e = static_cast<std::size_t>(nb[kE]);
-      const auto west = static_cast<std::size_t>(nb[kW]);
-      const auto in = static_cast<std::size_t>(nb[kN]);
+      const auto e = static_cast<std::size_t>(nb[static_cast<std::size_t>(wall.tangent)]);
+      const auto west =
+          static_cast<std::size_t>(nb[static_cast<std::size_t>(opposite(wall.tangent))]);
+      const auto in = static_cast<std::size_t>(nb[static_cast<std::size_t>(wall.normal)]);
       const double tx = x[e] - x[west];
       const double ty = y[e] - y[west];
       const double nx = x[in] - x[wall.node];
@@ -608,7 +622,7 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     std::int64_t west;
     double east_u;  // fixed parameter when the neighbour does not slide on this chain
     double west_u;
-    double lo0;  // within half the initial interval on either side of the initial parameter
+    double lo0;  // within slide_limit of the initial interval on either side
     double hi0;
   };
   std::vector<SlideBounds> bounds(sliding.size());
@@ -648,12 +662,13 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
         b.west_u = fixed_u;
       }
     }
-    // Each node keeps to half the initial interval on either side, so nodes cannot pile up
-    // one after another (e.g. towards a boundary corner where orthogonality is impossible).
+    // Each node keeps to a fraction (slide_limit, default 1/2) of the initial interval on
+    // either side, so nodes cannot pile up one after another (e.g. towards a boundary corner
+    // where orthogonality is impossible).
     const double a = std::min(initial[0], initial[1]);
     const double c = std::max(initial[0], initial[1]);
-    b.lo0 = u[g] - 0.5 * (u[g] - a);
-    b.hi0 = u[g] + 0.5 * (c - u[g]);
+    b.lo0 = u[g] - options.slide_limit * (u[g] - a);
+    b.hi0 = u[g] + options.slide_limit * (c - u[g]);
     bounds[s] = b;
   }
   auto slide_range = [&](std::size_t s, double& lo, double& hi) {
@@ -896,7 +911,8 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
       }
     }
     result.iterations = iteration + 1;
-    if (residual <= options.tolerance * first_residual || residual <= 1e-13 * size) {
+    if (residual <= options.tolerance * first_residual || residual <= 1e-13 * size ||
+        residual <= options.absolute_tolerance) {
       result.converged = true;
       break;
     }

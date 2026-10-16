@@ -13,7 +13,17 @@ Connectors, by their uses:
 * used by one member only: a *boundary*. Walls (``walls``) keep their nodes and get
   first-cell height and orthogonality control; other boundary connectors either slide along
   their curves (``slide``: "auto" slides every non-wall boundary connector, or a tuple of
-  connectors, or () for none) or stay fixed. The end nodes of boundary connectors stay fixed;
+  connectors, or () for none) or stay fixed. The end nodes of boundary connectors stay fixed,
+  except with ``joints="slide"``: a node joining exactly two sliding connectors on one curve
+  (one piece each, the node inside the curve) slides along that curve, and so do all the
+  sliding connectors on it (one chain over the whole curve); in 3D, a corner of sliding faces
+  on one surface (or plane) whose connectors all lie inside it slides on it. A sliding node
+  moves by at most
+  ``slide_limit`` of its initial intervals (default 1/2);
+* listed in ``pinned``: fixed, even an interface (e.g. the wake cut of a C-grid, whose
+  clustering at the trailing edge the Laplace smoothing would spread out);
+* a wall between two member domains (an interface listed in ``walls``) is an internal wall:
+  fixed, with wall control on both sides (3D: a face between two member blocks);
 * used by any domain outside the group: fixed (the neighbour needs those nodes).
 
 Members must be planar (z = const) structured domains without a surface. Parameters never
@@ -44,6 +54,9 @@ DEFAULT_GROUP = {
     "blocks": (),
     "walls": (),
     "slide": "auto",
+    "joints": "fixed",
+    "pinned": (),
+    "slide_limit": 0.5,
     "omega": 1.0,
     "max_iterations": 2000,
     "tolerance": 1e-6,
@@ -67,6 +80,7 @@ DEFAULT_GROUP_WALL = {
     "max_source": 100.0,
 }
 NODE_CLASSES = ("fixed", "regular", "irregular", "sliding")
+JOINTS = ("fixed", "slide")
 
 
 # ----------------------------------------------------------------------------- parameters
@@ -215,6 +229,26 @@ def normalize_group(raw: dict, store, where: str) -> dict:
             if ref not in refs:
                 refs.append(ref)
         slide = tuple(sorted(refs))
+    pinned = merged["pinned"]
+    if isinstance(pinned, (str, int)):
+        pinned = [pinned]
+    pinned_refs = []
+    for index, item in enumerate(pinned):
+        label = f"{where}: pinned[{index}]"
+        ref = _ref(store, item, ref_key, label, issues)
+        if ref is None:
+            continue
+        if ref not in allowed:
+            issues.append(Issue(label, f"{store.get(ref).name!r} is not {what}"))
+            continue
+        if ref not in pinned_refs:
+            pinned_refs.append(ref)
+    slide_limit = _number(merged["slide_limit"], f"{where}: slide_limit", issues, positive=True)
+    joints = merged["joints"]
+    if joints not in JOINTS:
+        issues.append(
+            Issue(f"{where}: joints", f"must be one of {', '.join(JOINTS)}, got {joints!r}")
+        )
     omega = _number(merged["omega"], f"{where}: omega", issues, positive=True)
     if omega is not None and omega >= 2.0:
         issues.append(Issue(f"{where}: omega", "must be below 2"))
@@ -244,6 +278,9 @@ def normalize_group(raw: dict, store, where: str) -> dict:
         "blocks": tuple(blocks),
         "walls": tuple(walls),
         "slide": slide,
+        "joints": joints,
+        "pinned": tuple(sorted(pinned_refs)),
+        "slide_limit": slide_limit,
         "omega": omega,
         "max_iterations": iterations,
         "tolerance": tolerance,
@@ -262,6 +299,7 @@ def group_references(params: dict) -> set[int]:
     refs.update(_wall_ref(w) for w in params["walls"])
     if params["slide"] != "auto":
         refs.update(params["slide"])
+    refs.update(params.get("pinned", ()))
     return refs
 
 
@@ -280,6 +318,7 @@ def group_script_params(params: dict, store) -> dict:
     result["walls"] = tuple(walls)
     if params["slide"] != "auto":
         result["slide"] = tuple(store.get(c).name for c in params["slide"])
+    result["pinned"] = tuple(store.get(c).name for c in params["pinned"])
     return result
 
 
@@ -354,6 +393,7 @@ def connector_roles(store, params: dict) -> dict[int, str]:
                 uses[item["connector"]] = uses.get(item["connector"], 0) + 1
     walls = {w["connector"] for w in params["walls"]}
     slide = params["slide"]
+    pinned = set(params.get("pinned", ()))
     roles = {}
     for c in sorted(uses):
         outside = [
@@ -363,10 +403,12 @@ def connector_roles(store, params: dict) -> dict[int, str]:
         ]
         if outside:
             roles[c] = "outside"
-        elif uses[c] >= 2:
-            roles[c] = "interface"
         elif c in walls:
             roles[c] = "wall"
+        elif c in pinned:
+            roles[c] = "fixed"
+        elif uses[c] >= 2:
+            roles[c] = "interface"
         elif slide == "auto" or c in slide:
             roles[c] = "sliding"
         else:
@@ -467,6 +509,8 @@ def build_layout(store, connectors, grids: dict[int, np.ndarray], params: dict) 
                     continue
                 wall_nodes.add(node)
                 walls.append((node, spacing, w["decay"], w["relaxation"], w["max_source"]))
+    if params.get("joints") == "slide":
+        slides = _slide_joints(store, roles, node_of, fixed, chains, slides)
     # A node that both slides and is fixed (end of another connector) stays fixed.
     slides = [(node, chain) for node, chain in slides if not fixed[node]]
     return GroupLayout(
@@ -480,6 +524,60 @@ def build_layout(store, connectors, grids: dict[int, np.ndarray], params: dict) 
         roles=roles,
         ends={c: (node_of(c, 0), node_of(c, store.get(c).params["dimension"] - 1)) for c in roles},
     )
+
+
+def _slide_joints(store, roles, node_of, fixed, chains, slides):
+    """Joints of sliding connectors on one curve: freed, and every node of those connectors
+    slides on one chain over the whole curve (so neighbours bound each other)."""
+    from opengrid.model.connectors import CHAIN_TOLERANCE
+
+    on_curve: dict[int, list[int]] = {}
+    for c in sorted(roles):
+        segments = store.get(c).params["segments"]
+        if roles[c] == "sliding" and len(segments) == 1:
+            on_curve.setdefault(segments[0]["curve"], []).append(c)
+    # Boundary connector ends per node (every role but interfaces).
+    ends: dict[int, list[tuple[int, int, float]]] = {}
+    for c in sorted(roles):
+        if roles[c] == "interface":
+            continue
+        params = store.get(c).params
+        segments = params["segments"]
+        n = params["dimension"]
+        first = (c, -1, -1.0)
+        last = (c, -1, -1.0)
+        if roles[c] == "sliding" and len(segments) == 1:
+            first = (c, segments[0]["curve"], segments[0]["t0"])
+            last = (c, segments[0]["curve"], segments[0]["t1"])
+        ends.setdefault(node_of(c, 0), []).append(first)
+        ends.setdefault(node_of(c, n - 1), []).append(last)
+    slide_chain = dict(slides)
+    for curve, members in sorted(on_curve.items()):
+        if len(members) < 2:
+            continue
+        joints = []
+        for node, items in sorted(ends.items()):
+            if len(items) != 2 or any(item[1] != curve for item in items):
+                continue
+            t = items[0][2]
+            if abs(items[1][2] - t) > 1e-9 or t <= 1e-9 or t >= 1.0 - 1e-9:
+                continue
+            joints.append(node)
+        if not joints:
+            continue
+        geometry = store.geometry(curve)
+        index = len(chains)
+        chains.append(
+            _core.CurveChain([(geometry, 0.0, 1.0)], CHAIN_TOLERANCE * max(1.0, geometry.length()))
+        )
+        for c in members:
+            n = store.get(c).params["dimension"]
+            for m in range(1, n - 1):
+                slide_chain[node_of(c, m)] = index
+        for node in joints:
+            fixed[node] = 0
+            slide_chain[node] = index
+    return sorted(slide_chain.items())
 
 
 def _inward(edge: int, i: int, j: int, step: int = 1) -> tuple[int, int]:
@@ -571,6 +669,8 @@ def run_group(layout, params: dict, progress=None):
         tolerance=params["tolerance"],
         acceleration=params["acceleration"],
         progress=progress,
+        slide_limit=params["slide_limit"],
+        absolute_tolerance=params.get("absolute_tolerance", 0.0),
     )
 
 
@@ -732,11 +832,21 @@ class GroupEvaluator:
         ) = raw
         counts = np.bincount(np.asarray(classes, dtype=np.int64), minlength=4)
         grids = {d: points[layout.ids[d]] for d in params["domains"]}
+        # Singular: irregular points, and fixed points where three or more member domains meet
+        # (e.g. a C-grid's trailing edge); grid lines must turn there.
+        corners = np.concatenate(
+            [layout.ids[d][[0, 0, -1, -1], [0, -1, 0, -1]] for d in params["domains"]]
+        )
+        meeting = np.bincount(corners, minlength=len(classes))
+
+        def singular_node(node: int) -> bool:
+            return classes[node] == 2 or (classes[node] == 0 and meeting[node] >= 3)
+
         singular = set()
         for c, (first, last) in layout.ends.items():
-            if classes[first] == 2:
+            if singular_node(first):
                 singular.add((c, 0))
-            if classes[last] == 2:
+            if singular_node(last):
                 singular.add((c, 1))
         singular = frozenset(singular)
         kinks = interface_kinks(self.store, params, grids, singular)

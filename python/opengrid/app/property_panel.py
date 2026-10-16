@@ -7,7 +7,7 @@ changed in that case.
 
 import math
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -929,6 +929,11 @@ class PropertyPanel(QWidget):
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
+        if entity.kind == "sketch":
+            self._sketch_rows(entity)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         for field, kind in FIELDS[entity.kind]:
             editor = self._make_editor(kind, entity.params[field])
             self._form.addRow(field, editor)
@@ -1047,6 +1052,36 @@ class PropertyPanel(QWidget):
         self.smooth_button = QPushButton("Run smoother")
         self.smooth_button.clicked.connect(lambda: self.smooth_requested.emit(entity.name))
         self._form.addRow("", self.smooth_button)
+
+    def _sketch_rows(self, entity) -> None:
+        params = entity.params
+        report = QLabel(self.session.sketch_report(entity.name))
+        report.setWordWrap(True)
+        report.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._form.addRow("sketch", report)
+        dimensions = QPlainTextEdit(
+            "\n".join(f"{d['edge'][0]} {d['edge'][1]} {d['points']}" for d in params["dimensions"])
+        )
+        dimensions.setPlaceholderText("a b points (one edge of a family per line)")
+        dimensions.setMinimumHeight(60)
+        self._form.addRow("dimensions", dimensions)
+        self._editors["dimensions"] = ("sketch_dimensions", dimensions)
+        lines = []
+        for wall in params["walls"]:
+            ref = wall.get("edge", wall.get("face"))
+            text = " ".join(str(v) for v in ref)
+            if wall["spacing"] is not None:
+                text += f" {format_number(wall['spacing'])}"
+            lines.append(text)
+        walls = QPlainTextEdit("\n".join(lines))
+        walls.setPlaceholderText("edge a b (3D: face a b c d) [first-cell height] per line")
+        walls.setMinimumHeight(50)
+        self._form.addRow("walls", walls)
+        self._editors["walls"] = ("sketch_walls", walls)
+        relax = QCheckBox("vertices on curves slide (2D)")
+        relax.setChecked(params["relax"])
+        self._form.addRow("relax", relax)
+        self._editors["relax"] = ("flag", relax)
 
     def _group_rows(self, entity) -> None:
         key = "domain"
@@ -1202,6 +1237,16 @@ class PropertyPanel(QWidget):
             value = self._read_editor(field, kind, editor)
             if value != entity.params[field]:
                 changes[field] = value
+        if entity.kind == "sketch" and changes:
+            from opengrid.model.sketch import normalize_sketch, sketch_script_params
+
+            merged = dict(sketch_script_params(entity.params, self.session.store))
+            merged.update(changes)
+            try:
+                canonical = normalize_sketch(merged, self.session.store, entity.name)
+            except ValidationError:
+                return new_name, changes  # reported by apply
+            changes = {k: v for k, v in changes.items() if canonical[k] != entity.params[k]}
         if entity.kind == "smoothing_group" and changes:
             # Names in the editors vs ids in the model: compare canonical parameters.
             from opengrid.model.groups import normalize_group
@@ -1225,6 +1270,10 @@ class PropertyPanel(QWidget):
             return parse_group_walls(editor.toPlainText(), key)
         if kind == "slide":
             return parse_slide(editor.text())
+        if kind in ("sketch_dimensions", "sketch_walls"):
+            return parse_sketch_lines(
+                editor.toPlainText(), kind, self.session.store.get(self.entity_id)
+            )
         if kind == "spin":
             return editor.value()
         if kind == "patch_type":
@@ -1306,6 +1355,36 @@ class PropertyPanel(QWidget):
     def _show_error(self, text: str) -> None:
         self._error.setText(text)
         self.message.emit(text, True)
+
+
+def parse_sketch_lines(text: str, kind: str, entity) -> tuple:
+    """Sketch dimensions ("a b points") or walls ("a b [spacing]", 3D "a b c d [spacing]")."""
+    size = 2
+    key = "edge"
+    if len(entity.params["blocks"][0]) == 8:
+        size = 4
+        key = "face"
+    out = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            if kind == "sketch_dimensions":
+                if len(parts) != 3:
+                    raise ValueError
+                out.append({"edge": (int(parts[0]), int(parts[1])), "points": int(parts[2])})
+                continue
+            if len(parts) not in (size, size + 1):
+                raise ValueError
+            ref = tuple(int(v) for v in parts[:size])
+            spacing = None
+            if len(parts) == size + 1:
+                spacing = float(parts[size])
+            out.append({key: ref, "spacing": spacing})
+        except ValueError:
+            raise ParseError(f"line {number}: cannot read {line!r}") from None
+    return tuple(out)
 
 
 def _canonical_vec(values) -> tuple:

@@ -45,6 +45,10 @@ def _for_script(kind: str, params: dict, store: Store) -> dict:
         from opengrid.model.blocks import block_script_params
 
         return block_script_params(params, store)
+    if kind == "sketch":
+        from opengrid.model.sketch import sketch_script_params
+
+        return sketch_script_params(params, store)
     if kind in ("domain", "unstructured_domain"):
         key = "edges"
         if kind == "unstructured_domain":
@@ -248,15 +252,24 @@ class DeleteEntities(Command):
             seen.add(name)
         if issues:
             raise ValidationError(issues)
+        # Deleting a sketch deletes what it generated.
+        expanded = list(self.names)
         for name in self.names:
+            entity = store.get(name)
+            if entity.kind == "sketch":
+                for _role, output in entity.params["outputs"]:
+                    if output in store and store.get(output).name not in seen:
+                        expanded.append(store.get(output).name)
+                        seen.add(store.get(output).name)
+        for name in expanded:
             for dependent in store.dependents(name):
                 if dependent.name not in seen:
                     issues.append(Issue(name, f"is used by {dependent.kind} {dependent.name!r}"))
         if issues:
             raise ValidationError(issues)
-        for name in self.names:
+        for name in expanded:
             store.remove(name)
-        return len(self.names)
+        return len(expanded)
 
     def script(self) -> str:
         return f"og.delete({self.names!r})"

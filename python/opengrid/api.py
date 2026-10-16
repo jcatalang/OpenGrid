@@ -507,6 +507,9 @@ class Session:
         tolerance: float = 1e-6,
         acceleration: int = 20,
         blocks=(),
+        joints: str = "fixed",
+        pinned=(),
+        slide_limit: float = 0.5,
     ) -> str:
         """Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
         grid (as one grid): interfaces and block corners move, grid lines continue across
@@ -521,12 +524,20 @@ class Session:
         and ``slide`` name block faces (domains); sliding faces move on their surface (or
         plane), boundary edges between faces on different surfaces along their connectors;
         faces shared with blocks or volumes outside the group stay fixed. Members' own
-        smoothing settings are ignored."""
+        smoothing settings are ignored. ``joints="slide"``: block corners between two sliding
+        connectors on one curve slide along it (3D: face corners inside one sliding surface
+        slide on it); ``pinned``: connectors (3D: faces) kept fixed even between members, e.g.
+        a wake cut (a wall between members is an internal wall: fixed, with wall control on
+        both sides, 2D); ``slide_limit``: how far a sliding node may move, in initial
+        intervals."""
         params = {
             "domains": domains,
             "blocks": blocks,
             "walls": walls,
             "slide": slide,
+            "joints": joints,
+            "pinned": pinned,
+            "slide_limit": slide_limit,
             "omega": omega,
             "max_iterations": max_iterations,
             "tolerance": tolerance,
@@ -559,6 +570,168 @@ class Session:
         if entity.kind != "smoothing_group":
             raise ValueError(f"{name!r} is a {entity.kind}, not a smoothing group")
         return entity.id
+
+    # ------------------------------------------------------------- sketches
+    def create_sketch(
+        self,
+        vertices,
+        blocks,
+        dimensions=(),
+        spacing: float | None = None,
+        curves=(),
+        surfaces=(),
+        walls=(),
+        fixed=(),
+        pinned=(),
+        distributions=(),
+        relax: bool = True,
+        tolerance: float = 1e-8,
+        max_iterations: int = 4000,
+        name: str | None = None,
+    ) -> str:
+        """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
+        (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
+        2D, counter-clockwise or not; 8 in 3D, VTK hexahedron order). ``dimensions``: points
+        per edge, ``{(a, b): n}`` on any edge of each edge family (or ``spacing`` for the
+        families without one); ``curves``: ``{(a, b): curve}`` assigns edges to database
+        curves, ``surfaces``: ``{(a, b, c, d): surface}`` 3D boundary faces to surfaces;
+        ``walls``: ``{(a, b): first-cell height or None}`` (edges, 2D; faces, 3D) or dicts
+        with ``"edge"``/``"face"``, ``"spacing"``, ``"decay"``, ``"relaxation"``,
+        ``"max_source"``; ``fixed``: vertices that must not float; ``distributions``:
+        ``{(a, b): distribution}`` from a to b. Generates connectors, domains (3D: also
+        blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
+        ``relax`` (2D) vertices joining two edges on one curve slide along it until the
+        grid stops moving them. One undo step; warnings (e.g. unassigned edges lying on
+        geometry) are in ``last_warnings``."""
+        from opengrid.model.sketch import create_sketch
+
+        kwargs = {
+            "vertices": vertices,
+            "blocks": blocks,
+            "dimensions": dimensions,
+            "spacing": spacing,
+            "curves": curves,
+            "surfaces": surfaces,
+            "walls": walls,
+            "fixed": fixed,
+            "pinned": pinned,
+            "distributions": distributions,
+            "relax": relax,
+            "tolerance": tolerance,
+            "max_iterations": max_iterations,
+            "name": name,
+        }
+        # The journal records what was given (defaults left out).
+        defaults = {"relax": True, "tolerance": 1e-8, "max_iterations": 4000}
+        kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in ("vertices", "blocks")
+            or (
+                not (v is None or (isinstance(v, (tuple, list, dict)) and not v))
+                and defaults.get(k, object()) != v
+            )
+        }
+        return self._sketch_command("create_sketch", create_sketch, "Create sketch", (), kwargs)
+
+    def edit_sketch(self, name: str, **changes) -> str:
+        """Change sketch parameters (any of those of create_sketch) and regenerate its
+        outputs in place (same names: patches and other references to them stay valid).
+        One undo step."""
+        from opengrid.model.sketch import edit_sketch
+
+        return self._sketch_command("edit_sketch", edit_sketch, f"Edit {name}", (name,), changes)
+
+    def regenerate_sketch(self, name: str) -> str:
+        """Generate a sketch's outputs again (e.g. after its geometry changed)."""
+        from opengrid.model.sketch import regenerate_sketch
+
+        return self._sketch_command(
+            "regenerate_sketch", regenerate_sketch, f"Regenerate {name}", (name,), {}
+        )
+
+    def sketch_report(self, name: str) -> str:
+        """Vertices (where they went and whether they float), edge families with their
+        dimensions, errors and suggested assignments of a sketch."""
+        from opengrid.model.sketch import report
+
+        return report(self.store, self._sketch(name))
+
+    def sketch_suggestions(self, name: str, tolerance: float | None = None) -> list[dict]:
+        """Unassigned boundary edges (3D: faces) of a sketch lying near a curve (surface):
+        ``{"what", "edge" | "face", "curve" | "surface", "message"}``. Nothing is assigned;
+        see accept_sketch_suggestions."""
+        from opengrid.model.sketch import suggestions
+
+        return suggestions(self.store, self._sketch(name), tolerance)
+
+    def accept_sketch_suggestions(self, name: str, tolerance: float | None = None) -> str:
+        """Assign every suggested curve and surface (sketch_suggestions) in one edit."""
+        from opengrid.model.sketch import suggestions
+
+        entity = self._sketch(name)
+        found = suggestions(self.store, entity, tolerance)
+        if not found:
+            raise ValidationError([Issue(entity.name, "no suggestions to accept")])
+        return self._assign_found(entity, found)
+
+    def assign_sketch_geometry(self, name: str, geometry, tolerance: float | None = None) -> str:
+        """Assign the given curves (and 3D: surfaces) to the unassigned boundary edges (faces)
+        of a sketch that lie near them - within ``tolerance``, by default the ends within a
+        fifth of the edge length and the middle within half of it (the nearest of them; the
+        GUI's "assign selected geometry"). One edit."""
+        from opengrid.model.sketch import suggestions
+
+        entity = self._sketch(name)
+        if isinstance(geometry, str):
+            geometry = [geometry]
+        ids = {self.store.get(g).id for g in geometry}
+        found = suggestions(
+            self.store, entity, tolerance, only=ids, fraction=0.2, middle_fraction=0.5
+        )
+        if not found:
+            raise ValidationError(
+                [Issue(entity.name, "no unassigned boundary edge or face lies near that geometry")]
+            )
+        return self._assign_found(entity, found)
+
+    def _assign_found(self, entity, found) -> str:
+        from opengrid.model.sketch import sketch_script_params
+
+        params = sketch_script_params(entity.params, self.store)
+        name = entity.name
+        changes = {}
+        curves = {item["edge"]: item["curve"] for item in params["curves"]}
+        surfaces = {item["face"]: item["surface"] for item in params["surfaces"]}
+        for item in found:
+            if "curve" in item:
+                curves[item["edge"]] = item["curve"]
+            else:
+                surfaces[item["face"]] = item["surface"]
+        if len(curves) != len(params["curves"]):
+            changes["curves"] = curves
+        if len(surfaces) != len(params["surfaces"]):
+            changes["surfaces"] = surfaces
+        return self.edit_sketch(name, **changes)
+
+    def _sketch(self, name: str):
+        entity = self.store.get(name)
+        if entity.kind != "sketch":
+            raise ValueError(f"{name!r} is a {entity.kind}, not a sketch")
+        return entity
+
+    def _sketch_command(self, method, function, label, args, kwargs) -> str:
+        from opengrid.commands import TopologyEdit
+        from opengrid.model.sketch import _canonical_input
+
+        args = tuple(_canonical_input(a) for a in args)
+        kwargs = {k: _canonical_input(v) for k, v in kwargs.items()}
+        command = TopologyEdit(method, function, args, kwargs, label)
+        names = self.commands.run(command)
+        self.last_warnings = command.warnings
+        for warning in command.warnings:
+            log.warning("%s: %s", method, warning)
+        return names[0]
 
     def domain_status(self, name: str) -> str:
         """One-line summary of a structured or unstructured domain."""
@@ -990,7 +1163,10 @@ class Session:
 
     # -------------------------------------------------------------- editing
     def modify(self, name: str, **params) -> str:
-        """Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))``."""
+        """Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))`` (a
+        sketch: edit_sketch, which regenerates it)."""
+        if name in self.store and self.store.get(name).kind == "sketch":
+            return self.edit_sketch(name, **params)
         return self.commands.run(ModifyEntity(name, params))
 
     def rename(self, name: str, new_name: str) -> str:

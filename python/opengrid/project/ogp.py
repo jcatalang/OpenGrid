@@ -21,7 +21,7 @@ _SECTIONS = {
     "connectors": ("connector",),
     "domains": ("domain", "unstructured_domain"),
     "blocks": ("block", "volume"),
-    "groups": ("smoothing_group",),
+    "groups": ("smoothing_group", "sketch"),
     "patches": ("patch",),
     "zones": ("zone",),
 }

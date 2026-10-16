@@ -63,9 +63,12 @@ class CommandStack:
 
     def run(self, command: Command) -> object:
         """Execute a command; on any error the store is rolled back and the error re-raised."""
+        from opengrid.model.sketch import check_ownership
+
         self.store.begin()
         try:
             result = command.execute(self.store)
+            check_ownership(self.store, self.store.touched())
         except BaseException:
             self.store.rollback()
             raise

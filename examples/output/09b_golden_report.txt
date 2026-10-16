@@ -8,5 +8,5 @@ g05_backward_step: ok (0.0 s, journal replays: True); area=45, interfaces=['c-in
 g06_airfoil_hybrid: ok (0.0 s, journal replays: True); quads=6421, triangles=3900, area=1255.73, first_height=1e-05
 g07_duct: ok (0.0 s, journal replays: True); volume=4, cells=16000
 g08_annular_sector: ok (0.0 s, journal replays: True); volume=1.57048, polygon_volume=1.57048
-g09_sphere_in_box: ok (0.7 s, journal replays: True); tets=15473, prisms=19536, pyramids=0, volume=186.981, worst_jacobian=0.300079
+g09_sphere_in_box: ok (0.6 s, journal replays: True); tets=15473, prisms=19536, pyramids=0, volume=186.981, worst_jacobian=0.300079
 g10_wing_stub: ok (3.0 s, journal replays: True); tets=68452, prisms=2084, hexes=32931, max_layers=12, worst_jacobian=0.0515424

@@ -161,6 +161,20 @@ while it is in a group.
     domains = og.domains_from_curves(curves)          # crossing curves -> structured domains
     og.move_handle("h1", "points", 6, (1.0, 0.9, 0))  # as a mouse drag: crossings follow
 
+### Sketch topology
+```python
+og.import_cad("airfoil.step", name="cad", domains="none")
+og.delete(og.names("connector"))
+og.create_sketch(vertices, blocks, dimensions={(0, 1): 41, (1, 2): 31}, relax=False, name="c")
+og.assign_sketch_geometry("c", og.names("nurbs"))      # curves near the sketch's edges
+og.edit_sketch("c", walls={(1, 2): 1e-3, (0, 1): 2e-3}, relax=True)  # (0, 1): a wake cut
+print(og.sketch_report("c"))                            # where each vertex went
+og.smooth_group("c-group")
+og.move_handle("c", "vertices", 9, (0.8, 0.65))         # as a mouse drag
+```
+The sketch owns `c-c0-1`, `c-d0`, ..., `c-group`; edit the sketch, not them. See
+`examples/10d_sketch_topology.py` (2D airfoil, sphere in a box, wing stub).
+
 ## Threads
 Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by
 default, or `OMP_NUM_THREADS`), `opengrid.set_threads(n)` changes it. Results never depend on

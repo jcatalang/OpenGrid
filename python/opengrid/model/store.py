@@ -61,6 +61,10 @@ def references(entity: Entity) -> set[int]:
         return refs
     if entity.kind == "zone":
         return {item["domain"] for item in entity.params["members"]}
+    if entity.kind == "sketch":
+        from opengrid.model.sketch import sketch_references
+
+        return sketch_references(entity.params)
     return set()
 
 
@@ -144,6 +148,9 @@ class Store:
         if self._transaction is not None:
             raise RuntimeError("transaction already open")
         self._transaction = {}
+        # A rolled-back transaction must not use up ids or automatic names (journal replay
+        # never sees it).
+        self._counters_before = (self.next_id, dict(self.name_counters))
 
     def commit(self) -> Change:
         transaction = self._require_transaction()
@@ -161,6 +168,7 @@ class Store:
         transaction = self._require_transaction()
         self._transaction = None
         self.apply_states(transaction)
+        self.next_id, self.name_counters = self._counters_before
 
     def apply_states(self, states: dict[int, Entity | None]) -> None:
         """Force the given entities into the given states (used by undo/redo/rollback)."""
@@ -243,6 +251,10 @@ class Store:
             )
         if name in self._names:
             raise ValidationError([Issue(name, "name already in use")])
+
+    def touched(self) -> dict[int, Entity | None]:
+        """Entities touched by the open transaction: id -> state before it."""
+        return dict(self._require_transaction())
 
     def _require_transaction(self) -> dict[int, Entity | None]:
         if self._transaction is None:

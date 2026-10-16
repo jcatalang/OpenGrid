@@ -108,7 +108,7 @@
  ],
  "format": "opengrid-project",
  "groups": [
-  {"acceleration": 20, "blocks": [36, 67, 80, 93, 96, 99], "domains": [], "id": 102, "max_iterations": 2000, "name": "box-group", "omega": 1.0, "slide": "auto", "tolerance": 1e-06, "type": "smoothing_group", "walls": [{"decay": 0.1, "domain": 14, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 45, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 72, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 85, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 94, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 97, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}
+  {"acceleration": 20, "blocks": [36, 67, 80, 93, 96, 99], "domains": [], "id": 102, "joints": "fixed", "max_iterations": 2000, "name": "box-group", "omega": 1.0, "pinned": [], "slide": "auto", "slide_limit": 0.5, "tolerance": 1e-06, "type": "smoothing_group", "walls": [{"decay": 0.1, "domain": 14, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 45, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 72, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 85, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 94, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}, {"decay": 0.1, "domain": 97, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.01}]}
  ],
  "name_counters": {},
  "next_id": 103,

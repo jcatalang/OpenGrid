@@ -25,6 +25,7 @@ KINDS = (
     "volume",
     "patch",
     "zone",
+    "sketch",
 )
 # Surface parameters that reference curves (entity ids once canonical).
 SURFACE_CURVES = {
@@ -310,6 +311,12 @@ def normalize_params(kind: str, raw: dict, where: str, store=None) -> dict:
         if store is None:
             raise ValueError("volume parameters need the store")
         return normalize_volume(raw, store, where)
+    if kind == "sketch":
+        from opengrid.model.sketch import normalize_sketch
+
+        if store is None:
+            raise ValueError("sketch parameters need the store")
+        return normalize_sketch(raw, store, where)
     if kind == "smoothing_group":
         from opengrid.model.groups import normalize_group
 
@@ -442,6 +449,7 @@ def build_geometry(kind: str, params: dict):
         "volume",
         "patch",
         "zone",
+        "sketch",
     ):
         raise ValueError(f"{kind}s have no single curve")
     if kind in SURFACE_KINDS:

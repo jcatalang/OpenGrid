@@ -1123,6 +1123,7 @@ MOVABLE = {
     "polyline": ("points",),
     "spline": ("points",),
     "nurbs": ("control_points",),
+    "sketch": ("vertices",),
 }
 
 
@@ -1144,8 +1145,10 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
     connector piece of the moved curve meets a connector piece of another curve (a crossing,
     or an end lying on the other curve) is solved again - Newton on both curves from the old
     parameters, or a projection when one of them is a curve end - and the connectors meeting
-    there get the new parameters. ``check``: validate the dependents (previews skip it: an
-    invalid state fails when it is drawn). Returns ([name], warnings)."""
+    there get the new parameters. Sketches using the curve are regenerated; a sketch vertex
+    (field "vertices") regenerates its sketch. ``check``: validate the dependents and run
+    the sketch vertex passes (previews skip both: an invalid state fails when it is drawn).
+    Returns ([name], warnings)."""
     from opengrid.model.network import _refine
 
     entity = _entity(store, name, tuple(MOVABLE), "move_handle")
@@ -1162,8 +1165,17 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
             _fail(entity.name, f"{field} has no item {index}")
         values[index] = point
         changes = {field: tuple(values)}
-    # Meeting places of the moved curve with other curves, before the move.
-    ends = _segment_ends(store)
+    if entity.kind == "sketch":
+        from opengrid.model.sketch import edit_sketch
+
+        # A drag preview (check=False) regenerates without the vertex passes.
+        return edit_sketch(store, entity.name, passes=check, **changes)
+    # Meeting places of the moved curve with other curves, before the move (the connectors
+    # of sketches are left to their sketch, which is regenerated).
+    from opengrid.model.sketch import owned_entities
+
+    owned = owned_entities(store)
+    ends = [e for e in _segment_ends(store) if e[0] not in owned]
     scale = max(1.0, max((float(np.max(np.abs(e[5]))) for e in ends), default=1.0))
     tolerance = 1e-9 * scale
     groups = []
@@ -1203,6 +1215,12 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
             segments[k][key] = value
     for connector, segments in sorted(updates.items()):
         _update(store, connector, dict(store.get(connector).params, segments=tuple(segments)))
+    from opengrid.model.sketch import regenerate_sketch
+
+    for dependent in store.dependents(entity.id):
+        if dependent.kind == "sketch":
+            _names, sketch_warnings = regenerate_sketch(store, dependent.name, passes=check)
+            warnings.extend(sketch_warnings)
     if check:
         from opengrid.commands.geometry import _check_dependents_still_valid
 

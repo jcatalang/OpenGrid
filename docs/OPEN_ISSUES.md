@@ -242,7 +242,8 @@ history). Phase tags show where each item came from.
   starting position (unbounded sliding piled nodes into 90° boundary corners: min scaled
   Jacobian 0.08 on the cylinder demo). So orthogonality on sliding boundaries is improved,
   not reached: 2.6° error on the bump channel's top wall (5.5° fixed). End nodes of boundary
-  connectors never slide, so an interface ending on a boundary keeps its end point.
+  connectors slide only with `joints="slide"` (10d: between two connectors on one curve in
+  2D, inside one surface in 3D); otherwise an interface ending on a boundary keeps its end.
 - **Topology decides the worst cells** [10a]: on the cylinder demo the group smooths the
   diagonals (kink 90° → 1°) but the worst cell drops from 0.45 to 0.36, in the channel
   corners, where a 90° boundary corner is split between two domains. Multi-block layouts
@@ -281,6 +282,30 @@ history). Phase tags show where each item came from.
   dragged. "Block from curves" (3D) was not built.
 - **Freehand** [10c]: fitted once (later drags move control points); pointer samples in the
   z = 0 plane; corners below 60 degrees are smoothed over.
+- **Sketch vertices on curves in 3D stay where drawn** [10d]: 3D vertices slide on planes and
+  surfaces only. Sliding along an edge between two surfaces (e.g. where the wing stub's
+  outflow meets a side wall) was built (one chain per curve, as in 2D) but made the 3D solver
+  stall (1500 iterations without converging in some passes) and was removed. So the wing
+  stub's wake blocks keep the drawn outflow vertices: min scaled Jacobian 0.12 there (0.68
+  elsewhere).
+- **Sketch boundary vertices without geometry stay where drawn** [10d] (2D boundary edges
+  with no curve, box corners, curve ends); the result depends on the drawing only through
+  them, the assigned geometry and the topology. Vertices on pinned edges and internal walls
+  (a wake cut) stay where drawn too: the passes have nothing to move them by.
+- **Vertex passes cost** [10d]: each pass smooths the group on a coarser copy (half the
+  intervals); 6-15 passes per edit: 2.7 s for the airfoil (3 edits), 44 s for the wing stub
+  (159k nodes). Previews skip them; set `relax=False` while setting a sketch up.
+- **Sketch assignment by proximity** [10d]: `assign_sketch_geometry` assigns the nearest
+  given curve within 20 % (ends) / 50 % (middle) of the edge length; a sketch drawn very
+  loosely can get an edge assigned to the wrong curve (seen with a 50 % end tolerance on
+  the wing: a mid-chord spanwise edge took the trailing-edge line). Check the report.
+- **Wall sources restart** [10d]: warm-started group runs restart wall control from zero
+  (only positions are warm-started); the sketch passes run without walls.
+- **Sketch GUI** [10d]: blocks are added four clicks at a time (2D, in the z = 0 plane);
+  vertices, blocks and assignments are otherwise edited by script or the property panel
+  (dimensions, walls, relax); no 3D axis handles; deleting single blocks has no tool.
+- **Sketch kink metric** [10d]: the airfoil group reports a 22° interface kink three cells
+  from the trailing edge, where the C-lines turn by the 14° wedge (8° six cells away).
 - **Groups and topology edits** [10a, 10b]: members follow splits, joins and O-grids; a 2D
   group's member order changes when an O-grid replaces a member.
 - **Picture bug in 9b** [10a]: `09b_topology.png` coloured cells by the wrong quality values

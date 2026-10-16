@@ -1,6 +1,6 @@
 sphere in a box: 6 blocks, 57600 cells
   per block (TFI, faces fixed): min scaled Jacobian 0.577
-  smoothing group: 6 blocks, 60050 nodes (55062 regular, 184 irregular, 2394 sliding, 2410 fixed), interface kink 31 deg, converged in 82 iterations, 0.59 s
+  smoothing group: 6 blocks, 60050 nodes (55062 regular, 184 irregular, 2394 sliding, 2410 fixed), interface kink 31 deg, converged in 82 iterations, 0.68 s
     min scaled Jacobian 0.327, interface kink 30.92 deg
     first-cell height on the sphere 0.01000 .. 0.01000 (requested 0.01)
     box faces stay on their planes within 0.0e+00
@@ -12,8 +12,8 @@ sphere in a box: 6 blocks, 57600 cells
 
 ball (core + 6 shells): 32000 cells
   per block (TFI, faces fixed): min scaled Jacobian 0.577
-  smoothing group: 7 blocks, 33281 nodes (30571 regular, 308 irregular, 2394 sliding, 8 fixed), interface kink 0.52 deg, converged in 196 iterations, 0.93 s
+  smoothing group: 7 blocks, 33281 nodes (30571 regular, 308 irregular, 2394 sliding, 8 fixed), interface kink 0.52 deg, converged in 196 iterations, 0.92 s
     min scaled Jacobian 0.750, interface kink 0.52 deg (away from irregular edges)
     sliding nodes on the sphere within 2.2e-16
 
-1M-cell ball: 1048576 cells, 10 threads: 7 blocks, 1061121 nodes (1035531 regular, 1012 irregular, 24570 sliding, 8 fixed), interface kink 0.49 deg, converged in 328 iterations, 25.2 s
+1M-cell ball: 1048576 cells, 10 threads: 7 blocks, 1061121 nodes (1035531 regular, 1012 irregular, 24570 sliding, 8 fixed), interface kink 0.49 deg, converged in 328 iterations, 26.6 s

@@ -18,12 +18,16 @@ class SnapTarget:
 
 
 def snap_targets(session: Session) -> list[SnapTarget]:
-    """Point entities and the end points of every curve, in id order (connector ends lie on
-    curve ends, so they need no separate targets)."""
+    """Point entities, sketch vertices and the end points of every curve, in id order
+    (connector ends lie on curve ends, so they need no separate targets)."""
     targets = []
     for entity in session.store:
         if entity.kind == "point":
             targets.append(SnapTarget(tuple(entity.params["xyz"]), entity.name))
+            continue
+        if entity.kind == "sketch":
+            for k, xyz in enumerate(entity.params["vertices"]):
+                targets.append(SnapTarget(tuple(xyz), f"{entity.name} vertex {k}"))
             continue
         if entity.kind not in CURVE_KINDS:
             continue
@@ -224,6 +228,56 @@ class FreehandTool(Tool):
         return list(self.points)
 
 
+class SketchTool(Tool):
+    """Sketch topology: click the four corners of a block (snapped to existing sketch
+    vertices, which are then shared). The first block creates a sketch whose spacing gives
+    its edges about ``points_per_edge`` points; later ones are added to the ``sketch``
+    (Session.edit_sketch)."""
+
+    name = "sketch"
+    min_points = 4
+    max_points = 4
+    points_per_edge = 21
+    sketch: str | None = None
+
+    def prompt(self) -> str:
+        target = "a new sketch"
+        if self.sketch is not None:
+            target = self.sketch
+        return f"Sketch block for {target}: click corner {len(self.points) + 1} of 4"
+
+    def create(self, points) -> str:
+        if self.sketch is None or self.sketch not in self.session.store:
+            mean = sum(math.dist(points[k], points[(k + 1) % 4]) for k in range(4)) / 4.0
+            spacing = mean / max(self.points_per_edge - 1, 1)
+            self.sketch = self.session.create_sketch(points, [(0, 1, 2, 3)], spacing=spacing)
+            return self.sketch
+        entity = self.session.store.get(self.sketch)
+        vertices = [tuple(v) for v in entity.params["vertices"]]
+        block = []
+        for point in points:
+            found = None
+            for k, vertex in enumerate(vertices):
+                if math.dist(vertex, point) <= 1e-12 * max(1.0, max(abs(c) for c in point)):
+                    found = k
+                    break
+            if found is None:
+                vertices.append(tuple(point))
+                found = len(vertices) - 1
+            block.append(found)
+        blocks = [*entity.params["blocks"], tuple(block)]
+        changes = {"vertices": vertices, "blocks": blocks}
+        if entity.params["spacing"] is None:
+            mean = sum(math.dist(points[k], points[(k + 1) % 4]) for k in range(4)) / 4.0
+            changes["spacing"] = mean / max(self.points_per_edge - 1, 1)
+        return self.session.edit_sketch(self.sketch, **changes)
+
+    def preview(self, cursor) -> list[tuple]:
+        if not self.points:
+            return []
+        return [*self.points, tuple(cursor), self.points[0]]
+
+
 TOOLS = {
     "select": SelectTool,
     "point": PointTool,
@@ -233,4 +287,5 @@ TOOLS = {
     "spline": SplineTool,
     "nurbs": NurbsTool,
     "freehand": FreehandTool,
+    "sketch": SketchTool,
 }

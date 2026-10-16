@@ -30,6 +30,7 @@ BLOCK_COLOR = "#7fd1b9"
 SURFACE_COLOR = "#8a7fd1"
 QUALITY_CMAP = "viridis"
 WORST_COLOR = "#ff3b30"
+SKETCH_COLOR = "#ff6fd8"
 TESSELLATION_TOLERANCE = 2e-4
 
 
@@ -53,6 +54,7 @@ class Scene:
         self.session = session
         self.selected_ids: set[int] = set()
         self._actors: dict[int, list[str]] = {}  # entity id -> actor names
+        self._hidden: set[str] = set()  # actors hidden by a drag preview
         self.color_by_stretching = True
         self.show_nodes = True
         self.quality_metric: str | None = None  # colour domains by this metric when set
@@ -78,7 +80,14 @@ class Scene:
         # redraw all of them together with the changed entities.
         targets = set(ids)
         for entity in self.session.store:
-            if entity.kind in ("connector", "domain", "unstructured_domain", "block", "volume"):
+            if entity.kind in (
+                "connector",
+                "domain",
+                "unstructured_domain",
+                "block",
+                "volume",
+                "sketch",
+            ):
                 targets.add(entity.id)
         for entity_id in sorted(targets):
             self._remove_entity_actor(entity_id)
@@ -86,6 +95,58 @@ class Scene:
                 self._add_entity_actor(entity_id)
         self._update_endpoints()
         self.plotter.render()
+
+    def preview_entities(self, ids) -> None:
+        """Drag preview: the given entities (domains, connectors, curves, sketches) drawn as
+        one wireframe actor while their own actors are hidden (cheap to redraw every frame);
+        end_preview restores them."""
+        pieces = []
+        actors = self.plotter.renderer.actors  # a fresh dict on every access: read once
+        for entity_id in sorted(ids):
+            if entity_id not in self.session.store:
+                continue
+            entity = self.session.store.get(entity_id)
+            if entity.kind == "domain":
+                pieces.append(quad_mesh(self.session.domain_grid(entity.name, compute=False)))
+            elif entity.kind == "connector":
+                pieces.append(_polyline(self.session.connector_nodes(entity.name).points))
+            elif entity.kind == "sketch":
+                from opengrid.model.sketch import Lattice
+
+                params = entity.params
+                lattice = Lattice.build(params["vertices"], params["blocks"], entity.name)
+                edges = np.array(sorted(lattice.edges), dtype=np.int64)
+                lines = np.concatenate([np.full((len(edges), 1), 2), edges], axis=1)
+                points = np.asarray(params["vertices"], dtype=float)
+                pieces.append(pv.PolyData(points, lines=lines.reshape(-1)))
+            else:
+                continue
+            for actor_name in self._actors.get(entity_id, []):
+                actor = actors.get(actor_name)
+                if actor is not None and actor_name not in self._hidden:
+                    actor.SetVisibility(False)
+                    self._hidden.add(actor_name)
+        if pieces:
+            merged = pv.merge(pieces)
+            self.plotter.add_mesh(
+                merged,
+                style="wireframe",
+                color=PREVIEW_COLOR,
+                line_width=1.0,
+                name="drag-preview",
+                pickable=False,
+                reset_camera=False,
+            )
+        self.plotter.render()
+
+    def end_preview(self) -> None:
+        self.plotter.remove_actor("drag-preview", render=False)
+        actors = self.plotter.renderer.actors
+        for actor_name in sorted(self._hidden):
+            actor = actors.get(actor_name)
+            if actor is not None:
+                actor.SetVisibility(True)
+        self._hidden.clear()
 
     def set_selection(self, ids) -> None:
         changed = self.selected_ids.symmetric_difference(ids)
@@ -389,6 +450,9 @@ class Scene:
         if entity.kind in SURFACE_KINDS:
             self._add_surface_actor(entity)
             return
+        if entity.kind == "sketch":
+            self._add_sketch_actor(entity)
+            return
         if entity.kind not in CURVE_KINDS and entity.kind != "point":
             return  # patches and zones are shown through their members
         if entity.kind == "point":
@@ -420,6 +484,41 @@ class Scene:
                 reset_camera=False,
             )
         self._actors[entity_id] = [actor_name]
+
+    def _add_sketch_actor(self, entity) -> None:
+        """The sketch's wireframe as drawn (its edges between the vertices) and its vertices."""
+        from opengrid.model.sketch import Lattice
+
+        params = entity.params
+        lattice = Lattice.build(params["vertices"], params["blocks"], entity.name)
+        points = np.asarray(params["vertices"], dtype=float)
+        edges = np.array(sorted(lattice.edges), dtype=np.int64)
+        lines = np.concatenate([np.full((len(edges), 1), 2), edges], axis=1).reshape(-1)
+        color = SKETCH_COLOR
+        width = 2.0
+        if entity.id in self.selected_ids:
+            color = SELECTED_COLOR
+            width = 3.0
+        line_name = f"entity-{entity.id}"
+        vertex_name = f"entity-{entity.id}-vertices"
+        self.plotter.add_mesh(
+            pv.PolyData(points, lines=lines),
+            color=color,
+            line_width=width,
+            name=line_name,
+            pickable=False,
+            reset_camera=False,
+        )
+        self.plotter.add_mesh(
+            pv.PolyData(points),
+            color=color,
+            point_size=9,
+            render_points_as_spheres=True,
+            name=vertex_name,
+            pickable=False,
+            reset_camera=False,
+        )
+        self._actors[entity.id] = [line_name, vertex_name]
 
     def _update_endpoints(self) -> None:
         ends = []
@@ -468,7 +567,7 @@ def pick_entity(session: Session, xyz, tolerance: float) -> str | None:
     """Name of the entity closest to ``xyz`` within ``tolerance``.
 
     Ties are broken by priority: points, then connectors (drawn on top of their curves), then
-    curves.
+    curves and sketch edges.
     """
     best_name = None
     best_score = math.inf
@@ -500,6 +599,16 @@ def pick_entity(session: Session, xyz, tolerance: float) -> str | None:
             score = tolerance
         elif entity.kind in CURVE_KINDS:
             _t, _point, distance = session.geometry(entity.name).project(tuple(xyz))
+            score = distance
+        elif entity.kind == "sketch":
+            from opengrid.model.sketch import Lattice
+
+            lattice = Lattice.build(entity.params["vertices"], entity.params["blocks"], "")
+            vertices = np.asarray(entity.params["vertices"], dtype=float)
+            point = np.asarray(xyz, dtype=float)
+            distance = min(
+                _distance_to_polyline(point, vertices[[a, b]]) for a, b in sorted(lattice.edges)
+            )
             score = distance
         else:
             continue

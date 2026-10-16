@@ -3,7 +3,8 @@ rendering, unit-testable).
 
 Handles: point entities; the end points of lines; the defining points of polylines and
 splines; the control points of NURBS curves; connector break points (moved along the
-connector). A drag previews the change inside a store transaction that is rolled back after
+connector); sketch vertices (the sketch regenerates, without its vertex passes while
+dragging). A drag previews the change inside a store transaction that is rolled back after
 drawing, so nothing is recorded until the release, which runs one Modify command (one undo
 step, one journal line with the final position: Session.move_handle, which also keeps the
 connectors of a curve network on the moved curve's crossings).
@@ -37,6 +38,8 @@ def entity_handles(session, name: str) -> list[Handle]:
         return [
             Handle(name, "control_points", k, tuple(q)) for k, q in enumerate(p["control_points"])
         ]
+    if entity.kind == "sketch":
+        return [Handle(name, "vertices", k, tuple(q)) for k, q in enumerate(p["vertices"])]
     if entity.kind == "connector":
         chain = session.connectors.chain(entity.id)
         out = []
@@ -51,7 +54,7 @@ def handles_for(session, names) -> list[Handle]:
     out = []
     for name in names:
         entity = session.store.get(name)
-        if entity.kind in CURVE_KINDS or entity.kind in ("point", "connector"):
+        if entity.kind in CURVE_KINDS or entity.kind in ("point", "connector", "sketch"):
             out.extend(entity_handles(session, name))
     return out
 
@@ -97,7 +100,8 @@ def moved_params(session, handle: Handle, xyz) -> dict:
 
 
 def dependents_closure(store, name: str) -> list[int]:
-    """Ids of the entity and everything that depends on it, transitively."""
+    """Ids of the entity and everything that depends on it, transitively (with what the
+    sketches among them generate)."""
     seen = []
     pending = [store.get(name).id]
     while pending:
@@ -106,6 +110,9 @@ def dependents_closure(store, name: str) -> list[int]:
             continue
         seen.append(current)
         pending.extend(d.id for d in store.dependents(current))
+        entity = store.get(current)
+        if entity.kind == "sketch":
+            pending.extend(i for _role, i in entity.params["outputs"] if i in store)
     return sorted(seen)
 
 

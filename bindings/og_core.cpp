@@ -452,7 +452,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
          const std::vector<std::tuple<std::int64_t, std::size_t>>& slides,
          const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
          double omega, int max_iterations, double tolerance, int acceleration,
-         og::SmoothingProgress* progress) {
+         og::SmoothingProgress* progress, double slide_limit, double absolute_tolerance) {
         const std::size_t n = points.shape(0);
         if (fixed.shape(0) != n) {
           throw std::invalid_argument("fixed must have one entry per point");
@@ -487,6 +487,8 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         options.max_iterations = max_iterations;
         options.tolerance = tolerance;
         options.acceleration = acceleration;
+        options.slide_limit = slide_limit;
+        options.absolute_tolerance = absolute_tolerance;
         og::MultiblockResult result;
         {
           const nb::gil_scoped_release release;
@@ -508,8 +510,10 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       nb::arg("points"), nb::arg("quads"), nb::arg("fixed"), nb::arg("chains"), nb::arg("slides"),
       nb::arg("walls"), nb::arg("omega") = 1.0, nb::arg("max_iterations") = 2000,
       nb::arg("tolerance") = 1e-6, nb::arg("acceleration") = 20, nb::arg("progress") = nb::none(),
+      nb::arg("slide_limit") = 0.5, nb::arg("absolute_tolerance") = 0.0,
       "Elliptic smoothing of a planar multi-block grid as one grid (GIL released). quads are "
-      "counter-clockwise node ids; slides are (node, chain index); walls are (node, spacing "
+      "counter-clockwise node ids; slides are (node, chain index; a node moves at most "
+      "slide_limit of its initial boundary intervals); walls are (node, spacing "
       "(<= 0: initial), decay, relaxation, max_source). Returns (points, node_class "
       "(0 fixed, 1 regular, 2 irregular, 3 sliding), residuals, iterations, converged, "
       "cancelled, lines, colours, warnings).");

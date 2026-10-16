@@ -848,6 +848,50 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10d — sketch topology (2026-10-16) — approved (pre-authorised)
+
+### Built
+- `model/sketch.py`: the `sketch` entity (vertices + blocks, 2D and 3D), edge families and
+  dimension propagation (conflicts reported by edge), geometry assignment and placement,
+  generation of owned connectors / domains / blocks / smoothing group, vertex passes (2D
+  joints on curves, 3D vertices on planes and surfaces), suggestions, ownership checks.
+- Session: `create_sketch`, `edit_sketch`, `regenerate_sketch`, `sketch_report`,
+  `sketch_suggestions`, `accept_sketch_suggestions`, `assign_sketch_geometry`;
+  `move_handle` on sketch vertices; `modify` of a sketch regenerates it.
+- Smoothing groups: `joints="slide"`, `pinned`, `slide_limit`, internal walls (2D and 3D,
+  C++), `absolute_tolerance` (C++ option); one plane patch for coplanar sliding faces; wall
+  faces projected onto their surface.
+- Fixes: `Store.rollback` restores ids and name counters; the smoother dock replaces a
+  running job instead of mixing two (results tagged by job).
+- GUI: Sketch block tool (four clicks, snapping to sketch vertices), sketch wireframe and
+  vertex handles (drag with merged-actor preview), Topology -> Assign selected geometry /
+  Regenerate sketch / Sketch report, sketch rows in the property panel (report, dimensions,
+  walls, relax), sketches in the model tree.
+- Demo `examples/10d_sketch_topology.py`: airfoil (2D) and wing stub (3D) around STEP models
+  written and imported through OCCT, sphere in a box.
+
+### Results
+| Check | Result | Target |
+|---|---|---|
+| Airfoil, C-topology (12 blocks): min scaled Jacobian | 0.679 | >= 0.5 met |
+| Airfoil: floating vertices moved by 20 % of the block size, 3 trials | grid changes <= 2.1e-4 local spacings | < 1e-2 met |
+| Airfoil: nodes on the assigned CAD curves | 1.8e-15 | 1e-9 met |
+| Airfoil: generation (3 edits, 11 vertex passes) | 2.7 s | — |
+| Airfoil: drag preview of a sketch vertex | 95 ms (11 frames/s) | — |
+| Sphere in a box (32 blocks): min scaled Jacobian | 0.688 | >= 0.5 met |
+| Sphere: inner vertices moved by 20 %, 2 trials | <= 1.2e-8 local spacings | — |
+| Sphere: nodes on the sphere | 2.2e-16 | 1e-9 met |
+| Wing stub (12 blocks): min scaled Jacobian | 0.12 (0.68 outside the 4 wake blocks) | — |
+| Undo per edit, journal replay, .ogp round trip | identical grids | met |
+
+### Verified
+- `ctest` +3 (internal walls 2D and 3D, absolute tolerance) -> 138; `pytest` +9
+  (`test_sketch.py`) -> 329; CI build, clang-tidy on the changed C++, ruff, clang-format,
+  ternary check, API docs; all demos run. Changed outputs: groups in projects and journals
+  now carry `joints`, `pinned`, `slide_limit`.
+- Not verified: dragging sketch vertices with a real mouse; 3D vertices have no axis handles
+  (they move in the view plane).
+
 ## Phase 10c — live mouse editing, freehand curves, curve networks (2026-10-16) — approved (pre-authorised)
 
 ### Built

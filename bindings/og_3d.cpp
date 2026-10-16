@@ -252,7 +252,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::tuple<std::int64_t, std::string, std::size_t>>& slides,
          const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
          double omega, int max_iterations, double tolerance, int acceleration,
-         og::SmoothingProgress* progress, double slide_limit) {
+         og::SmoothingProgress* progress, double slide_limit, double absolute_tolerance) {
         const std::size_t n = points.shape(0);
         if (fixed.shape(0) != n) {
           throw std::invalid_argument("fixed must have one entry per point");
@@ -285,6 +285,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         options.tolerance = tolerance;
         options.acceleration = acceleration;
         options.slide_limit = slide_limit;
+        options.absolute_tolerance = absolute_tolerance;
         og::Multiblock3DResult result;
         {
           const nb::gil_scoped_release release;
@@ -311,7 +312,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("points"), nb::arg("hexes"), nb::arg("fixed"), nb::arg("surfaces"), nb::arg("chains"),
       nb::arg("slides"), nb::arg("walls"), nb::arg("omega") = 1.0, nb::arg("max_iterations") = 2000,
       nb::arg("tolerance") = 1e-6, nb::arg("acceleration") = 20, nb::arg("progress") = nb::none(),
-      nb::arg("slide_limit") = 0.5,
+      nb::arg("slide_limit") = 0.5, nb::arg("absolute_tolerance") = 0.0,
       "Elliptic smoothing of a multi-block hexahedral grid as one grid (GIL released). hexes: "
       "corner c = i + 2 j + 4 k, right-handed; slides: (node, 'surface' | 'chain', index); "
       "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source). Returns (points, "

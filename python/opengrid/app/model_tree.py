@@ -111,6 +111,9 @@ class ModelTree(QTreeWidget):
                 except ValidationError:
                     pass
                 item = QTreeWidgetItem(blocks, [entity.name, info])
+            elif entity.kind == "sketch":
+                info = f"sketch, {len(entity.params['blocks'])} blocks"
+                item = QTreeWidgetItem(blocks, [entity.name, info])
             elif entity.kind == "patch":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(

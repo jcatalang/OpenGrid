@@ -204,7 +204,7 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
 
-## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a-10c done)*
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a-10d done)*
 
 Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
 user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
@@ -339,7 +339,10 @@ the existing patches, exports and quality checks keep working on the result.
 - **GUI:** place and drag sketch vertices in the viewport (2D; 3D with axis handles), assign
   geometry from the selection, regenerate with live progress.
 - **Demo:** a 2D airfoil and a 3D wing stub, each sketched by hand around CAD geometry imported
-  in 9a.
+  in 9a. *(Built: `examples/10d_sketch_topology.py`, plus the sphere in a box; airfoil min
+  scaled Jacobian 0.68, sphere 0.69, 20 % vertex moves change the grid by 2e-4 spacings. The
+  wing stub reaches 0.12 in its wake blocks (vertices on 3D curves do not slide, see
+  OPEN_ISSUES); 3D vertices have no axis handles.)*
 
 ### 10e — Templates and automatic topology
 - **Templates:** parametrised generators that create a 10d sketch from the selected geometry:

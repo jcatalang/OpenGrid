@@ -35,6 +35,7 @@ class SmootherDock(QWidget):
         self._thread: threading.Thread | None = None
         self._key = None
         self._group = None  # (params, layout) while a group runs
+        self._job = 0  # results of replaced jobs are ignored
         self._emitter = _Emitter()
         self._emitter.done.connect(self._on_done)
 
@@ -118,7 +119,17 @@ class SmootherDock(QWidget):
             return False
         return self.start(self.domain_name)
 
+    def _stop_running(self) -> None:
+        """A new start replaces a running job: cancel it and wait (its result is ignored)."""
+        if self._thread is not None:
+            self.cancel()
+            self._thread.join()
+            self._thread = None
+            self._timer.stop()
+
     def start(self, name: str) -> bool:
+        self._stop_running()
+        self._job += 1
         group = self._group_of(name)
         if group is not None:
             return self._start_group(group)
@@ -134,12 +145,14 @@ class SmootherDock(QWidget):
         self._progress = _core.SmoothingProgress()
         progress = self._progress
 
+        job = self._job
+
         def work():
             try:
                 result = run_smoother(initial, elliptic, progress)
             except Exception as error:  # reported on the GUI thread
                 result = error
-            self._emitter.done.emit(result)
+            self._emitter.done.emit((job, result))
 
         self._thread = threading.Thread(target=work, name="opengrid-smoother", daemon=True)
         self.run_button.setEnabled(False)
@@ -161,12 +174,14 @@ class SmootherDock(QWidget):
         self._progress = _core.SmoothingProgress()
         progress = self._progress
 
+        job = self._job
+
         def work():
             try:
                 result = run_group(layout, params, progress)
             except Exception as error:  # reported on the GUI thread
                 result = error
-            self._emitter.done.emit(result)
+            self._emitter.done.emit((job, result))
 
         self._thread = threading.Thread(target=work, name="opengrid-group", daemon=True)
         self.run_button.setEnabled(False)
@@ -186,7 +201,10 @@ class SmootherDock(QWidget):
         if self._thread is not None:
             self._thread.join(timeout)
 
-    def _on_done(self, result) -> None:
+    def _on_done(self, message) -> None:
+        job, result = message
+        if job != self._job:
+            return  # a replaced job
         self._timer.stop()
         thread = self._thread
         self._thread = None

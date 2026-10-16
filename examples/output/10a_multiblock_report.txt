@@ -1,5 +1,5 @@
 cylinder in a channel: 4 domains, 5412 points
-  per-domain smoothing (Laplace + wall control, interfaces fixed): 0.06 s
+  per-domain smoothing (Laplace + wall control, interfaces fixed): 0.07 s
     interface kink 89.6 deg, min scaled Jacobian 0.447, wall angle error 0.00 deg
   smoothing group: 4 domains, 5248 nodes (4992 regular, 0 irregular, 124 sliding, 132 fixed), interface kink 0.99 deg, converged in 78 iterations, 0.06 s
     interface kink 0.99 deg, min scaled Jacobian 0.365, wall angle error 0.00 deg

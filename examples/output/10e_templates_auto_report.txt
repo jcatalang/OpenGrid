@@ -1,15 +1,15 @@
 templates (min scaled Jacobian after the group smoothing; target >= 0.4):
   ogrid (ellipse)                4 blocks    0.1 s  min SJ 0.953 (met)
   butterfly (disk)               5 blocks    0.1 s  min SJ 0.864 (met)
-  cgrid (NACA 0012)             12 blocks    0.5 s  min SJ 0.619 (met)
-  hgrid (bump)                   3 blocks    0.1 s  min SJ 0.989 (met)
+  cgrid (NACA 0012)             12 blocks    0.6 s  min SJ 0.619 (met)
+  hgrid (bump)                   3 blocks    0.2 s  min SJ 0.989 (met)
   body_in_channel (cylinder)    12 blocks    1.1 s  min SJ 0.782 (met)
   pipe                           5 blocks    0.1 s  min SJ 0.864 (met)
-  cylinder_in_channel           12 blocks    1.1 s  min SJ 0.782 (met)
+  cylinder_in_channel           12 blocks    1.2 s  min SJ 0.782 (met)
   bump_channel                   3 blocks    0.2 s  min SJ 0.989 (met)
   wing_in_box (C-H)             12 blocks    0.6 s  min SJ 0.619 (met)
-  wing_in_box tapered + swept   12 blocks   13.4 s  min SJ 0.602 (met)
-  sphere_in_box                 32 blocks   12.2 s  min SJ 0.525 (met)
+  wing_in_box tapered + swept   12 blocks   11.1 s  min SJ 0.602 (met)
+  sphere_in_box                 32 blocks   11.9 s  min SJ 0.525 (met)
   (wing_in_box: the smoothed 2D C-grid extruded; tapered + swept: a 3D sketch smoothed in 3D, the wing on ruled surfaces, the end planes symmetry planes)
   C-grid wall control (first cell; deviation of the first grid line from normal):
     wall 0.001: converged in 141 iterations; body 0.001..0.001, max 0.00 deg; wake cut 0.002..0.002, max 0.00 deg

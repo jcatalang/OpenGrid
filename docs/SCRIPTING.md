@@ -205,10 +205,20 @@ og.auto_topology(curves)  # a sketch of four-sided blocks
 ```
 See `examples/10e_templates_auto.py`.
 
+## High-order elements
+```python
+og.create_template("cgrid", body=["upper", "lower"], wall=1e-5, layers=24, interval_multiple=4)
+mesh = og.high_order(order=4, nodes="gll")   # (elements, 25, 3) GLL nodes, curved
+print(mesh.scaled_jacobian.min())
+og.export_high_order("naca_p4.vtkhdf", order=4)            # VTK Lagrange cells
+og.export_high_order("naca_p4_gauss.h5", order=4, nodes="gauss")  # DG solution points
+```
+Interval counts must be multiples of the order; p x p grid cells form one element.
+
 ## GPU (experimental)
 ```python
-opengrid.gpu_info()   # {"available": True, "device": "Apple M1 Max", ...} after a self-test
-opengrid.set_gpu("on")   # 3D group smoothing: line sweeps on the GPU; "auto": >= 200k nodes
+opengrid.gpu_info()  # {"available": True, "device": "Apple M1 Max", ...} after a self-test
+opengrid.set_gpu("on")  # 3D group smoothing: line sweeps on the GPU; "auto": >= 200k nodes
 ```
 Off by default: on the 1M-cell ball it is 1.2x faster per iteration and stops at a relative
 residual of 1e-5 (the CPU at 1e-6); see docs/PROGRESS.md (11d).

@@ -278,6 +278,9 @@ class MainWindow(QMainWindow):
         self.export_gmsh_action = self._action("Export Gmsh…", self.export_gmsh)
         self.export_vtkhdf_action = self._action("Export VTKHDF…", self.export_vtkhdf)
         self.export_plot3d_action = self._action("Export Plot3D…", self.export_plot3d)
+        self.export_high_order_action = self._action(
+            "Export high-order elements…", self.export_high_order
+        )
 
         self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
         self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -317,6 +320,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.export_cgns_action)
         file_menu.addAction(self.export_gmsh_action)
         file_menu.addAction(self.export_plot3d_action)
+        file_menu.addAction(self.export_high_order_action)
         file_menu.addSeparator()
         file_menu.addAction(self.save_journal_action)
         file_menu.addSeparator()
@@ -1041,6 +1045,38 @@ class MainWindow(QMainWindow):
             if not path:
                 return None
         summary = self._run(lambda: self.session.export_vtkhdf(path))
+        if summary:
+            log.info("exported %s: %s", path, summary)
+        return summary
+
+    def export_high_order(
+        self, path: str | None = None, order: int | None = None, nodes: str = "equispaced"
+    ) -> dict | None:
+        """Curved order-p elements of the structured domains (blocks in 3D): VTKHDF Lagrange
+        cells, or .h5 with the chosen node set."""
+        if order is None:
+            from PySide6.QtWidgets import QInputDialog
+
+            order, ok = QInputDialog.getInt(
+                self, "High-order elements", "Order (interval counts must be multiples):", 2, 1, 10
+            )
+            if not ok:
+                return None
+        if path is None:
+            path, chosen = QFileDialog.getSaveFileName(
+                self,
+                "Export high-order elements",
+                "",
+                "VTKHDF Lagrange cells (*.vtkhdf);;HDF5, Gauss-Lobatto nodes (*.h5);;"
+                "HDF5, Gauss nodes (*.h5)",
+            )
+            if not path:
+                return None
+            if "Lobatto" in chosen:
+                nodes = "gll"
+            elif "Gauss nodes" in chosen:
+                nodes = "gauss"
+        summary = self._run(lambda: self.session.export_high_order(path, order=order, nodes=nodes))
         if summary:
             log.info("exported %s: %s", path, summary)
         return summary

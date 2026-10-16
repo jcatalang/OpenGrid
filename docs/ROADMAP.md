@@ -443,3 +443,9 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   Legendre (DG solution points); warp-and-blend points for simplices. Validity: the Jacobian
   determinant at the nodes / quadrature points (scaled Jacobian of curved elements). Exports:
   VTK Lagrange cells (VTKHDF), Gmsh high-order .msh, CGNS where its element types allow.
+  *(Built for quadrilaterals and hexahedra (`core/src/highorder`, `model/highorder.py`,
+  `examples/11e_high_order.py`): p x p (x p) grid cells per element, equispaced / GLL /
+  Gauss node sets, GLL nodes snapped onto curves and surfaces, Jacobian validity, VTKHDF
+  Lagrange cells (point order checked against VTK) and HDF5 node sets; `interval_multiple`
+  on sketches and templates. Boundary error on a circle at the rate h^(p+1) (h^(p+2) for even
+  p). Not built: triangles, tetrahedra and prisms, Gmsh and CGNS high-order types.)*

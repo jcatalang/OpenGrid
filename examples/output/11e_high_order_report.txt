@@ -1,0 +1,14 @@
+curved high-order elements from structured grids (OpenGrid 11e)
+
+quarter annulus: distance of the element edges from the inner circle (r = 1)
+  p = 1: 4 x 4 elements 1.92e-02, 8 x 8 elements 4.82e-03 (rate 2.0; h^(p+1) would be 2)
+  p = 2: 4 x 4 elements 4.61e-05, 8 x 8 elements 2.90e-06 (rate 4.0; h^(p+1) would be 3)
+  p = 3: 4 x 4 elements 1.21e-05, 8 x 8 elements 7.63e-07 (rate 4.0; h^(p+1) would be 4)
+  p = 4: 4 x 4 elements 3.75e-08, 8 x 8 elements 5.88e-10 (rate 6.0; h^(p+1) would be 5)
+  p = 6: 4 x 4 elements 1.50e-11, 8 x 8 elements 5.92e-14 (rate 8.0; h^(p+1) would be 7)
+
+NACA 0012 C-grid, 1e-5 wall, 24 wall layers: grid 0.9 s; order 4: 828 quadrilaterals (0.01 s), scaled Jacobian of the curved elements 0.064 .. 0.981
+  worst element at (0.987, -0.009) (the trailing edge); GLL nodes snapped onto the curves: 490, moved at most 3.6e-05 chords on the airfoil and 1.1e-03 on the far-field arc (the degree-4 mappings' own distance from the curves)
+  VTKHDF: 828 Lagrange quadrilaterals, 13444 points; HDF5: GLL and Gauss node sets
+
+pipe (3D, extruded): order 2: 1536 hexahedra, scaled Jacobian 0.164 .. 0.999; VTKHDF 14265 points

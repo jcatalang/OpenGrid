@@ -30,6 +30,8 @@
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
 #include "opengrid/core/gpu/gpu.hpp"
+#include "opengrid/core/highorder/elements.hpp"
+#include "opengrid/core/highorder/nodes.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality2d.hpp"
 #include "opengrid/core/quality/quality_cells.hpp"
@@ -259,6 +261,65 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         return std::string("auto");
       },
       "The GPU mode: 'off', 'auto' or 'on'.");
+  m.def(
+      "nodes_1d",
+      [](const std::string& set, int count) {
+        return to_numpy(og::nodes_1d(og::node_set_from(set), count));
+      },
+      nb::arg("set"), nb::arg("count"),
+      "Points of a 1D node set on [-1, 1]: 'equispaced', 'gll' or 'gauss'.");
+  m.def(
+      "weights_1d",
+      [](const std::string& set, int count) {
+        return to_numpy(og::weights_1d(og::node_set_from(set), count));
+      },
+      nb::arg("set"), nb::arg("count"), "Quadrature weights of 'gll' or 'gauss' points.");
+  m.def(
+      "high_order_elements",
+      [](const nb::ndarray<const double, nb::c_contig, nb::device::cpu>& grid, int order,
+         const std::string& nodes) {
+        int ni = 0;
+        int nj = 0;
+        int nk = 1;
+        if (grid.ndim() == 3 && grid.shape(2) == 3) {
+          nj = static_cast<int>(grid.shape(0));
+          ni = static_cast<int>(grid.shape(1));
+        } else if (grid.ndim() == 4 && grid.shape(3) == 3) {
+          nk = static_cast<int>(grid.shape(0));
+          nj = static_cast<int>(grid.shape(1));
+          ni = static_cast<int>(grid.shape(2));
+        } else {
+          throw std::invalid_argument("grid must be (nj, ni, 3) or (nk, nj, ni, 3)");
+        }
+        const std::size_t count = static_cast<std::size_t>(ni) * static_cast<std::size_t>(nj) *
+                                  static_cast<std::size_t>(nk);
+        std::vector<og::Vec3> points(count);
+        const double* data = grid.data();
+        for (std::size_t g = 0; g < count; ++g) {
+          points[g] = {data[3 * g], data[3 * g + 1], data[3 * g + 2]};
+        }
+        og::HighOrderElements e;
+        {
+          const nb::gil_scoped_release release;
+          e = og::high_order_from_grid(points, ni, nj, nk, order, og::node_set_from(nodes));
+        }
+        const auto n1 = static_cast<std::size_t>(order) + 1;
+        std::size_t per = n1 * n1;
+        if (e.dim == 3) {
+          per *= n1;
+        }
+        auto* xyz = new double[e.xyz.size()];
+        std::copy(e.xyz.begin(), e.xyz.end(), xyz);
+        const nb::capsule owner(xyz, [](void* p) noexcept { delete[] static_cast<double*>(p); });
+        nb::ndarray<nb::numpy, double, nb::ndim<3>> nodes_out(
+            xyz, {static_cast<std::size_t>(e.count), per, 3}, owner);
+        return std::make_tuple(nodes_out, to_numpy(e.min_jacobian), to_numpy(e.max_jacobian), e.ne);
+      },
+      nb::arg("grid"), nb::arg("order"), nb::arg("nodes") = "equispaced",
+      "Curved order-p elements of a structured grid ((nj, ni, 3) or (nk, nj, ni, 3); every "
+      "interval count a multiple of p): (nodes (elements, (p + 1)^d, 3) in tensor order with i "
+      "fastest, min Jacobian, max Jacobian (per element, at the (p + 2)^d GLL points), "
+      "elements per direction (i, j, k)). nodes: 'equispaced', 'gll' or 'gauss'.");
   m.attr("gpu_min_nodes") = og::kGpuMinNodes;
   m.attr("gpu_tolerance") = og::kGpuTolerance;
 

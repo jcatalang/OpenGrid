@@ -848,6 +848,46 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11e — high-order elements (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `core/src/highorder/nodes.cpp`: equispaced, Gauss-Lobatto-Legendre and Gauss-Legendre
+  points and weights (Newton on Legendre polynomials), barycentric interpolation and
+  differentiation matrices.
+- `core/src/highorder/elements.cpp`: order-p quadrilaterals / hexahedra from a structured grid
+  whose interval counts are multiples of p (p x p (x p) cells per element; the grid's nodes
+  are the equispaced node set), other node sets by tensor-product interpolation (sum
+  factorisation), Jacobian min / max at (p + 2)^d GLL points per element.
+- `model/highorder.py` + `Session.high_order(names, order, nodes, snap)`: domains (2D) or
+  blocks (3D); GLL nodes snapped onto the curves of boundary sides (not interfaces) and the
+  surfaces of block faces (face interiors). `Session.export_high_order`: VTKHDF
+  (VTK_LAGRANGE_QUADRILATERAL / HEXAHEDRON, equispaced, shared nodes merged; point order as
+  vtkHigherOrder*::PointIndexFromIJK, checked for p = 1..8) or `.h5` (any node set, merged
+  numbering). GUI: File -> Export high-order elements.
+- Sketches and templates: `interval_multiple` rounds every edge family's interval count (and
+  the extrusion's) up to a multiple.
+- Demo `examples/11e_high_order.py`; tests `core/tests/test_highorder.cpp`,
+  `tests/python/test_high_order.py`.
+
+### Results
+| Quarter annulus, inner arc | 4 x 4 elements | 8 x 8 | rate |
+|---|---|---|---|
+| p = 1 | 1.9e-2 | 4.8e-3 | 2.0 |
+| p = 2 | 4.6e-5 | 2.9e-6 | 4.0 |
+| p = 3 | 1.2e-5 | 7.6e-7 | 4.0 |
+| p = 4 | 3.8e-8 | 5.9e-10 | 6.0 |
+| p = 6 | 1.5e-11 | 5.9e-14 | 8.0 |
+
+- (h^(p+1), one order more for even p on a circle.) NACA 0012 C-grid template, 1e-5 wall,
+  24 wall layers, order 4: 828 curved quadrilaterals, scaled Jacobian 0.064 - 0.981 (the
+  smallest at the trailing edge), GLL nodes on the airfoil moved at most 3.6e-5 chords by the
+  snapping; pipe (3D), order 2: 1536 hexahedra, scaled Jacobian 0.164 - 0.999.
+
+### Verified
+- `ctest` +4 -> 151; `pytest` +6 (VTK reads the Lagrange cells back; one cell evaluated by VTK
+  equals our mapping to 1e-12); strict CI build, clang-tidy on the new C++, ruff, format,
+  ternary check, API docs.
+
 ## Phase 11d — GPU backend, experimental (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

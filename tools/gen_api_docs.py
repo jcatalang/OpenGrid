@@ -152,6 +152,7 @@ GROUPS = [
     ),
     ("Import", ["import_airfoil_dat", "import_csv", "import_cad"]),
     ("Export", ["export_vtkhdf", "export_cgns", "export_gmsh", "export_plot3d"]),
+    ("High-order elements", ["high_order", "export_high_order"]),
     (
         "Editing, undo and the model",
         ["modify", "rename", "delete", "undo", "redo", "entity", "names"],

@@ -28,7 +28,8 @@ creates.
 Boundary edges are assigned to the curves (surfaces) that contain them; the template places
 the boundary vertices exactly on the geometry (fixed) and the interior ones float in the
 smoothing group (10d), so nothing is placed by hand. ``layers`` / ``growth`` (every template):
-wall layers on all its walls (11a: the first layers marched normal to the wall and kept).
+wall layers on all its walls (11a: the first layers marched normal to the wall and kept);
+``interval_multiple``: interval counts rounded up to multiples (for order-p meshes, 11e).
 
 Method: the standard multi-block topologies of Thompson, Warsi and Mastin;
 references: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
@@ -990,6 +991,7 @@ def create_template(store, kind: str, name=None, **options):
     relax = options.pop("relax", True)
     layers = options.pop("layers", 0)
     growth = options.pop("growth", 1.2)
+    interval_multiple = options.pop("interval_multiple", 1)
     if layers != 0 and "wall" in options and "wake" not in options:
         # A wake cut with layers takes the wall's spacing: twice it (the default without
         # layers) steps the layer front by 2x where the cut meets the body.
@@ -1050,6 +1052,7 @@ def create_template(store, kind: str, name=None, **options):
         _fail("create_template", f"unexpected options for {kind}: {', '.join(sorted(options))}")
     if name is None:
         name = fresh_name(store, kind)
+    params["interval_multiple"] = interval_multiple
     return create_sketch(store, name=name, relax=relax, **params)
 
 

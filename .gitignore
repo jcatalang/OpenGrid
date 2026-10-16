@@ -19,6 +19,7 @@ compile_commands.json
 examples/output/*.cgns
 examples/output/*.msh
 examples/output/*.vtkhdf
+examples/output/*.h5
 examples/output/*.xyz
 /packaging/output/
 /packaging/dist/

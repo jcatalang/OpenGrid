@@ -1182,6 +1182,20 @@ segment, so derivative jumps at knots never cost accuracy.
 - Measured (PROGRESS 11d): 1.2x per iteration on the 1M-cell ball and slower to the same
   accuracy, so the mode defaults to off.
 
+### High-order elements (Phase 11e)
+- Core (`core/src/highorder`): node sets and barycentric matrices (`nodes.cpp`); elements from
+  one structured grid (`elements.cpp`): the grid's nodes in blocks of (p + 1)^d are the
+  equispaced nodes of an order-p element (so the elliptic smoothing places every high-order
+  node and neighbours share edge and face nodes), other node sets interpolated, Jacobian at
+  check points. Python (`model/highorder.py`): collects domains / blocks, snaps GLL boundary
+  nodes (curves of non-shared domain sides; surfaces of block face domains), owners per
+  element range; `io/highorder.py` writes VTKHDF Lagrange cells (equispaced only: VTK's
+  Lagrange cells interpolate equispaced nodes) and HDF5 node sets.
+- Node sets for solvers: GLL (continuous Galerkin / spectral elements; DGSEM with boundary
+  points, shared face nodes) and Gauss-Legendre (DG solution points, interior only); files
+  for meshing tools take equispaced nodes. Simplices would need different sets
+  (warp-and-blend / Fekete) and curving with untangling: not built.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

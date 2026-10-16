@@ -44,6 +44,8 @@ add_library(og_core STATIC
   src/structured/hyperbolic.cpp
   src/structured/wall_layers.cpp
   src/gpu/gpu.cpp
+  src/highorder/nodes.cpp
+  src/highorder/elements.cpp
   src/gpu/multiblock3d_sweeps.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)

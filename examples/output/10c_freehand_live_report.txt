@@ -5,8 +5,8 @@ stroke v0: 70 samples -> 1 NURBS, 11 control points
 stroke v1: 70 samples -> 1 NURBS, 11 control points
 stroke v2: 70 samples -> 1 NURBS, 10 control points
 stroke v3: 70 samples -> 1 NURBS, 13 control points
-domains from curves: 6 structured domains in 0.03 s, 7 interfaces, warnings: none
+domains from curves: 6 structured domains in 0.01 s, 7 interfaces, warnings: none
 smoothing group: 6 domains, 2480 nodes (2262 regular, 0 irregular, 132 sliding, 86 fixed), interface kink 1.8 deg, converged in 91 iterations
   min scaled Jacobian 0.869
-drag of bottom control point 4: 20 previews, 13.2 ms each (76 frames/s), one command: og.move_handle('bottom', 'control_points', 4, (1.48386006663...
+drag of bottom control point 4: 20 previews, 6.4 ms each (155 frames/s), one command: og.move_handle('bottom', 'control_points', 4, (1.48386006663...
 after the drag: 6 domains, 2480 nodes (2262 regular, 0 irregular, 132 sliding, 86 fixed), interface kink 1.9 deg, converged in 93 iterations

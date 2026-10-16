@@ -596,6 +596,7 @@ class Session:
         tolerance: float = 1e-8,
         max_iterations: int = 4000,
         extrude=None,
+        interval_multiple: int = 1,
         name: str | None = None,
     ) -> str:
         """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
@@ -614,8 +615,10 @@ class Session:
         ``relax`` (2D) vertices joining two edges on one curve slide along it until the
         grid stops moving them. ``extrude`` (2D): ``{"vector": (0, 0, L), "points": n,
         "distribution": {...}}`` (spacings as lengths) also makes one extruded block per
-        domain: the smoothed 2D grid extruded, the same in every section. One undo step;
-        warnings (e.g. unassigned edges lying on geometry) are in ``last_warnings``."""
+        domain: the smoothed 2D grid extruded, the same in every section;
+        ``interval_multiple`` m: interval counts rounded up to multiples of m (for
+        ``high_order`` meshes of order m). One undo step; warnings (e.g. unassigned edges
+        lying on geometry) are in ``last_warnings``."""
         from opengrid.model.sketch import create_sketch
 
         kwargs = {
@@ -634,10 +637,16 @@ class Session:
             "tolerance": tolerance,
             "max_iterations": max_iterations,
             "extrude": extrude,
+            "interval_multiple": interval_multiple,
             "name": name,
         }
         # The journal records what was given (defaults left out).
-        defaults = {"relax": True, "tolerance": 1e-8, "max_iterations": 4000}
+        defaults = {
+            "relax": True,
+            "tolerance": 1e-8,
+            "max_iterations": 4000,
+            "interval_multiple": 1,
+        }
         kwargs = {
             k: v
             for k, v in kwargs.items()
@@ -741,8 +750,9 @@ class Session:
         ``span_points``: extruded along z; ``wing_in_box`` also ``taper`` and ``sweep``) and
         ``"sphere_in_box"`` (center, radius, box, cube, points, radial_points, outer_points,
         wall). All take ``spacing`` (default: a twentieth of the median boundary edge),
-        ``relax``, and ``layers`` / ``growth`` (wall layers on every wall; a C-grid's wake cut
-        then takes the wall spacing). One undo step; returns the sketch."""
+        ``relax``, ``layers`` / ``growth`` (wall layers on every wall; a C-grid's wake cut
+        then takes the wall spacing) and ``interval_multiple`` (interval counts rounded up to
+        multiples, for ``high_order``). One undo step; returns the sketch."""
         from opengrid.model.templates import create_template
 
         kwargs = dict(options)
@@ -1202,6 +1212,31 @@ class Session:
         if self.is_3d():
             return write_cgns_3d(path, self, base_name)
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
+
+    def high_order(self, names=None, order: int = 2, nodes: str = "equispaced", snap: bool = True):
+        """Curved order-``order`` elements of structured domains (2D) or blocks (3D): p x p
+        (x p) grid cells per element (interval counts must be multiples of p), the grid's
+        nodes are the equispaced node set. ``nodes``: "equispaced" (file formats), "gll"
+        (Gauss-Lobatto-Legendre: continuous Galerkin / spectral elements, DGSEM with boundary
+        points) or "gauss" (Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on
+        boundary sides onto their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz``
+        (elements, (p + 1)^d, 3) in tensor order, ``scaled_jacobian``, ``merged()``,
+        ``owners``)."""
+        from opengrid.model.highorder import high_order
+
+        return high_order(self, names, order, nodes, snap)
+
+    def export_high_order(
+        self, path, names=None, order: int = 2, nodes: str = "equispaced", snap: bool = True
+    ) -> dict:
+        """Write ``high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes) or
+        ``.h5`` (any node set: element node coordinates, Jacobians, merged numbering)."""
+        from opengrid.io.highorder import write_high_order_h5, write_vtkhdf_high_order
+
+        mesh = self.high_order(names, order, nodes, snap)
+        if str(path).endswith(".h5"):
+            return write_high_order_h5(path, mesh)
+        return write_vtkhdf_high_order(path, mesh)
 
     def export_plot3d(self, path, domains=None, binary: bool = True, three_d: bool = False) -> None:
         """Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1); in a model with

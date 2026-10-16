@@ -260,6 +260,15 @@ history). Phase tags show where each item came from.
   the 33-point ball runs to the 2000-iteration limit) that no coarse start removes; likely
   sliding nodes clamped at their slide limits. Neither a stagnation criterion nor multigrid
   was built.
+- **High-order elements: structured grids only** [11e]: quadrilaterals and hexahedra from
+  structured domains and blocks; no triangles, tetrahedra, prisms or pyramids (curving
+  boundary-layer prisms needs the inner layers curved too, and untangling); no Gmsh or CGNS
+  high-order element types (VTKHDF Lagrange cells and HDF5 node sets only). Interval counts
+  must be multiples of the order (`interval_multiple` on sketches and templates); elements
+  inherit the grid's quality, and the curved elements' scaled Jacobian can be low at a sharp
+  trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D moves face interiors
+  onto their surfaces but leaves nodes on block edges as interpolated; the equispaced
+  geometry between grid nodes is the degree-p interpolant, not the CAD itself.
 - **GPU smoothing does not pay yet** [11d]: the experimental OpenCL path (`opengrid.set_gpu`,
   off by default) runs the 3D group smoother's line sweeps 2.2x faster than the CPU on the 1M-
   cell ball, but the whole iteration only 1.2x (Anderson mixing and sliding projections stay

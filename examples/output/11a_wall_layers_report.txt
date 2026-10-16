@@ -1,7 +1,7 @@
 wall layers at a first-cell height of 1e-05 chords (y+ ~ 1), growth 1.2
 
 2D C-grid (NACA 0012), 61 + 31 radial points:
-  wall control only: 12 domains, 13154 nodes (12727 regular, 0 irregular, 319 sliding, 108 fixed); converged in 630 iterations, 0.6 s; min scaled Jacobian 0.576
+  wall control only: 12 domains, 13154 nodes (12727 regular, 0 irregular, 319 sliding, 108 fixed); converged in 630 iterations, 0.7 s; min scaled Jacobian 0.576
   30 wall layers:    12 domains, 13154 nodes (8437 regular, 0 irregular, 319 sliding, 108 fixed, 4290 in wall layers); converged in 142 iterations, 0.2 s; min scaled Jacobian 0.468
   body and wake cut: deviation from the wall normal (mean / max degrees)
     layer   wall control only   30 wall layers
@@ -16,8 +16,8 @@ wall layers at a first-cell height of 1e-05 chords (y+ ~ 1), growth 1.2
   first cell with layers 1e-05 .. 1e-05 (requested 1e-05)
 
 3D wing in a box (taper 0.6, sweep 20 degrees), 13 span points:
-  wall control only: 12 blocks, 171002 nodes (139997 regular, 0 irregular, 29635 sliding, 1370 fixed); NOT converged after 4000 iterations, 30.5 s; min scaled Jacobian 0.434
-  30 wall layers:    12 blocks, 171002 nodes (92807 regular, 0 irregular, 21055 sliding, 1370 fixed, 55770 in wall layers); converged in 1770 iterations, 15.8 s; min scaled Jacobian 0.407
+  wall control only: 12 blocks, 171002 nodes (139997 regular, 0 irregular, 29635 sliding, 1370 fixed); NOT converged after 4000 iterations, 25.7 s; min scaled Jacobian 0.434
+  30 wall layers:    12 blocks, 171002 nodes (92807 regular, 0 irregular, 21055 sliding, 1370 fixed, 55770 in wall layers); converged in 1770 iterations, 13.7 s; min scaled Jacobian 0.407
   wing faces: deviation from the wall normal (mean / max degrees)
     layer   wall control only   30 wall layers
         0     0.00 /   0.17       0.07 /   1.15

@@ -35,6 +35,9 @@ in VTK). Its edges and faces are those of the blocks, shared where blocks share 
 * **Extrusion** (2D, ``extrude``: ``{"vector", "points", "distribution"}``): every block's
   domain is also extruded along the vector (a translated block of ``points`` layers), so a
   straight 3D grid is the smoothed 2D grid extruded - the same in every section.
+* **High-order meshes** (``interval_multiple`` m): every edge family's interval count (and the
+  extrusion's) is rounded up to a multiple of m, so m x m (x m) cells form the elements of an
+  order-m mesh (``Session.high_order``).
 * **Ownership:** the generated entities are listed in ``outputs`` (role key, entity id) and
   are regenerated in place (same names and ids) when the sketch changes; editing, renaming or
   deleting them directly is refused (:func:`check_ownership`, run by every command), and
@@ -75,6 +78,7 @@ DEFAULT_SKETCH = {
     "tolerance": 1e-8,
     "max_iterations": 4000,
     "extrude": None,
+    "interval_multiple": 1,
     "outputs": (),
 }
 DEFAULT_SKETCH_WALL = {
@@ -379,6 +383,12 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
             continue
         symmetry.add(ref)
     spacing = _number(merged["spacing"], f"{where}: spacing", issues, True, True)
+    multiple = merged["interval_multiple"]
+    if isinstance(multiple, bool) or not isinstance(multiple, int) or multiple < 1:
+        issues.append(
+            Issue(f"{where}: interval_multiple", f"expected a whole number >= 1, got {multiple!r}")
+        )
+        multiple = 1
     relax = merged["relax"]
     if not isinstance(relax, bool):
         issues.append(Issue(f"{where}: relax", f"must be true or false, got {relax!r}"))
@@ -416,6 +426,7 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
         "pinned": tuple(sorted(pinned)),
         "symmetry": tuple(sorted(symmetry)),
         "relax": relax,
+        "interval_multiple": multiple,
         "slide_limit": slide_limit,
         "tolerance": tolerance,
         "max_iterations": iterations,
@@ -472,7 +483,7 @@ def _extrusion(params: dict, index: int) -> dict:
         "domain": f"@d{index}",
         "mode": "translate",
         "vector": extrude["vector"],
-        "dimension": extrude["points"],
+        "dimension": _round_points(extrude["points"], params),
         "distribution": distribution,
     }
 
@@ -817,7 +828,15 @@ def _family_dimensions(store, params, lattice, placement) -> tuple[dict, list[Is
         for key in keys:
             out[key] = points
         del root
-    return out, issues
+    return {key: _round_points(points, params) for key, points in out.items()}, issues
+
+
+def _round_points(points: int, params: dict) -> int:
+    """Point count with the intervals rounded up to a multiple of ``interval_multiple`` (so
+    that p x p cells form the elements of an order-p mesh, 11e)."""
+    multiple = params.get("interval_multiple", 1)
+    intervals = points - 1
+    return math.ceil(intervals / multiple) * multiple + 1
 
 
 def _along_extrusions(store, surfaces, direction) -> bool:

@@ -278,7 +278,7 @@ boundaries), else the connector's own nodes.
 
 ## Sketch topology (floating wireframe)
 
-### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, name: str | None = None) -> str`
+### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, interval_multiple: int = 1, name: str | None = None) -> str`
 
 Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
 (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
@@ -296,8 +296,10 @@ blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
 ``relax`` (2D) vertices joining two edges on one curve slide along it until the
 grid stops moving them. ``extrude`` (2D): ``{"vector": (0, 0, L), "points": n,
 "distribution": {...}}`` (spacings as lengths) also makes one extruded block per
-domain: the smoothed 2D grid extruded, the same in every section. One undo step;
-warnings (e.g. unassigned edges lying on geometry) are in ``last_warnings``.
+domain: the smoothed 2D grid extruded, the same in every section;
+``interval_multiple`` m: interval counts rounded up to multiples of m (for
+``high_order`` meshes of order m). One undo step; warnings (e.g. unassigned edges
+lying on geometry) are in ``last_warnings``.
 
 ### `edit_sketch(name: str, **changes) -> str`
 
@@ -344,8 +346,9 @@ left, margin, radial_points, wall). 3D: ``"pipe"``, ``"cylinder_in_channel"``,
 ``span_points``: extruded along z; ``wing_in_box`` also ``taper`` and ``sweep``) and
 ``"sphere_in_box"`` (center, radius, box, cube, points, radial_points, outer_points,
 wall). All take ``spacing`` (default: a twentieth of the median boundary edge),
-``relax``, and ``layers`` / ``growth`` (wall layers on every wall; a C-grid's wake cut
-then takes the wall spacing). One undo step; returns the sketch.
+``relax``, ``layers`` / ``growth`` (wall layers on every wall; a C-grid's wake cut
+then takes the wall spacing) and ``interval_multiple`` (interval counts rounded up to
+multiples, for ``high_order``). One undo step; returns the sketch.
 
 ### `auto_topology(curves, size: float | None = None, spacing: float | None = None, relax: bool = False, name: str | None = None) -> str`
 
@@ -604,6 +607,24 @@ validate.
 
 Write domains as a multi-grid Plot3D file (2D, or 3D with nk = 1); in a model with
 blocks, the blocks (3D).
+
+## High-order elements
+
+### `high_order(names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True)`
+
+Curved order-``order`` elements of structured domains (2D) or blocks (3D): p x p
+(x p) grid cells per element (interval counts must be multiples of p), the grid's
+nodes are the equispaced node set. ``nodes``: "equispaced" (file formats), "gll"
+(Gauss-Lobatto-Legendre: continuous Galerkin / spectral elements, DGSEM with boundary
+points) or "gauss" (Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on
+boundary sides onto their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz``
+(elements, (p + 1)^d, 3) in tensor order, ``scaled_jacobian``, ``merged()``,
+``owners``).
+
+### `export_high_order(path, names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True) -> dict`
+
+Write ``high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes) or
+``.h5`` (any node set: element node coordinates, Jacobians, merged numbering).
 
 ## Editing, undo and the model
 

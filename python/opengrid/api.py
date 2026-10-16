@@ -510,6 +510,7 @@ class Session:
         joints: str = "fixed",
         pinned=(),
         slide_limit: float = 0.5,
+        symmetry=(),
     ) -> str:
         """Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
         grid (as one grid): interfaces and block corners move, grid lines continue across
@@ -529,7 +530,8 @@ class Session:
         slide on it); ``pinned``: connectors (3D: faces) kept fixed even between members, e.g.
         a wake cut (a wall between members is an internal wall: fixed, with wall control on
         both sides, 2D); ``slide_limit``: how far a sliding node may move, in initial
-        intervals."""
+        intervals; ``symmetry`` (3D): planar faces that are symmetry planes (nodes move as
+        interior nodes mirrored across the plane, without the slide limit)."""
         params = {
             "domains": domains,
             "blocks": blocks,
@@ -537,6 +539,7 @@ class Session:
             "slide": slide,
             "joints": joints,
             "pinned": pinned,
+            "symmetry": symmetry,
             "slide_limit": slide_limit,
             "omega": omega,
             "max_iterations": max_iterations,
@@ -583,10 +586,12 @@ class Session:
         walls=(),
         fixed=(),
         pinned=(),
+        symmetry=(),
         distributions=(),
         relax: bool = True,
         tolerance: float = 1e-8,
         max_iterations: int = 4000,
+        extrude=None,
         name: str | None = None,
     ) -> str:
         """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
@@ -601,8 +606,10 @@ class Session:
         ``{(a, b): distribution}`` from a to b. Generates connectors, domains (3D: also
         blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
         ``relax`` (2D) vertices joining two edges on one curve slide along it until the
-        grid stops moving them. One undo step; warnings (e.g. unassigned edges lying on
-        geometry) are in ``last_warnings``."""
+        grid stops moving them. ``extrude`` (2D): ``{"vector": (0, 0, L), "points": n,
+        "distribution": {...}}`` (spacings as lengths) also makes one extruded block per
+        domain: the smoothed 2D grid extruded, the same in every section. One undo step;
+        warnings (e.g. unassigned edges lying on geometry) are in ``last_warnings``."""
         from opengrid.model.sketch import create_sketch
 
         kwargs = {
@@ -615,10 +622,12 @@ class Session:
             "walls": walls,
             "fixed": fixed,
             "pinned": pinned,
+            "symmetry": symmetry,
             "distributions": distributions,
             "relax": relax,
             "tolerance": tolerance,
             "max_iterations": max_iterations,
+            "extrude": extrude,
             "name": name,
         }
         # The journal records what was given (defaults left out).

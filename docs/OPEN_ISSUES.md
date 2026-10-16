@@ -285,9 +285,9 @@ history). Phase tags show where each item came from.
 - **Sketch vertices on curves in 3D stay where drawn** [10d]: 3D vertices slide on planes and
   surfaces only. Sliding along an edge between two surfaces (e.g. where the wing stub's
   outflow meets a side wall) was built (one chain per curve, as in 2D) but made the 3D solver
-  stall (1500 iterations without converging in some passes) and was removed. So the wing
-  stub's wake blocks keep the drawn outflow vertices: min scaled Jacobian 0.12 there (0.68
-  elsewhere).
+  stall (1500 iterations without converging in some passes) and was removed. The wake blocks
+  that suffered from it (0.12) reach 0.62 since the side walls are symmetry planes (10e
+  follow-up); the outflow vertices still keep their drawn positions. Not retried.
 - **Sketch boundary vertices without geometry stay where drawn** [10d] (2D boundary edges
   with no curve, box corners, curve ends); the result depends on the drawing only through
   them, the assigned geometry and the topology. Vertices on pinned edges and internal walls
@@ -306,10 +306,32 @@ history). Phase tags show where each item came from.
   (dimensions, walls, relax); no 3D axis handles; deleting single blocks has no tool.
 - **Sketch kink metric** [10d]: the airfoil group reports a 22° interface kink three cells
   from the trailing edge, where the C-lines turn by the 14° wedge (8° six cells away).
-- **Wing-in-box template below target** [10e]: min scaled Jacobian 0.25 (target 0.4). The
-  extruded C-grid's TFI is 0.55 in its wake and ring blocks; the 3D group smoothing lowers it
-  at the end planes, where nodes slide on the planes within half an interval; a limit of 1.5
-  (used by the other extruded templates) folds the C-grid's cells.
+- **Wing in box: the 3D-smoothed variants differ from the 2D grid** [10e, follow-up]: the
+  template now extrudes the smoothed 2D C-grid (min scaled Jacobian 0.62, target met). The
+  six-face variant (`three_d_blocks=True`, and taper / sweep, which need it) smooths in 3D with
+  the end planes as symmetry planes: 0.48 (taper 0.6: 0.55, sweep 20°: 0.48, both: 0.60), and
+  its sections differ from the 2D grid by up to 0.24 in the far-field blocks (0.07-0.10 near
+  the outflow): the block corners on the end planes keep the 2D-relaxed positions and the
+  far-field edges slide on the extruded arc and lines within their slide limit. Not found:
+  why the end-plane sections are not exactly the 2D solution.
+- **Symmetry planes** [10e follow-up]: planar faces only (a flagged face on a curved surface
+  is an ordinary sliding face), listed explicitly (`symmetry`; templates set their end planes);
+  2D groups have none (their boundaries slide as before).
+- **Wall orthogonality is controlled at the first cell only** [10e follow-up, measured]:
+  Steger-Sorenson sources with Hilgenstock feedback make the first-cell height and the angle
+  of the first grid line exact at convergence (0.0-0.1° mean on the 2D C-grid and the 3D
+  wings; 3° at the trailing-edge node). Further out the lines bend: wall spacing 1e-3 - mean
+  0.8° at layer 1, 4° at layer 4, 9° at layer 8, 14-17° at layer 16 (max 17-20° at layer 8);
+  1e-5 / 1e-6 (y+ ~ 1) - mean below 0.5° to layer 4, 1-2° at layer 8, 7-10° at layer 16 (max
+  15-19°). No control keeps lines normal over N layers (no boundary-layer block marched
+  normally inside a group).
+- **Sharp trailing edge** [10e follow-up]: C-grid lines turn from the wedge faces (±8°) into
+  the wake within ~0.005 chords of the trailing edge: interface kink 20° at a 1e-3 wall
+  spacing, 53-60° at 1e-5 - 1e-6 (the group status reports it).
+- **Accelerated smoothing can diverge** [10e follow-up]: undamped Anderson mixing blew up on
+  the C-grid at wall spacings <= 1e-5 (and returned the TFI grid). Now guarded: restart from
+  the best iterate, plain iteration after two blow-ups (warning); the plain iteration needs
+  more iterations (C-grid at 1e-6: ~2100-3100).
 - **Automatic topology: two-element airfoil fails** [10e]: the cross field is right (index sum
   -1) but in the slot between main element and flap the separatrices from the flap's leading
   edge and the main trailing edge leave a five-cornered face and a triangle. No repair of

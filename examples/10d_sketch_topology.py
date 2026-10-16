@@ -15,12 +15,14 @@
     inside a box layer of 26 blocks (72 vertices, 32 blocks); the sphere is a wall, the box
     faces slide on their planes. The inner cube's vertices float; they are moved at random
     by 20 % of the block size and the grids compared.
+  * "wing (extruded)": the same wing stub as the airfoil's 2D sketch on the CAD model's root
+    curves, extruded by the span (the smoothed 2D grid in every section).
   * "wing": a wing stub between two side walls, 3D: the fluid region (the 2D fluid face
     extruded by one chord, STEP), and the C-sketch extruded likewise (38 vertices, 12
     blocks); the CAD edges and faces near the sketch's edges and faces are assigned; upper
-    and lower wing faces are walls, the wake cut an internal wall; the vertices on the side
-    walls slide on them (those on edges, e.g. where the outflow meets a side wall, stay where
-    drawn, projected onto their CAD edge).
+    and lower wing faces are walls, the wake cut an internal wall, the side walls symmetry
+    planes (their nodes move as interior nodes of the sections); vertices on edges, e.g. where
+    the outflow meets a side wall, stay where drawn, projected onto their CAD edge.
 Writes 10d_sketch_topology.png, 10d_sketch_topology_report.txt, projects and journals.
 
     python examples/10d_sketch_topology.py [--quick] [--gui [--screenshot out.png]]
@@ -513,7 +515,11 @@ def wing_session():
     for a, b in ((1, 2), (2, 3), (3, 4), (4, 1)):
         walls[(a, b, b + n, a + n)] = WALL
     walls[(0, 1, 1 + n, n)] = WAKE  # the wake cut: an internal wall
-    og.edit_sketch("w", walls=walls, relax=True)
+    # The side walls are symmetry planes (the grid lines cross them straight).
+    symmetry = [tuple(sorted(b)) for b in C_BLOCKS] + [
+        tuple(sorted(v + n for v in b)) for b in C_BLOCKS
+    ]
+    og.edit_sketch("w", walls=walls, symmetry=symmetry, relax=True)
     return og
 
 
@@ -537,17 +543,79 @@ def wing_case(report: list[str]):
         f"  {og.group_status('w-group')}, {smooth:.1f} s",
         f"  min scaled Jacobian {min_jacobian(og, blocks, 'block'):.3f}; outside the four wake"
         f" blocks {min_jacobian(og, [b for b in blocks if b not in WAKE_BLOCKS], 'block'):.3f}",
-        "  (the wake blocks' vertices on the outflow edges stay where they were drawn - 3D"
-        " vertices on curves do not slide - and the cells between the drawn ring and the"
-        " internal wall are sheared there)",
+        "  (the side walls are symmetry planes: their nodes move as interior nodes of the"
+        " sections; the vertices on the outflow edges stay where they were drawn - 3D"
+        " vertices on edges between two surfaces do not slide)",
     ]
     og.save(OUTPUT / "10d_wing.ogp")
     og.save_journal(OUTPUT / "10d_wing_journal.py")
     return og
 
 
+def wing_extruded_session():
+    """The same wing stub as a 2D sketch on the CAD model's root-plane curves, extruded by the
+    span (the smoothed 2D grid in every section)."""
+    og = opengrid.Session()
+    result = og.import_cad(WING_STEP, name="wing", domains="auto")
+    og.delete(result.domains + og.names("connector"))
+    og.create_sketch(
+        C_DRAWN,
+        C_BLOCKS,
+        dimensions=C_DIMENSIONS,
+        distributions=C_DISTRIBUTIONS,
+        relax=False,
+        name="x",
+    )
+    # Only the root-plane curves hold both ends of an edge drawn at z = 0.
+    og.assign_sketch_geometry("x", og.names("nurbs") + og.names("line"))
+    og.edit_sketch(
+        "x",
+        walls=C_WALLS,
+        relax=True,
+        extrude={"vector": (0.0, 0.0, SPAN), "points": 13},
+    )
+    return og
+
+
+def on_surfaces(og, blocks, surfaces) -> tuple[int, float]:
+    """Nodes of the block faces lying on the given surfaces: count and largest distance."""
+    count = 0
+    worst = 0.0
+    geometry = [og.store.geometry(og.entity(s).id) for s in surfaces]
+    for name in blocks:
+        grid = og.block_grid(name)
+        for face in (grid[:, 0, :], grid[:, -1, :], grid[:, :, 0], grid[:, :, -1]):
+            middle = face[face.shape[0] // 2, face.shape[1] // 2]
+            if min(g.project(tuple(middle))[3] for g in geometry) > 1e-6:
+                continue
+            for p in face.reshape(-1, 3):
+                worst = max(worst, min(g.project(tuple(p))[3] for g in geometry))
+                count += 1
+    return count, worst
+
+
+def wing_extruded_case(report: list[str]):
+    t = time.perf_counter()
+    og = wing_extruded_session()
+    elapsed = time.perf_counter() - t
+    blocks = og.names("block")
+    wing_surfaces = og.names("nurbs_surface")
+    count, distance = on_surfaces(og, blocks, wing_surfaces)
+    report += [
+        "",
+        f"wing stub as a 2D sketch on the root curves, extruded by the span: {len(blocks)} "
+        f"extruded blocks, generated in {elapsed:.1f} s",
+        f"  min scaled Jacobian {min_jacobian(og, blocks, 'block'):.3f} (the 2D sketch's own"
+        " value: every section is the smoothed 2D grid)",
+        f"  {count} nodes on the CAD model's curved faces, within {distance:.1e} of them",
+    ]
+    og.save(OUTPUT / "10d_wing_extruded.ogp")
+    og.save_journal(OUTPUT / "10d_wing_extruded_journal.py")
+    return og
+
+
 # ------------------------------------------------------------------------------ picture
-def render(airfoil, sphere, wing, path: Path) -> None:
+def render(airfoil, sphere, wing, extruded, path: Path) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -624,10 +692,17 @@ def render(airfoil, sphere, wing, path: Path) -> None:
     collection = cut(axes[1, 0], sphere, "sphere in a box: cut z = 0 (scaled Jacobian)", level=1e-6)
     axes[1, 0].set_xlim(-1.6, 1.6)
     axes[1, 0].set_ylim(-1.6, 1.6)
-    cut(axes[1, 1], wing, "wing stub: cut at mid-span (scaled Jacobian)", level=0.5 * SPAN)
+    cut(
+        axes[1, 1],
+        wing,
+        "wing stub, 3D sketch: cut at mid-span (scaled Jacobian)",
+        level=0.5 * SPAN,
+    )
     axes[1, 1].set_xlim(-0.6, 1.8)
     axes[1, 1].set_ylim(-0.9, 0.9)
-    cut(axes[1, 2], wing, "wing stub: the whole cut at mid-span", level=0.5 * SPAN)
+    cut(axes[1, 2], extruded, "wing stub, 2D sketch extruded: cut at mid-span", level=0.5 * SPAN)
+    axes[1, 2].set_xlim(-0.6, 1.8)
+    axes[1, 2].set_ylim(-0.9, 0.9)
     fig.colorbar(collection, ax=axes[1, :], shrink=0.6, label="scaled Jacobian")
     for ax in axes.ravel():
         ax.set_aspect("equal")
@@ -711,10 +786,11 @@ def main() -> int:
     )
     sphere, _inner = sphere_case(report, args.quick)
     wing = wing_case(report)
+    extruded = wing_extruded_case(report)
     text = "\n".join(report) + "\n"
     print(text, end="")
     (OUTPUT / "10d_sketch_topology_report.txt").write_text(text)
-    render(airfoil, sphere, wing, OUTPUT / "10d_sketch_topology.png")
+    render(airfoil, sphere, wing, extruded, OUTPUT / "10d_sketch_topology.png")
     return 0
 
 

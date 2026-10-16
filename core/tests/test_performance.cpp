@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "opengrid/core/quality/volume_quality.hpp"
@@ -68,6 +69,30 @@ TEST(Anderson, AcceleratesAndIsThreadIndependent) {
     const double exact = static_cast<double>(i) / static_cast<double>(a.size() - 1);
     EXPECT_NEAR(b[i], exact, 1e-8);
   }
+}
+
+TEST(Anderson, GuardRestoresTheBestIterateAndSwitchesOff) {
+  og::AndersonAccelerator anderson(2, 5);
+  std::vector<double> u = {0.0, 0.0};
+  std::vector<double> g = {1.0, 1.0};
+  EXPECT_FALSE(anderson.guarded_step(u, g, 1.0));  // no history yet
+  u = g;
+  g = {1.5, 1.25};
+  anderson.guarded_step(u, g, 0.5);  // the lowest residual: {1.5, 1.25} kept
+  u = g;
+  g = {50.0, -40.0};
+  EXPECT_TRUE(anderson.guarded_step(u, g, 0.5 * og::AndersonAccelerator::kBlowup * 2.0));
+  EXPECT_EQ(g, (std::vector<double>{1.5, 1.25}));
+  EXPECT_EQ(anderson.restarts(), 1);
+  EXPECT_TRUE(anderson.enabled());
+  g = {70.0, 70.0};
+  EXPECT_TRUE(anderson.guarded_step(u, g, 1e6));
+  EXPECT_EQ(g, (std::vector<double>{1.5, 1.25}));
+  EXPECT_FALSE(anderson.enabled());  // kMaxRestarts = 2: the plain iteration continues
+  g = {2.0, 2.0};
+  EXPECT_FALSE(anderson.guarded_step(u, g, 0.1));
+  EXPECT_EQ(g, (std::vector<double>{2.0, 2.0}));
+  EXPECT_NE(anderson.restart_note().find("without acceleration"), std::string::npos);
 }
 
 TEST(VolumeQuality, RegularCellsAndNeighbours) {

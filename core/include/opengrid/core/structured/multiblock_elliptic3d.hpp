@@ -65,6 +65,11 @@ struct Multiblock3DInput {
   std::vector<std::shared_ptr<const CurveChain>> chains;
   std::vector<Multiblock3DSlide> slides;
   std::vector<MultiblockWall> walls;  // nodes on boundary faces
+  // Per node (empty: none): nodes of symmetry planes. A face node sliding on a plane and
+  // flagged here is updated like an interior node with its neighbours mirrored across the
+  // plane, not limited; edges between two such planes likewise, and an edge between one and
+  // another surface slides to the foot of its neighbour in the plane (a 2D boundary node).
+  std::vector<std::uint8_t> symmetric;
 };
 
 struct Multiblock3DResult {

@@ -364,7 +364,8 @@ the existing patches, exports and quality checks keep working on the result.
 - **GUI:** Topology → Templates menu, and an Automatic topology action (2D).
 - **Demo:** each template on its geometry, and automatic topology for the two-element airfoil
   and the plate with holes. *(Built: `examples/10e_templates_auto.py`. Nine templates meet
-  0.4; wing in box (C-H) reaches 0.25 - missed. Automatic topology: valid layouts for the
+  0.4; wing in box (C-H) reached 0.25 - missed, then 0.62 in the follow-up (extruded 2D
+  C-grid; tapered + swept 3D variant 0.60). Automatic topology: valid layouts for the
   airfoil in a box, the plate with three holes and the bracket section; the two-element
   airfoil fails (a five-cornered face in the slot) - missed; the index theorem holds in all
   four. See OPEN_ISSUES.)*

@@ -553,6 +553,24 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     std::array<int, 2> tangent;  // positive directions of the two other axes
   };
   std::vector<WallNode> walls;
+  // Symmetry-plane nodes (flagged face nodes sliding on a plane): interior nodes for the
+  // smoothing, so wall control reaches them too.
+  std::vector<std::uint8_t> symmetric(n, 0);
+  for (std::size_t g = 0; g < n; ++g) {
+    if (!is(static_cast<std::int64_t>(g), MultiblockNode::Sliding) ||
+        topo[g].shape != Shape::Face || slide_of[g] < 0) {
+      continue;
+    }
+    const Multiblock3DSlide& slide = input.slides[static_cast<std::size_t>(slide_of[g])];
+    if (g < input.symmetric.size() && input.symmetric[g] != 0 &&
+        slide.target == SlideTarget::Surface &&
+        dynamic_cast<const PlaneSurface*>(input.surfaces[slide.index].get()) != nullptr) {
+      symmetric[g] = 1;
+    }
+  }
+  auto is_symmetric = [&](std::int64_t g) {
+    return g >= 0 && symmetric[static_cast<std::size_t>(g)] != 0;
+  };
   std::vector<std::uint8_t> on_wall(n, 0);
   for (const MultiblockWall& wall : input.walls) {
     if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
@@ -586,6 +604,15 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
         inward.push_back(dir_of(normal_axis, 1));
         inward.push_back(dir_of(normal_axis, -1));
       }
+    } else if (t.consistent && t.shape == Shape::Edge) {
+      // Where a wall meets a symmetry plane: the grid line leaving the wall in the plane.
+      for (int m = 0; m < 2; ++m) {
+        const int d = dir_of(t.inward_axes[static_cast<std::size_t>(m)],
+                             t.inward_signs[static_cast<std::size_t>(m)]);
+        if (is_symmetric(nb_dir(g, d))) {
+          inward.push_back(d);
+        }
+      }
     }
     for (const int d : inward) {
       const int axis = dir_axis(d);
@@ -608,7 +635,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     for (std::size_t steps = 1; steps <= n; ++steps) {
       const auto& nb = topo[static_cast<std::size_t>(cur)].nb;
       const std::int64_t next = nb[static_cast<std::size_t>(slot_of_dir(normal))];
-      if (!is(next, MultiblockNode::Regular)) {
+      if (!is(next, MultiblockNode::Regular) && !is_symmetric(next)) {
         break;
       }
       const auto& next_nb = topo[static_cast<std::size_t>(next)].nb;
@@ -623,11 +650,22 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
         offset[static_cast<std::size_t>(dir_axis(normal))] = dir_sign(normal);
         offset[static_cast<std::size_t>(dir_axis(tangent[static_cast<std::size_t>(m)]))] =
             dir_sign(tangent[static_cast<std::size_t>(m)]);
-        const std::int64_t side = nb[static_cast<std::size_t>(slot_of(offset))];
-        const int d = dir_to(next_nb, side);
+        std::int64_t side = nb[static_cast<std::size_t>(slot_of(offset))];
+        bool flipped = false;
+        if (side < 0) {
+          // Across a symmetry plane: take the mirror side and turn the direction round.
+          offset[static_cast<std::size_t>(dir_axis(tangent[static_cast<std::size_t>(m)]))] =
+              -dir_sign(tangent[static_cast<std::size_t>(m)]);
+          side = nb[static_cast<std::size_t>(slot_of(offset))];
+          flipped = true;
+        }
+        int d = dir_to(next_nb, side);
         if (side < 0 || d < 0) {
           ok = false;
           break;
+        }
+        if (flipped) {
+          d = dir_opposite(d);
         }
         next_tangent[static_cast<std::size_t>(m)] = d;
       }
@@ -692,15 +730,17 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
   auto at_offset = [&](std::size_t g, const std::array<int, 3>& offset) -> const Vec3& {
     return x[static_cast<std::size_t>(topo[g].nb[static_cast<std::size_t>(slot_of(offset))])];
   };
-  auto coefficients = [&](std::size_t g) {
-    auto unit = [](int axis, int sign) {
-      std::array<int, 3> o{};
-      o[static_cast<std::size_t>(axis)] = sign;
-      return o;
-    };
+  auto unit = [](int axis, int sign) {
+    std::array<int, 3> o{};
+    o[static_cast<std::size_t>(axis)] = sign;
+    return o;
+  };
+  // Coefficients from the neighbours' positions given by `pos` (an offset -> point accessor:
+  // the stored neighbours, or mirror images across a symmetry plane).
+  auto coefficients_with = [&](std::size_t g, const auto& pos) {
     std::array<Vec3, 3> d;
     for (int m = 0; m < 3; ++m) {
-      d[static_cast<std::size_t>(m)] = 0.5 * (at_offset(g, unit(m, 1)) - at_offset(g, unit(m, -1)));
+      d[static_cast<std::size_t>(m)] = 0.5 * (pos(unit(m, 1)) - pos(unit(m, -1)));
     }
     const double g11 = dot(d[0], d[0]);
     const double g22 = dot(d[1], d[1]);
@@ -733,7 +773,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     c.a23 = g12 * g13 - g11 * g23;
     return c;
   };
-  auto cross_term = [&](std::size_t g, const Coefficients& c) {
+  auto cross_with = [&](const Coefficients& c, const auto& pos) {
     auto cross_derivative = [&](int m1, int m2) {
       auto o = [&](int s1, int s2) {
         std::array<int, 3> v{};
@@ -741,11 +781,17 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
         v[static_cast<std::size_t>(m2)] = s2;
         return v;
       };
-      return 0.25 * (at_offset(g, o(1, 1)) - at_offset(g, o(1, -1)) - at_offset(g, o(-1, 1)) +
-                     at_offset(g, o(-1, -1)));
+      return 0.25 * (pos(o(1, 1)) - pos(o(1, -1)) - pos(o(-1, 1)) + pos(o(-1, -1)));
     };
     return 2.0 * (c.a12 * cross_derivative(0, 1) + c.a13 * cross_derivative(0, 2) +
                   c.a23 * cross_derivative(1, 2));
+  };
+  auto coefficients = [&](std::size_t g) {
+    return coefficients_with(g,
+                             [&](const std::array<int, 3>& o) -> Vec3 { return at_offset(g, o); });
+  };
+  auto cross_term = [&](std::size_t g, const Coefficients& c) {
+    return cross_with(c, [&](const std::array<int, 3>& o) -> Vec3 { return at_offset(g, o); });
   };
   std::vector<std::size_t> regular;
   for (std::size_t g = 0; g < n; ++g) {
@@ -773,6 +819,11 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     double v = 0.0;
     Vec3 origin;
     double radius = 0.0;
+    // A face node on a plane is a symmetry-plane node: updated like an interior node with the
+    // neighbours across the plane mirrored, and not limited (it is the interior of the grid's
+    // sections, e.g. the end plane of an extrusion).
+    bool planar = false;
+    Vec3 normal;
   };
   std::vector<SlideState> slides(sliding.size());
   for (std::size_t s = 0; s < sliding.size(); ++s) {
@@ -808,6 +859,26 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       nearest = 0.0;
     }
     st.radius = options.slide_limit * nearest;
+    if (st.slide->target == SlideTarget::Chain && t.shape == Shape::Edge) {
+      // Between two symmetry planes: not limited either.
+      const std::int64_t on1 = nb_dir(g, dir_of(t.inward_axes[1], t.inward_signs[1]));
+      const std::int64_t on2 = nb_dir(g, dir_of(t.inward_axes[0], t.inward_signs[0]));
+      if (is_symmetric(on1) && is_symmetric(on2)) {
+        st.radius = std::numeric_limits<double>::infinity();
+      }
+    }
+    if (symmetric[g] != 0) {
+      const Surface& surface = *input.surfaces[st.slide->index];
+      {
+        const Vec3 nrm = cross(surface.du(st.u, st.v), surface.dv(st.u, st.v));
+        const double length = norm(nrm);
+        if (length > 0.0) {
+          st.planar = true;
+          st.normal = (1.0 / length) * nrm;
+          st.radius = std::numeric_limits<double>::infinity();
+        }
+      }
+    }
   }
   // Initial parameters and the metric there, so the limit acts in parameter space: the
   // limited position lies exactly on the geometry and limiting it again changes nothing (an
@@ -878,6 +949,19 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     double vt = 0.0;
     project(s, wanted, ut, vt);
     return limit(s, ut, vt, u, v);
+  };
+  // Unit normal of the plane a symmetry-plane node slides on.
+  auto plane_normal = [&](std::size_t g) {
+    const Multiblock3DSlide& slide = input.slides[static_cast<std::size_t>(slide_of[g])];
+    const Surface& surface = *input.surfaces[slide.index];
+    const Vec3 nrm = cross(surface.du(0.0, 0.0), surface.dv(0.0, 0.0));
+    return (1.0 / norm(nrm)) * nrm;
+  };
+  // Point of chain node s at parameter u, not limited (edges between symmetry planes).
+  auto limit_free = [&](std::size_t s, double ut, double& u, double& v) {
+    u = std::clamp(ut, 0.0, 1.0);
+    v = 0.0;
+    return input.chains[slides[s].slide->index]->point_at_param(u);
   };
   std::vector<Vec3> slide_target(sliding.size());
   std::vector<std::array<double, 2>> slide_param(sliding.size());
@@ -987,7 +1071,6 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
   auto updates = static_cast<double>(line_nodes.size() + irregular.size() + sliding.size());
   updates = std::max(updates, 1.0);
   double first_residual = 0.0;
-  double best_residual = 0.0;
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
     if (progress != nullptr && progress->cancelled()) {
       result.cancelled = true;
@@ -1047,8 +1130,100 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
           const auto us = static_cast<std::size_t>(s);
           const std::size_t g = sliding[us];
           const NodeTopo& t = topo[g];
+          if (slides[us].planar) {
+            // Mirror images across the plane through the node stand in for the missing
+            // neighbours on the far side.
+            const int axis = dir_axis(t.inward);
+            const Vec3 here = x[g];
+            const Vec3 nrm = slides[us].normal;
+            auto pos = [&](const std::array<int, 3>& o) -> Vec3 {
+              const std::int64_t id = t.nb[static_cast<std::size_t>(slot_of(o))];
+              if (id >= 0) {
+                return x[static_cast<std::size_t>(id)];
+              }
+              std::array<int, 3> inside = o;
+              inside[static_cast<std::size_t>(axis)] = -inside[static_cast<std::size_t>(axis)];
+              const Vec3 q =
+                  x[static_cast<std::size_t>(t.nb[static_cast<std::size_t>(slot_of(inside))])];
+              return q - (2.0 * dot(q - here, nrm)) * nrm;
+            };
+            const Coefficients c = coefficients_with(g, pos);
+            Vec3 sum = cross_with(c, pos);
+            for (int d = 0; d < 6; ++d) {
+              sum += c.a[static_cast<std::size_t>(d)] * pos(unit(dir_axis(d), dir_sign(d)));
+            }
+            double u = 0.0;
+            double v = 0.0;
+            slide_target[us] = place(us, (1.0 / c.diag) * sum, u, v);
+            slide_param[us] = {u, v};
+            return;
+          }
           std::int64_t inner = kNone;
-          if (t.shape == Shape::Face) {
+          if (t.shape == Shape::Edge) {
+            // An edge on a symmetry plane: between two planes both sides are mirrored (an
+            // interior node of the sections' boundary); between a plane and another surface
+            // it slides as a 2D boundary node, to the foot of its neighbour in the plane.
+            const int a1 = t.inward_axes[0];
+            const int a2 = t.inward_axes[1];
+            const std::int64_t on1 = nb_dir(g, dir_of(a2, t.inward_signs[1]));  // face normal to a1
+            const std::int64_t on2 = nb_dir(g, dir_of(a1, t.inward_signs[0]));  // face normal to a2
+            const bool sym1 = is_symmetric(on1);
+            const bool sym2 = is_symmetric(on2);
+            if (sym1 && sym2) {
+              const Vec3 here = x[g];
+              const Vec3 n1 = plane_normal(static_cast<std::size_t>(on1));
+              const Vec3 n2 = plane_normal(static_cast<std::size_t>(on2));
+              auto pos = [&](const std::array<int, 3>& o) -> Vec3 {
+                const std::int64_t id = t.nb[static_cast<std::size_t>(slot_of(o))];
+                if (id >= 0) {
+                  return x[static_cast<std::size_t>(id)];
+                }
+                std::array<int, 3> inside = o;
+                const bool out1 = o[static_cast<std::size_t>(a1)] == -t.inward_signs[0];
+                const bool out2 = o[static_cast<std::size_t>(a2)] == -t.inward_signs[1];
+                if (out1) {
+                  inside[static_cast<std::size_t>(a1)] = t.inward_signs[0];
+                }
+                if (out2) {
+                  inside[static_cast<std::size_t>(a2)] = t.inward_signs[1];
+                }
+                const std::int64_t mirror_of = t.nb[static_cast<std::size_t>(slot_of(inside))];
+                if (mirror_of < 0) {
+                  return here;
+                }
+                Vec3 q = x[static_cast<std::size_t>(mirror_of)];
+                if (out1) {
+                  q = q - (2.0 * dot(q - here, n1)) * n1;
+                }
+                if (out2) {
+                  q = q - (2.0 * dot(q - here, n2)) * n2;
+                }
+                return q;
+              };
+              const Coefficients c = coefficients_with(g, pos);
+              Vec3 sum = cross_with(c, pos);
+              for (int d = 0; d < 6; ++d) {
+                sum += c.a[static_cast<std::size_t>(d)] * pos(unit(dir_axis(d), dir_sign(d)));
+              }
+              double uf = slides[us].u;
+              double vf = slides[us].v;
+              project(us, (1.0 / c.diag) * sum, uf, vf);
+              double u = 0.0;
+              double v = 0.0;
+              slide_target[us] = limit_free(us, uf, u, v);
+              slide_param[us] = {u, v};
+              return;
+            }
+            if (sym1 || sym2) {
+              inner = on1;
+              if (sym2) {
+                inner = on2;
+              }
+            }
+          }
+          if (inner >= 0) {
+            // set above (an edge on one symmetry plane)
+          } else if (t.shape == Shape::Face) {
             inner = nb_dir(g, t.inward);
           } else {
             std::array<int, 3> offset{};
@@ -1106,16 +1281,10 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     }
     if (iteration == 0) {
       first_residual = residual;
-      best_residual = residual;
     }
     if (options.acceleration > 0) {
-      if (residual > 4.0 * best_residual) {
-        anderson.reset();
-        best_residual = residual;
-      }
-      best_residual = std::min(best_residual, residual);
       pack(after);
-      if (anderson.step(before, after)) {
+      if (anderson.guarded_step(before, after, residual)) {
         unpack(after);
         reproject();
       }
@@ -1141,6 +1310,9 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
                               std::to_string(saturated) +
                               " node(s); spacing/orthogonality may not be met (raise max_source "
                               "or lower decay)");
+  }
+  if (anderson.restarts() > 0) {
+    result.warnings.push_back("multiblock: " + anderson.restart_note());
   }
   if (!result.converged && !result.cancelled) {
     result.warnings.push_back("multiblock 3D: not converged after " +

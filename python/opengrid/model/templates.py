@@ -16,9 +16,15 @@ geometry they need) from the selected geometry, with no user-placed vertices.
     centre cell, which an O-grid of four blocks around the body replaces (each channel corner
     in one block).
 3D: ``pipe`` (butterfly), ``cylinder_in_channel`` (body in channel), ``bump_channel``
-(H-grid) and ``wing_in_box`` (C-grid) extrude the 2D template along z by ``length`` (faces on
-extruded surfaces of the curves, end faces on their planes); ``sphere_in_box`` builds a
-cubed-sphere O-grid inside a 26-block box layer around a sphere it creates.
+(H-grid) and ``wing_in_box`` (C-grid) are the 2D template with ``extrude``: its smoothed grid
+extruded along z by ``length`` (``span_points``, ``span_distribution`` with spacings as
+lengths, e.g. clustered towards the side walls), the same in every section; with
+``three_d_blocks=True`` a 3D sketch of six-face blocks instead (smoothed in 3D with the end
+planes as symmetry planes, for editing the layout in 3D); ``wing_in_box`` takes ``taper``
+(tip / root chord, about the leading edge) and ``sweep`` (degrees of the leading edge),
+which make it such a 3D sketch with the wing on ruled surfaces between root and tip;
+``sphere_in_box`` builds a cubed-sphere O-grid inside a 26-block box layer around a sphere it
+creates.
 Boundary edges are assigned to the curves (surfaces) that contain them; the template places
 the boundary vertices exactly on the geometry (fixed) and the interior ones float in the
 smoothing group (10d), so nothing is placed by hand.
@@ -46,15 +52,6 @@ EXTRUDED = {
     "wing_in_box": "cgrid",
 }
 SAMPLES = 400  # loop samples per curve
-# End-plane nodes of extruded templates may slide further than the default (half an interval)
-# so they can follow the interior; much more (5) let them run into the plane's corners. The
-# extruded C-grid folds at 1.5 (wake and ring blocks at the end planes) and keeps 0.5.
-EXTRUDED_SLIDE_LIMIT = {
-    "pipe": 1.5,
-    "cylinder_in_channel": 1.5,
-    "bump_channel": 1.5,
-    "wing_in_box": 0.5,
-}
 
 
 def _fail(where: str, message: str):
@@ -466,7 +463,11 @@ def _cgrid(store, options) -> dict:
         "distributions": distributions,
     }
     curves = [p[0] for p in loop.pieces] + [arc, top, bottom, out]
-    return _finish_2d(store, options, vertices, blocks, curves, plan)
+    params = _finish_2d(store, options, vertices, blocks, curves, plan)
+    params["_body"] = tuple(p[0] for p in loop.pieces)
+    params["_leading_edge"] = tuple(loop.points[le].tolist())
+    params["_chord"] = tuple(e.tolist())
+    return params
 
 
 def _corners(store, sides: dict, where: str):
@@ -666,17 +667,24 @@ def _finish_2d(store, options, vertices, blocks, curve_ids, plan) -> dict:
 # ------------------------------------------------------------------------- 3D templates
 def _translated(store, curve_id: int, offset) -> int:
     """A copy of a curve moved by ``offset``."""
-    entity = store.get(curve_id)
     d = np.asarray(offset, dtype=float)
+    return _mapped(store, curve_id, lambda p: p + d, 1.0)
+
+
+def _mapped(store, curve_id: int, mapping, scale: float) -> int:
+    """A copy of a curve under a similarity ``mapping`` (point -> point; ``scale`` its length
+    factor): exact for lines, arcs, polylines, interpolating splines and NURBS."""
+    entity = store.get(curve_id)
 
     def moved(point):
-        return tuple((np.asarray(point, dtype=float) + d).tolist())
+        return tuple(np.asarray(mapping(np.asarray(point, dtype=float)), dtype=float).tolist())
 
     raw = dict(entity.params)
     if entity.kind == "line":
         raw = {"p0": moved(raw["p0"]), "p1": moved(raw["p1"])}
     elif entity.kind == "arc":
         raw["center"] = moved(raw["center"])
+        raw["radius"] = raw["radius"] * scale
     elif entity.kind in ("polyline", "spline"):
         raw["points"] = tuple(moved(q) for q in raw["points"])
     elif entity.kind == "nurbs":
@@ -711,14 +719,26 @@ def _relaxed_vertices(store, params2d: dict) -> np.ndarray:
     return points
 
 
-def _extrude(store, params2d: dict, length: float, span_points: int, slide_limit: float) -> dict:
-    """The 2D sketch (relaxed in 2D first) extruded along z by ``length``: edges at both ends
-    on the curves (copies moved by ``length`` at the far end), the faces between on extruded
-    surfaces of the curves, walls from wall edges."""
+def _blocks_3d(
+    store, params2d: dict, length: float, span_points: int, section=None, body=()
+) -> dict:
+    """A 3D sketch of six-face blocks: the 2D sketch (relaxed in 2D first) swept along z by
+    ``length``, edges at both ends on the curves (copies at the far end), the faces between on
+    extruded surfaces of the curves, walls from wall edges, the end planes symmetry planes.
+    ``section``: (mapping, scale) - a similarity applied to the ``body`` curves and to the
+    vertices not on other curves at the far end (a tapered or swept body; its faces are then
+    on ruled surfaces between the two sections). The plain extrusion is ``extrude``."""
     vertices = list(_relaxed_vertices(store, params2d))
     n = len(vertices)
     offset = (0.0, 0.0, length)
-    top = [v + np.asarray(offset) for v in vertices]
+    body = set(body)
+    other = {v for (a, b), c in params2d["curves"].items() if c not in body for v in (a, b)}
+    top = []
+    for k, v in enumerate(vertices):
+        if section is not None and k not in other:
+            top.append(np.asarray(section[0](v), dtype=float) + np.asarray(offset))
+        else:
+            top.append(v + np.asarray(offset))
     blocks = []
     for b in params2d["blocks"]:
         blocks.append((*b, *(v + n for v in b)))
@@ -727,6 +747,16 @@ def _extrude(store, params2d: dict, length: float, span_points: int, slide_limit
     made = {}
     ends = {}
     for (a, b), curve in params2d["curves"].items():
+        if curve not in made and section is not None and curve in body:
+            mapping, scale = section
+            d = np.asarray(offset)
+            ends[curve] = _mapped(store, curve, lambda p, m=mapping, d=d: m(p) + d, scale)
+            made[curve] = _add(
+                store,
+                "ruled_surface",
+                {"curve0": curve, "curve1": ends[curve]},
+                f"{store.get(curve).name}-ruled",
+            )
         if curve not in made:
             made[curve] = _add(
                 store,
@@ -738,6 +768,26 @@ def _extrude(store, params2d: dict, length: float, span_points: int, slide_limit
         surfaces[tuple(sorted((a, b, b + n, a + n)))] = made[curve]
         curves[(a, b)] = curve
         curves[(a + n, b + n)] = ends[curve]
+    if section is not None:
+        # Where two body curves meet (the leading edge), the spanwise edge lies between two
+        # ruled surfaces: a straight line from the root to the tip section (exact for a
+        # similarity of the sections).
+        meets: dict[int, set] = {}
+        for (a, b), curve in params2d["curves"].items():
+            if curve in body:
+                meets.setdefault(a, set()).add(curve)
+                meets.setdefault(b, set()).add(curve)
+        for v in sorted(meets):
+            if len(meets[v]) >= 2 and v not in other:
+                curves[(v, v + n)] = _add(
+                    store,
+                    "line",
+                    {
+                        "p0": tuple(float(c) for c in vertices[v]),
+                        "p1": tuple(float(c) for c in top[v]),
+                    },
+                    "span-edge",
+                )
     walls = {}
     for (a, b), spacing in params2d["walls"].items():
         walls[(a, b, b + n, a + n)] = spacing
@@ -748,9 +798,12 @@ def _extrude(store, params2d: dict, length: float, span_points: int, slide_limit
         distributions[(a, b)] = d
         distributions[(a + n, b + n)] = d
     fixed = [v for v in params2d["fixed"]] + [v + n for v in params2d["fixed"]]
+    # The end planes are symmetry planes: every section is the same.
+    symmetry = [tuple(sorted(b)) for b in params2d["blocks"]]
+    symmetry += [tuple(sorted(v + n for v in b)) for b in params2d["blocks"]]
     return {
         "fixed": tuple(fixed),
-        "slide_limit": slide_limit,
+        "symmetry": tuple(symmetry),
         "vertices": tuple(tuple(float(c) for c in p) for p in vertices + top),
         "blocks": tuple(blocks),
         "dimensions": dimensions,
@@ -938,18 +991,48 @@ def create_template(store, kind: str, name=None, **options):
         params = _sphere_in_box(store, options)
     elif kind in EXTRUDED:
         length = options.pop("length", None)
-        span_points = options.pop("span_points", 11)
-        params2d = BUILDERS_2D[EXTRUDED[kind]](store, options)
+        span_points = int(options.pop("span_points", 11))
+        span_distribution = options.pop("span_distribution", "uniform")
+        three_d_blocks = bool(options.pop("three_d_blocks", False))
+        taper = float(options.pop("taper", 1.0))
+        sweep = float(options.pop("sweep", 0.0))
+        if kind != "wing_in_box" and (taper != 1.0 or sweep != 0.0):
+            _fail(kind, "taper and sweep are options of wing_in_box")
+        params = BUILDERS_2D[EXTRUDED[kind]](store, options)
+        body = params.pop("_body", ())
+        leading = np.asarray(params.pop("_leading_edge", (0.0, 0.0, 0.0)))
+        chord = np.asarray(params.pop("_chord", (1.0, 0.0, 0.0)))
         if length is None:
-            points = np.asarray(params2d["vertices"])
+            points = np.asarray(params["vertices"])
             length = float(np.max(np.ptp(points[:, :2], axis=0))) / 4.0
-        params = _extrude(
-            store, params2d, float(length), int(span_points), EXTRUDED_SLIDE_LIMIT[kind]
-        )
-        # Relaxed in 2D already (the grid is the same in every section): no 3D passes.
-        relax = False
+        section = None
+        if taper != 1.0 or sweep != 0.0:
+            # The tip section: the root scaled by taper about the leading edge, moved back by
+            # the sweep (degrees of the leading edge).
+            shift = float(length) * math.tan(math.radians(sweep)) * chord
+
+            def mapping(p, leading=leading, taper=taper, shift=shift):
+                return leading + taper * (np.asarray(p) - leading) + shift
+
+            section = (mapping, taper)
+            three_d_blocks = True
+        if three_d_blocks:
+            params = _blocks_3d(
+                store, params, float(length), span_points, section=section, body=body
+            )
+            relax = False  # relaxed in 2D already
+        else:
+            # The smoothed 2D grid extruded along z: the same in every section.
+            params["extrude"] = {
+                "vector": (0.0, 0.0, float(length)),
+                "points": span_points,
+                "distribution": span_distribution,
+            }
     else:
         params = BUILDERS_2D[kind](store, options)
+    # Builder notes for the 3D variants (body curves, leading edge, chord) are not sketch
+    # parameters.
+    params = {k: v for k, v in params.items() if not k.startswith("_")}
     if options:
         _fail("create_template", f"unexpected options for {kind}: {', '.join(sorted(options))}")
     if name is None:

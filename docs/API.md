@@ -234,7 +234,7 @@ step.
 
 ## Multi-block smoothing groups
 
-### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5) -> str`
+### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5, symmetry=()) -> str`
 
 Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
 grid (as one grid): interfaces and block corners move, grid lines continue across
@@ -254,7 +254,8 @@ connectors on one curve slide along it (3D: face corners inside one sliding surf
 slide on it); ``pinned``: connectors (3D: faces) kept fixed even between members, e.g.
 a wake cut (a wall between members is an internal wall: fixed, with wall control on
 both sides, 2D); ``slide_limit``: how far a sliding node may move, in initial
-intervals.
+intervals; ``symmetry`` (3D): planar faces that are symmetry planes (nodes move as
+interior nodes mirrored across the plane, without the slide limit).
 
 ### `smooth_group(name: str, progress=None) -> opengrid.model.groups.GroupResult`
 
@@ -273,7 +274,7 @@ boundaries), else the connector's own nodes.
 
 ## Sketch topology (floating wireframe)
 
-### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, name: str | None = None) -> str`
+### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, name: str | None = None) -> str`
 
 Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
 (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
@@ -287,8 +288,10 @@ with ``"edge"``/``"face"``, ``"spacing"``, ``"decay"``, ``"relaxation"``,
 ``{(a, b): distribution}`` from a to b. Generates connectors, domains (3D: also
 blocks) and a smoothing group named ``<sketch>-...`` that the sketch owns; with
 ``relax`` (2D) vertices joining two edges on one curve slide along it until the
-grid stops moving them. One undo step; warnings (e.g. unassigned edges lying on
-geometry) are in ``last_warnings``.
+grid stops moving them. ``extrude`` (2D): ``{"vector": (0, 0, L), "points": n,
+"distribution": {...}}`` (spacings as lengths) also makes one extruded block per
+domain: the smoothed 2D grid extruded, the same in every section. One undo step;
+warnings (e.g. unassigned edges lying on geometry) are in ``last_warnings``.
 
 ### `edit_sketch(name: str, **changes) -> str`
 

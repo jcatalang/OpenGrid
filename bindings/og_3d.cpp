@@ -252,12 +252,20 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::tuple<std::int64_t, std::string, std::size_t>>& slides,
          const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
          double omega, int max_iterations, double tolerance, int acceleration,
-         og::SmoothingProgress* progress, double slide_limit, double absolute_tolerance) {
+         og::SmoothingProgress* progress, double slide_limit, double absolute_tolerance,
+         const std::optional<nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig,
+                                         nb::device::cpu>>& symmetric) {
         const std::size_t n = points.shape(0);
         if (fixed.shape(0) != n) {
           throw std::invalid_argument("fixed must have one entry per point");
         }
         og::Multiblock3DInput input;
+        if (symmetric.has_value()) {
+          if (symmetric->shape(0) != n) {
+            throw std::invalid_argument("symmetric must have one entry per point");
+          }
+          input.symmetric.assign(symmetric->data(), symmetric->data() + n);
+        }
         input.xyz.assign(points.data(), points.data() + 3 * n);
         input.hexes = index_input<8>(hexes);
         input.fixed.assign(fixed.data(), fixed.data() + n);
@@ -313,9 +321,11 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("slides"), nb::arg("walls"), nb::arg("omega") = 1.0, nb::arg("max_iterations") = 2000,
       nb::arg("tolerance") = 1e-6, nb::arg("acceleration") = 20, nb::arg("progress") = nb::none(),
       nb::arg("slide_limit") = 0.5, nb::arg("absolute_tolerance") = 0.0,
+      nb::arg("symmetric") = nb::none(),
       "Elliptic smoothing of a multi-block hexahedral grid as one grid (GIL released). hexes: "
       "corner c = i + 2 j + 4 k, right-handed; slides: (node, 'surface' | 'chain', index); "
-      "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source). Returns (points, "
+      "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source); symmetric: per "
+      "node, 1 on symmetry planes. Returns (points, "
       "node_class (0 fixed, 1 regular, 2 irregular, 3 sliding), residuals, iterations, "
       "converged, cancelled, lines, colours, warnings).");
 

@@ -3,7 +3,8 @@
   * Templates (opengrid.model.templates): each on its geometry, with no vertex placed by hand:
     2D O-grid (ellipse), butterfly (disk), C-grid (NACA 0012), H-grid (channel with a bump),
     body in channel (cylinder); 3D pipe, cylinder in channel, bump channel, wing in box (C-H,
-    extruded) and sphere in box. Reported: blocks, time, min scaled Jacobian (target >= 0.4).
+    extruded; and tapered + swept, smoothed in 3D) and sphere in box. Reported: blocks, time,
+    min scaled Jacobian (target >= 0.4), and the C-grid's wall control down to y+ ~ 1.
   * Automatic topology (opengrid.model.crossfield): the cross field of an airfoil in a box, a
     two-element airfoil (main element and flap), a plate with three holes and the 9a
     bracket's section; singularities and the index theorem, the separatrices, and the sketch of
@@ -91,6 +92,17 @@ def template_runs(report: list[str]) -> dict:
                 "span_points": 9,
             },
         ),
+        "wing_in_box tapered + swept": (
+            "wing_in_box",
+            lambda og: {
+                "body": cases.airfoil(og),
+                "wall": 0.001,
+                "length": 2.0,
+                "span_points": 13,
+                "taper": 0.6,
+                "sweep": 20.0,
+            },
+        ),
         "sphere_in_box": ("sphere_in_box", lambda og: {"radius": 0.5, "wall": 0.01}),
     }
     report.append("templates (min scaled Jacobian after the group smoothing; target >= 0.4):")
@@ -113,10 +125,33 @@ def template_runs(report: list[str]) -> dict:
         if kind in ("ogrid", "butterfly", "cgrid", "hgrid", "body_in_channel"):
             sessions[label] = og
     report.append(
-        "  (wing_in_box: the extruded C-grid's wake and ring blocks lose quality at the end planes"
-        " in the 3D smoothing - 0.55 as TFI; larger slide limits fold them; see OPEN_ISSUES)"
+        "  (wing_in_box: the smoothed 2D C-grid extruded; tapered + swept: a 3D sketch smoothed"
+        " in 3D, the wing on ruled surfaces, the end planes symmetry planes)"
     )
+    wall_control(report)
     return sessions
+
+
+def wall_control(report: list[str]) -> None:
+    """The C-grid at a y+ ~ 1 wall spacing: first-cell height and orthogonality on the body
+    and on the wake cut (an internal wall with twice the spacing)."""
+    report.append(
+        "  C-grid wall control (first cell; deviation of the first grid line from normal):"
+    )
+    for wall in (1e-3, 1e-5, 1e-6):
+        og = opengrid.Session()
+        og.create_template("cgrid", body=cases.airfoil(og), wall=wall, name="c")
+        result = og.smooth_group("c-group")
+        parts = []
+        for label, domain in (("body", "c-d1"), ("wake cut", "c-d0")):
+            height, deviation = cases.first_layer(og.domain_grid(domain))
+            parts.append(
+                f"{label} {height.min():.3g}..{height.max():.3g}, max {deviation.max():.2f} deg"
+            )
+        state = f"converged in {result.iterations} iterations"
+        if not result.converged:
+            state = f"NOT converged after {result.iterations} iterations"
+        report.append(f"    wall {wall:g}: {state}; " + "; ".join(parts))
 
 
 def auto_runs(report: list[str]) -> dict:

@@ -291,7 +291,6 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
   AndersonAccelerator anderson(state_size, options.acceleration);
   std::vector<double> before;
   std::vector<double> after;
-  double best = 0.0;
   std::vector<double> plane_sum(static_cast<std::size_t>(nk), 0.0);
   std::vector<std::size_t> plane_count(static_cast<std::size_t>(nk), 0);
 
@@ -375,17 +374,10 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
     result.iterations = iteration + 1;
     if (iteration == 0) {
       first = rms;
-      best = rms;
     }
     if (options.acceleration > 0) {
-      // Restart the history when the residual grows well above its best value.
-      if (rms > 4.0 * best) {
-        anderson.reset();
-        best = rms;
-      }
-      best = std::min(best, rms);
       pack(after);
-      if (anderson.step(before, after)) {
+      if (anderson.guarded_step(before, after, rms)) {
         unpack(after);
       }
     }
@@ -408,6 +400,9 @@ Elliptic3DResult smooth_elliptic_3d(const Grid3D& initial, const Elliptic3DOptio
       result.warnings.emplace_back("elliptic 3D: wall sources reached max_source (face " +
                                    std::to_string(w.axis * 2 + (w.side + 1) / 2) + ")");
     }
+  }
+  if (anderson.restarts() > 0) {
+    result.warnings.push_back("elliptic 3D: " + anderson.restart_note());
   }
   if (!result.converged && !result.cancelled) {
     result.warnings.emplace_back("elliptic 3D: not converged in " +

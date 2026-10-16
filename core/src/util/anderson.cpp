@@ -119,6 +119,52 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
   return true;
 }
 
+bool AndersonAccelerator::guarded_step(const std::vector<double>& u, std::vector<double>& g,
+                                       double residual) {
+  if (!started_) {
+    started_ = true;
+    best_ = residual;
+    lowest_ = residual;
+    best_state_ = g;
+  }
+  if (!enabled_) {
+    return false;
+  }
+  if (residual > kBlowup * lowest_) {
+    restarts_ += 1;
+    reset();
+    g = best_state_;
+    best_ = lowest_;
+    if (restarts_ >= kMaxRestarts) {
+      enabled_ = false;
+    }
+    return true;
+  }
+  if (residual < lowest_) {
+    lowest_ = residual;
+    best_state_ = g;
+  }
+  // Restart the history when the residual grows well above its best value.
+  if (residual > 4.0 * best_) {
+    reset();
+    best_ = residual;
+  }
+  best_ = std::min(best_, residual);
+  return step(u, g);
+}
+
+std::string AndersonAccelerator::restart_note() const {
+  if (restarts_ == 0) {
+    return "";
+  }
+  std::string note = "acceleration diverged " + std::to_string(restarts_) +
+                     " time(s); restarted from the best iterate";
+  if (!enabled_) {
+    note += " and continued without acceleration";
+  }
+  return note;
+}
+
 bool AndersonAccelerator::solve(std::vector<double>& gamma) const {
   const std::size_t m = count_;
   double scale = 0.0;

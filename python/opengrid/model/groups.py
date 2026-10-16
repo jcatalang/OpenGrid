@@ -22,6 +22,10 @@ Connectors, by their uses:
   ``slide_limit`` of its initial intervals (default 1/2);
 * listed in ``pinned``: fixed, even an interface (e.g. the wake cut of a C-grid, whose
   clustering at the trailing edge the Laplace smoothing would spread out);
+* ``symmetry`` (3D): faces that are symmetry planes (planar, e.g. the end planes of an
+  extruded layout or the plane of a half model): their nodes move like interior nodes, with
+  the neighbours mirrored across the plane, without the slide limit; edges between two such
+  planes likewise, and an edge between one and another surface slides as a 2D boundary node;
 * a wall between two member domains (an interface listed in ``walls``) is an internal wall:
   fixed, with wall control on both sides (3D: a face between two member blocks);
 * used by any domain outside the group: fixed (the neighbour needs those nodes).
@@ -56,6 +60,7 @@ DEFAULT_GROUP = {
     "slide": "auto",
     "joints": "fixed",
     "pinned": (),
+    "symmetry": (),
     "slide_limit": 0.5,
     "omega": 1.0,
     "max_iterations": 2000,
@@ -243,6 +248,23 @@ def normalize_group(raw: dict, store, where: str) -> dict:
             continue
         if ref not in pinned_refs:
             pinned_refs.append(ref)
+    symmetry_raw = merged["symmetry"]
+    if isinstance(symmetry_raw, (str, int)):
+        symmetry_raw = [symmetry_raw]
+    symmetry = []
+    for index, item in enumerate(symmetry_raw):
+        label = f"{where}: symmetry[{index}]"
+        if not three_d:
+            issues.append(Issue(label, "symmetry planes are faces of 3D groups"))
+            break
+        ref = _ref(store, item, "domain", label, issues)
+        if ref is None:
+            continue
+        if ref not in allowed:
+            issues.append(Issue(label, f"{store.get(ref).name!r} is not {what}"))
+            continue
+        if ref not in symmetry:
+            symmetry.append(ref)
     slide_limit = _number(merged["slide_limit"], f"{where}: slide_limit", issues, positive=True)
     joints = merged["joints"]
     if joints not in JOINTS:
@@ -280,6 +302,7 @@ def normalize_group(raw: dict, store, where: str) -> dict:
         "slide": slide,
         "joints": joints,
         "pinned": tuple(sorted(pinned_refs)),
+        "symmetry": tuple(sorted(symmetry)),
         "slide_limit": slide_limit,
         "omega": omega,
         "max_iterations": iterations,
@@ -300,6 +323,7 @@ def group_references(params: dict) -> set[int]:
     if params["slide"] != "auto":
         refs.update(params["slide"])
     refs.update(params.get("pinned", ()))
+    refs.update(params.get("symmetry", ()))
     return refs
 
 
@@ -319,6 +343,7 @@ def group_script_params(params: dict, store) -> dict:
     if params["slide"] != "auto":
         result["slide"] = tuple(store.get(c).name for c in params["slide"])
     result["pinned"] = tuple(store.get(c).name for c in params["pinned"])
+    result["symmetry"] = tuple(store.get(d).name for d in params["symmetry"])
     return result
 
 

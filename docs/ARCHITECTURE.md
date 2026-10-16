@@ -867,6 +867,11 @@ segment, so derivative jumps at knots never cost accuracy.
   Hilgenstock feedback is accelerated together with the grid; depth `acceleration` (default
   5, 0 = plain relaxation), history restarted when the residual exceeds 4x its best value.
   The relaxation sweeps themselves are unchanged (same discretisation, same fixed point).
+  Safeguard (`guarded_step`, 10e follow-up): undamped mixing can diverge where the plain
+  sweep contracts (the C-grid with a 1e-5 wall spacing blew up after ~600 iterations and
+  returned its TFI grid); the iterate of lowest residual is kept, a residual above 100x that
+  value restarts from it with an empty history, and after two restarts the plain iteration
+  continues (a warning says so). Runs without a blow-up are unchanged bit for bit.
   500 x 200 cylinder O-grid with wall control: 402 iterations / 1.06 s (3.2 s on one thread);
   plain relaxation reaches only 9e-3 of the first residual after 4000 iterations.
 - **Volume quality in C++** (`quality/volume_quality.cpp`): all per-cell metrics in one pass;
@@ -1077,6 +1082,26 @@ segment, so derivative jumps at knots never cost accuracy.
   - along z: faces on extruded surfaces, edges at both ends on the curves and their
   translated copies, no 3D vertex passes, end-plane slide limit 1.5 (0.5 for the C-grid,
   which folds at 1.5); sphere_in_box builds the 32-block cubed-sphere layout.
+  10e follow-up: the extruded templates are now 2D sketches with `extrude` (the smoothed 2D
+  grid swept by a translate extrusion: every section equals the 2D grid); `three_d_blocks=True`
+  keeps the six-face 3D sketch (end planes as symmetry planes); `wing_in_box` with `taper`
+  (tip / root chord, about the leading edge) and `sweep` (leading-edge angle) builds the tip
+  section by a similarity of the body curves, the wing faces on ruled surfaces between root
+  and tip, the leading-edge span edge on a line.
+- **Sketch `extrude`** (2D sketches): `{"vector", "points", "distribution"}` (spacings as
+  lengths); each generated domain gets an owned extruded block `x{index}`.
+- **Symmetry planes** (3D groups and sketches, `symmetry`; C++ `Multiblock3DInput::symmetric`):
+  flagged planar faces whose nodes slide on their plane are updated as interior nodes with
+  the out-of-plane neighbours mirrored across the plane, without the slide limit, and wall
+  control reaches through them; an edge between two symmetry planes likewise (mirrored in
+  both); an edge between a symmetry plane and another surface slides along its chain to the
+  foot of its in-plane neighbour (a 2D boundary node); a wall edge on a symmetry plane starts
+  an in-plane wall line. The C-grid wing stub's wake blocks (10d) went from 0.12 to 0.62.
+- **Internal walls in 2D groups** (fix): a fixed node inside the grid listed as a wall now
+  takes its wall-normal direction from the neighbours that are wall nodes too (the local
+  frame of an interior node has no preferred orientation; before, a frame turned by 90°
+  applied the control along the cut: the C-grid template's wake lines met the cut at ~45°,
+  interface kink 120-130°). 3D already chose the axis this way.
 - **Sketch extensions:** an edge on a closed curve may run across its seam (a two-piece
   connector); a seam point is no curve end; `slide_limit` passed to the group.
 - **Automatic topology** (`model/crossfield.py`, `Session.auto_topology`, `cross_field`):

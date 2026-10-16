@@ -10,9 +10,18 @@
 // relative ridge of 1e-10, Gaussian elimination with partial pivoting); a singular or
 // non-finite system clears the history. Dot products sum fixed-size chunks in index order, so
 // the result does not depend on the number of threads.
+//
+// Safeguard (guarded_step): undamped Anderson mixing is not globally convergent (Walker & Ni
+// §5; it can diverge where the plain iteration contracts, e.g. elliptic smoothing with stiff
+// wall sources at wall spacings of 1e-5 body lengths). The history restarts when the residual
+// grows above 4x its best value since the last restart; the iterate of lowest residual is
+// kept, and when the residual exceeds kBlowup times that lowest value the iteration restarts
+// from it with an empty history. After kMaxRestarts such restarts acceleration is switched off
+// and the plain iteration continues, which converges where its map contracts.
 #pragma once
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace og {
@@ -28,6 +37,24 @@ class AndersonAccelerator {
   // Forget the history (after a residual jump, or when the map changes).
   void reset();
 
+  // The safeguarded step for an iteration whose residual (the size of its last update) is
+  // ``residual``: g is G(u), replaced by the accelerated iterate or, after a blow-up, by the
+  // best iterate so far. Returns true when g was replaced (the caller then unpacks it).
+  bool guarded_step(const std::vector<double>& u, std::vector<double>& g, double residual);
+
+  // Blow-ups that restarted from the best iterate, and whether acceleration is still on.
+  [[nodiscard]] int restarts() const {
+    return restarts_;
+  }
+  [[nodiscard]] bool enabled() const {
+    return enabled_;
+  }
+  // The warning for a run with restarts ("" without).
+  [[nodiscard]] std::string restart_note() const;
+
+  static constexpr double kBlowup = 100.0;
+  static constexpr int kMaxRestarts = 2;
+
  private:
   bool solve(std::vector<double>& gamma) const;
 
@@ -42,6 +69,12 @@ class AndersonAccelerator {
   std::vector<double> last_f_;
   std::vector<double> last_g_;
   std::vector<double> f_;
+  bool started_ = false;  // a residual has been seen
+  double best_ = 0.0;     // best residual since the last history restart
+  double lowest_ = 0.0;   // lowest residual of the run
+  std::vector<double> best_state_;
+  int restarts_ = 0;
+  bool enabled_ = true;
 };
 
 }  // namespace og

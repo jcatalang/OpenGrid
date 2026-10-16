@@ -85,6 +85,7 @@ class Layout3D:
     walls: list[tuple[int, float, float, float, float]]
     roles: dict[int, str]  # face domain id -> role
     interfaces: list[tuple[int, str, int, str]]  # (block, face, block, face) per interface
+    symmetric: np.ndarray = None  # (n,) uint8: nodes of symmetry-plane faces
 
 
 @dataclass
@@ -331,7 +332,12 @@ def build_layout_3d(store, connectors, domains, blocks, params: dict) -> Layout3
         if roles[d] == "interface" and len(holders[d]) == 2:
             (ba, fa), (bb, fb) = holders[d]
             interfaces.append((ba, fa, bb, fb))
+    symmetric = np.zeros(n, dtype=np.uint8)
+    for d in params.get("symmetry", ()):
+        if d in domain_ids and roles.get(d) == "sliding":
+            symmetric[domain_ids[d].reshape(-1)] = 1
     return Layout3D(
+        symmetric=symmetric,
         ids=ids,
         domain_ids=domain_ids,
         points=np.ascontiguousarray(points),
@@ -363,6 +369,7 @@ def run_group_3d(layout: Layout3D, params: dict, progress=None):
         progress=progress,
         slide_limit=params["slide_limit"],
         absolute_tolerance=params.get("absolute_tolerance", 0.0),
+        symmetric=layout.symmetric,
     )
 
 

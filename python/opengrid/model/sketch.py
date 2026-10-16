@@ -32,6 +32,9 @@ in VTK). Its edges and faces are those of the blocks, shared where blocks share 
   geometry, not on where the floating vertices were drawn. Vertices on assigned curves in
   3D, at curve ends, on pinned edges or internal walls, and on unassigned boundaries in 2D
   stay where drawn (projected).
+* **Extrusion** (2D, ``extrude``: ``{"vector", "points", "distribution"}``): every block's
+  domain is also extruded along the vector (a translated block of ``points`` layers), so a
+  straight 3D grid is the smoothed 2D grid extruded - the same in every section.
 * **Ownership:** the generated entities are listed in ``outputs`` (role key, entity id) and
   are regenerated in place (same names and ids) when the sketch changes; editing, renaming or
   deleting them directly is refused (:func:`check_ownership`, run by every command), and
@@ -65,10 +68,12 @@ DEFAULT_SKETCH = {
     "walls": (),
     "fixed": (),
     "pinned": (),
+    "symmetry": (),
     "relax": True,
     "slide_limit": 0.5,
     "tolerance": 1e-8,
     "max_iterations": 4000,
+    "extrude": None,
     "outputs": (),
 }
 DEFAULT_SKETCH_WALL = {"spacing": None, "decay": 0.1, "relaxation": 0.1, "max_source": 100.0}
@@ -347,6 +352,19 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
             ref = face_of(item, label)
             if ref is not None:
                 pinned.add(ref)
+    symmetry = set()
+    for index, item in enumerate(merged["symmetry"]):
+        label = f"{where}: symmetry[{index}]"
+        if lattice.dim != 3:
+            issues.append(Issue(label, "symmetry planes are faces of 3D sketches"))
+            break
+        ref = face_of(item, label)
+        if ref is None:
+            continue
+        if ref not in lattice.boundary_faces:
+            issues.append(Issue(label, f"{ref} is not a boundary face"))
+            continue
+        symmetry.add(ref)
     spacing = _number(merged["spacing"], f"{where}: spacing", issues, True, True)
     relax = merged["relax"]
     if not isinstance(relax, bool):
@@ -356,6 +374,7 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
     iterations = _int(merged["max_iterations"], f"{where}: max_iterations", issues)
     if iterations is not None and iterations < 1:
         issues.append(Issue(f"{where}: max_iterations", "must be positive"))
+    extrude = _normalize_extrude(merged["extrude"], lattice, where, issues)
     outputs = []
     for index, item in enumerate(merged["outputs"]):
         label = f"{where}: outputs[{index}]"
@@ -382,11 +401,66 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
         "walls": tuple(w for _k, w in sorted(walls.items())),
         "fixed": tuple(sorted(fixed)),
         "pinned": tuple(sorted(pinned)),
+        "symmetry": tuple(sorted(symmetry)),
         "relax": relax,
         "slide_limit": slide_limit,
         "tolerance": tolerance,
         "max_iterations": iterations,
+        "extrude": extrude,
         "outputs": tuple(sorted(outputs)),
+    }
+
+
+def _normalize_extrude(raw, lattice, where: str, issues: list) -> dict | None:
+    """A 2D sketch's extrusion: {"vector", "points", "distribution"} (spacings as lengths)."""
+    from opengrid.model.connectors import normalize_distribution
+    from opengrid.model.entities import _Checker
+
+    if raw is None:
+        return None
+    label = f"{where}: extrude"
+    if lattice.dim != 2:
+        issues.append(Issue(label, "only 2D sketches are extruded (3D sketches have blocks)"))
+        return None
+    if not isinstance(raw, dict):
+        issues.append(Issue(label, "expected {'vector', 'points', 'distribution'}"))
+        return None
+    for key in sorted(set(raw) - {"vector", "points", "distribution"}):
+        issues.append(Issue(f"{label}.{key}", "unexpected key"))
+    checker = _Checker(label)
+    vector = checker.vec3(raw.get("vector", (0.0, 0.0, 1.0)), "vector")
+    issues.extend(checker.issues)
+    if vector is not None and not any(vector):
+        issues.append(Issue(f"{label}.vector", "must not be zero"))
+    points = _int(raw.get("points", 11), f"{label}.points", issues)
+    if points is not None and points < 2:
+        issues.append(Issue(f"{label}.points", f"must be at least 2, got {points}"))
+    try:
+        distribution = normalize_distribution(raw.get("distribution", "uniform"), label)
+    except ValidationError as error:
+        issues.extend(error.issues)
+        return None
+    if distribution["type"] == "explicit":
+        issues.append(Issue(f"{label}.distribution", "uniform, geometric, tanh or sine"))
+    return {"vector": vector, "points": points, "distribution": distribution}
+
+
+def _extrusion(params: dict, index: int) -> dict:
+    """The extruded block of a 2D sketch's block ``index`` (spacings converted to fractions
+    of the extrusion length, as extruded blocks take them)."""
+    extrude = params["extrude"]
+    length = float(np.linalg.norm(extrude["vector"]))
+    distribution = {}
+    for key, value in extrude["distribution"].items():
+        if key in ("begin_spacing", "end_spacing") and value is not None:
+            value = value / length
+        distribution[key] = value
+    return {
+        "domain": f"@d{index}",
+        "mode": "translate",
+        "vector": extrude["vector"],
+        "dimension": extrude["points"],
+        "distribution": distribution,
     }
 
 
@@ -894,6 +968,8 @@ def plan(
         for index, block in enumerate(lattice.blocks):
             items.append((f"d{index}", "domain", {"edges": loop(block), "generator": None}))
             domains[index] = f"d{index}"
+            if params["extrude"] is not None:
+                items.append((f"x{index}", "block", {"extrusion": _extrusion(params, index)}))
         pinned = list(params["pinned"])
         for wall in params["walls"]:
             a, b = wall["edge"]
@@ -954,13 +1030,14 @@ def plan(
             "blocks": tuple(f"@b{k}" for k in range(len(lattice.blocks))),
             "walls": tuple(walls),
             "pinned": tuple(f"@{face_role[f]}" for f in sorted(pinned)),
-            "joints": "fixed",
+            "symmetry": tuple(f"@{face_role[f]}" for f in params["symmetry"]),
+            # Face corners inside one surface or plane slide on it (on a plane they are
+            # symmetry-plane nodes: interior nodes of the sections).
+            "joints": "slide",
             "slide_limit": params["slide_limit"],
             "tolerance": params["tolerance"],
             "max_iterations": params["max_iterations"],
         }
-        if params["relax"]:
-            group["joints"] = "slide"
     items.append(("group", "smoothing_group", group))
     del base
     return Plan(items=items, group_key="group", domains=domains, warnings=warnings)

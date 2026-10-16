@@ -367,7 +367,6 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
   AndersonAccelerator anderson(state_size, options.acceleration);
   std::vector<double> before;
   std::vector<double> after;
-  double best_residual = 0.0;
 
   EllipticResult result;
   double first_residual = 0.0;
@@ -522,17 +521,10 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
     }
     if (iteration == 0) {
       first_residual = residual;
-      best_residual = residual;
     }
     if (options.acceleration > 0) {
-      // Restart the history when the residual grows well above its best value.
-      if (residual > 4.0 * best_residual) {
-        anderson.reset();
-        best_residual = residual;
-      }
-      best_residual = std::min(best_residual, residual);
       pack(after);
-      if (anderson.step(before, after)) {
+      if (anderson.guarded_step(before, after, residual)) {
         unpack(after);
       }
     }
@@ -565,6 +557,9 @@ EllipticResult smooth_elliptic(const Grid2D& initial, const EllipticOptions& opt
                                 " node(s); spacing/orthogonality may not be met (raise max_source "
                                 "or lower decay)");
     }
+  }
+  if (anderson.restarts() > 0) {
+    result.warnings.push_back("elliptic: " + anderson.restart_note());
   }
   if (!result.converged && !result.cancelled) {
     result.warnings.push_back("elliptic: not converged after " + std::to_string(result.iterations) +

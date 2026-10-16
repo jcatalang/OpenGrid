@@ -848,6 +848,54 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10e follow-up — extruded templates, symmetry planes, wall control fixes (2026-10-16) — approved (pre-authorised)
+
+### Built
+- Sketch `extrude` (2D sketches): the smoothed 2D grid swept into owned extruded blocks
+  (`vector`, `points`, `distribution` with spacings as lengths). The extruded templates (pipe,
+  cylinder_in_channel, bump_channel, wing_in_box) use it; `three_d_blocks=True` keeps six-face
+  3D sketches.
+- `wing_in_box` `taper` / `sweep`: a 3D sketch whose tip section is a similarity of the root
+  (about the leading edge), the wing on ruled surfaces, the leading-edge span edge on a line.
+- Symmetry planes (`symmetry` on 3D groups and sketches; C++ `Multiblock3DInput::symmetric`):
+  planar faces whose nodes move as interior nodes mirrored across the plane (no slide limit),
+  with edge rules (two planes; a plane and another surface) and wall lines through them.
+  Templates set their end planes; the 10d wing stub its side walls. Sketch face corners in
+  one surface or plane now slide on it (`joints="slide"`).
+- Fix, 2D internal walls: the wall-normal direction of a fixed interior wall node comes from
+  its wall neighbours (a turned local frame applied the control along the C-grid template's
+  wake cut: lines at ~45°, kink 120-130°).
+- Fix, Anderson divergence: `AndersonAccelerator::guarded_step` (all four elliptic smoothers):
+  restart from the best iterate when the residual exceeds 100x its lowest value, plain
+  iteration after two restarts, with a warning. The C-grid at wall spacings 1e-5 / 1e-6 had
+  diverged and silently fallen back to its TFI grid.
+- C-grid default `wake_points` stays 41 (61 was better only while the wake wall was broken).
+- Demos: 10d adds the wing stub as a 2D sketch extruded on the CAD root curves
+  (`10d_wing_extruded.ogp`); 10e adds the tapered + swept wing and the C-grid wall control
+  at 1e-3 / 1e-5 / 1e-6.
+
+### Results
+| Case | Before | Now |
+|---|---|---|
+| Wing in box template (extruded) | 0.249 (missed) | 0.619 (met) |
+| Wing in box, six-face 3D / taper 0.6 / sweep 20° / both | 0.24 / - / - / - | 0.48 / 0.55 / 0.48 / 0.60 |
+| C-grid template | 0.430, wake kink 130° | 0.619, kink 22° |
+| 10d wing stub (3D sketch), wake blocks | 0.12 | 0.616 (0.653 elsewhere) |
+| 10d wing stub, 2D sketch extruded | - | 0.679, nodes on the CAD faces within 4.8e-15 |
+| C-grid wall spacing 1e-5 / 1e-6 | diverged (TFI returned) | converged in 600 / 3125 iterations |
+
+- Wall control at convergence (C-grid, 1e-3 / 1e-5 / 1e-6): first cell exactly the requested
+  height on the body and 2x on the wake cut, first grid line within 0.005° of the normal.
+  Further layers (measured, see OPEN_ISSUES): 1e-3 - 4° at layer 4, 9° at layer 8; 1e-5 -
+  1e-6 - below 0.5° to layer 4, 1-2° at layer 8 (means).
+- Earlier demos: grids unchanged (projects and journals gain `"symmetry": []`).
+
+### Verified
+- `ctest` +1 (Anderson guard) -> 139 (release and strict CI presets); `pytest` +3 (C-grid
+  wall and wake orthogonality at 1e-3 and 1e-5, extruded / tapered + swept wing) -> 352 passed,
+  1 xfailed; clang-tidy on the changed C++ files, ruff, format, ternary check, API docs;
+  all demos 01-10e run.
+
 ## Phase 10e — templates and automatic topology (2026-10-16) — approved (pre-authorised)
 
 ### Built

@@ -172,6 +172,9 @@ print(og.sketch_report("c"))  # where each vertex went
 og.smooth_group("c-group")
 og.move_handle("c", "vertices", 9, (0.8, 0.65))  # as a mouse drag
 ```
+A 2D sketch with `extrude={"vector": (0, 0, 2), "points": 13}` sweeps its smoothed grid into
+blocks; a 3D sketch takes `symmetry=[(a, b, c, d), ...]` for planar boundary faces that are
+symmetry planes (grid lines cross them straight; their nodes move freely in the plane).
 The sketch owns `c-c0-1`, `c-d0`, ..., `c-group`; edit the sketch, not them. See
 `examples/10d_sketch_topology.py` (2D airfoil, sphere in a box, wing stub).
 
@@ -187,7 +190,10 @@ og.create_template(
     blocks=(3, 1),
     wall=5e-3,
     length=1.0,
-)  # 3D, extruded
+)  # 3D: the smoothed 2D grid, extruded
+og.create_template(
+    "wing_in_box", body=["upper", "lower"], wall=1e-5, length=2.0, taper=0.6, sweep=20.0
+)  # 3D blocks (smoothed in 3D, end planes symmetry planes), wing on ruled surfaces
 layout = og.cross_field(curves)  # field, singularities, separatrices
 print(layout.field.index_sum(), layout.field.euler())
 og.auto_topology(curves)  # a sketch of four-sided blocks

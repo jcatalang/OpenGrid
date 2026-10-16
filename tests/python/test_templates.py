@@ -104,11 +104,60 @@ def test_3d_templates_mesh_their_golden_geometry(kind):
     assert smoothed(og) >= 0.4
 
 
+def test_extruded_and_three_d_wing_in_box():
+    # The plain template extrudes the smoothed 2D C-grid; six-face blocks smooth in 3D with the
+    # end planes as symmetry planes; taper and sweep need the 3D blocks.
+    og = opengrid.Session()
+    og.create_template("wing_in_box", body=airfoil(og), wall=0.001, length=1.0, span_points=5)
+    extruded = smoothed(og)
+    assert extruded >= 0.5
+    assert all(og.entity(b).params["extrusion"] is not None for b in og.names("block"))
+    og = opengrid.Session()
+    sketch = og.create_template(
+        "wing_in_box",
+        body=airfoil(og),
+        wall=0.001,
+        length=2.0,
+        span_points=7,
+        taper=0.6,
+        sweep=20.0,
+    )
+    assert og.entity(sketch).params["symmetry"]
+    assert any(og.entity(n).kind == "ruled_surface" for n in og.names())
+    assert smoothed(og) >= 0.4
+
+
 def test_sphere_in_box_template():
     og = opengrid.Session()
     og.create_template("sphere_in_box", radius=0.5, wall=0.01)
     assert len(og.names("block")) == 32
     assert smoothed(og) >= 0.4
+
+
+def first_layer(grid):
+    """Heights of the first cells off side i = 0 and the deviation of the lines leaving it
+    from the wall normal (degrees)."""
+    wall, inner = grid[:, 0], grid[:, 1]
+    t = wall[2:] - wall[:-2]
+    v = inner[1:-1] - wall[1:-1]
+    cos = np.abs(np.sum(t * v, axis=1)) / (np.linalg.norm(t, axis=1) * np.linalg.norm(v, axis=1))
+    return np.linalg.norm(v, axis=1), np.degrees(np.arcsin(cos))
+
+
+@pytest.mark.parametrize("wall", [1e-3, 1e-5])
+def test_cgrid_wall_and_wake_cut_get_spacing_and_orthogonality(wall):
+    # Down to y+ ~ 1 spacings: the smoothing converges (safeguarded acceleration) and both
+    # the body wall and the wake cut (an internal wall, 2x the spacing) get their first-cell
+    # height and grid lines normal to them.
+    og = opengrid.Session()
+    og.create_template("cgrid", body=airfoil(og), wall=wall, name="c")
+    assert og.smooth_group("c-group").converged
+    height, deviation = first_layer(og.domain_grid("c-d1"))  # on the upper surface
+    assert np.allclose(height, wall, rtol=1e-3)
+    assert deviation.max() < 0.5
+    height, deviation = first_layer(og.domain_grid("c-d0"))  # on the wake cut
+    assert np.allclose(height, 2 * wall, rtol=1e-2)
+    assert deviation.max() < 0.5
 
 
 def test_template_is_one_undo_step_and_replays():

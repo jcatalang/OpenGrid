@@ -476,6 +476,16 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
   };
   std::vector<WallNode> walls;
   int bad_walls = 0;
+  std::vector<std::uint8_t> on_wall(n, 0);
+  for (const MultiblockWall& wall : input.walls) {
+    if (wall.node >= 0 && std::cmp_less(wall.node, n)) {
+      on_wall[static_cast<std::size_t>(wall.node)] = 1;
+    }
+  }
+  auto wall_neighbour = [&](std::size_t g, int label) {
+    const std::int64_t id = topo.nb[g][static_cast<std::size_t>(label)];
+    return id >= 0 && on_wall[static_cast<std::size_t>(id)] != 0;
+  };
   for (const MultiblockWall& wall : input.walls) {
     if (wall.node < 0 || std::cmp_greater_equal(wall.node, n)) {
       throw std::invalid_argument("multiblock: wall node out of range");
@@ -486,8 +496,15 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
       sides.emplace_back(kN, kE);
     } else if (topo.manifold[g] != 0 && topo.closed[g] != 0 && topo.fans[g].size() == 4 &&
                input.fixed[g] != 0) {
-      sides.emplace_back(kN, kE);
-      sides.emplace_back(kS, kW);
+      // An internal wall: the local frame of a node inside the grid has no preferred
+      // orientation; the wall runs through the neighbours that are wall nodes too.
+      if (wall_neighbour(g, kN) || wall_neighbour(g, kS)) {
+        sides.emplace_back(kE, kS);
+        sides.emplace_back(kW, kN);
+      } else {
+        sides.emplace_back(kN, kE);
+        sides.emplace_back(kS, kW);
+      }
     } else {
       bad_walls += 1;  // a block corner on the wall: no grid line leaves it normally
       continue;
@@ -802,7 +819,6 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
   updates = std::max(updates, 1.0);
 
   double first_residual = 0.0;
-  double best_residual = 0.0;
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
     if (progress != nullptr && progress->cancelled()) {
       result.cancelled = true;
@@ -896,16 +912,10 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     }
     if (iteration == 0) {
       first_residual = residual;
-      best_residual = residual;
     }
     if (options.acceleration > 0) {
-      if (residual > 4.0 * best_residual) {
-        anderson.reset();
-        best_residual = residual;
-      }
-      best_residual = std::min(best_residual, residual);
       pack(after);
-      if (anderson.step(before, after)) {
+      if (anderson.guarded_step(before, after, residual)) {
         unpack(after);
         reproject();
       }
@@ -928,6 +938,9 @@ MultiblockResult smooth_multiblock(const MultiblockInput& input, const Multibloc
     result.warnings.push_back("multiblock: wall control saturated at " + std::to_string(saturated) +
                               " node(s); spacing/orthogonality may not be met (raise max_source "
                               "or lower decay)");
+  }
+  if (anderson.restarts() > 0) {
+    result.warnings.push_back("multiblock: " + anderson.restart_note());
   }
   if (!result.converged && !result.cancelled) {
     result.warnings.push_back("multiblock: not converged after " +

@@ -109,7 +109,7 @@
  ],
  "format": "opengrid-project",
  "groups": [
-  {"acceleration": 20, "blocks": [95, 96, 97, 98, 99, 100, 101], "domains": [], "id": 102, "joints": "fixed", "max_iterations": 2000, "name": "ball-group", "omega": 1.0, "pinned": [], "slide": "auto", "slide_limit": 0.5, "tolerance": 1e-06, "type": "smoothing_group", "walls": []}
+  {"acceleration": 20, "blocks": [95, 96, 97, 98, 99, 100, 101], "domains": [], "id": 102, "joints": "fixed", "max_iterations": 2000, "name": "ball-group", "omega": 1.0, "pinned": [], "slide": "auto", "slide_limit": 0.5, "symmetry": [], "tolerance": 1e-06, "type": "smoothing_group", "walls": []}
  ],
  "name_counters": {},
  "next_id": 103,

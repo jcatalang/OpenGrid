@@ -30,6 +30,13 @@ struct SurfaceProjection {
   double distance = 0.0;
 };
 
+// A point of a surface with its partial derivatives.
+struct SurfacePoint {
+  Vec3 s;
+  Vec3 su;
+  Vec3 sv;
+};
+
 class Surface {
  public:
   Surface() = default;
@@ -41,6 +48,8 @@ class Surface {
   // Partial derivatives; the default uses central differences of eval.
   [[nodiscard]] virtual Vec3 du(double u, double v) const;
   [[nodiscard]] virtual Vec3 dv(double u, double v) const;
+  // eval, du and dv together (one evaluation where the surface can share the work).
+  [[nodiscard]] virtual SurfacePoint values(double u, double v) const;
   // Unit normal x_u x x_v (zero where the surface is degenerate).
   [[nodiscard]] Vec3 normal(double u, double v) const;
 
@@ -118,14 +127,10 @@ class NurbsSurface final : public Surface {
   [[nodiscard]] Vec3 eval(double u, double v) const override;
   [[nodiscard]] Vec3 du(double u, double v) const override;
   [[nodiscard]] Vec3 dv(double u, double v) const override;
+  [[nodiscard]] SurfacePoint values(double u, double v) const override;
 
  private:
-  struct Values {
-    Vec3 s;
-    Vec3 su;
-    Vec3 sv;
-  };
-  [[nodiscard]] Values evaluate(double u, double v) const;
+  [[nodiscard]] SurfacePoint evaluate(double u, double v) const;
   int pu_;
   int pv_;
   std::vector<double> ku_;

@@ -1114,12 +1114,17 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
   const std::size_t state_size = 3 * n + 3 * walls.size();
   auto pack = [&](std::vector<double>& state) {
     state.resize(state_size);
-    std::size_t k = 0;
-    for (const Vec3& p : x) {
-      state[k++] = p.x;
-      state[k++] = p.y;
-      state[k++] = p.z;
-    }
+    parallel_for(
+        0, static_cast<std::int64_t>(n),
+        [&](std::int64_t g) {
+          const Vec3& p = x[static_cast<std::size_t>(g)];
+          const auto k = 3 * static_cast<std::size_t>(g);
+          state[k] = p.x;
+          state[k + 1] = p.y;
+          state[k + 2] = p.z;
+        },
+        16384);
+    std::size_t k = 3 * n;
     for (const auto& s : wall_s) {
       for (const double value : s) {
         state[k++] = value;
@@ -1127,12 +1132,17 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     }
   };
   auto unpack = [&](const std::vector<double>& state) {
-    std::size_t k = 0;
-    for (Vec3& p : x) {
-      p.x = state[k++];
-      p.y = state[k++];
-      p.z = state[k++];
-    }
+    parallel_for(
+        0, static_cast<std::int64_t>(n),
+        [&](std::int64_t g) {
+          Vec3& p = x[static_cast<std::size_t>(g)];
+          const auto k = 3 * static_cast<std::size_t>(g);
+          p.x = state[k];
+          p.y = state[k + 1];
+          p.z = state[k + 2];
+        },
+        16384);
+    std::size_t k = 3 * n;
     for (auto& s : wall_s) {
       for (double& value : s) {
         value = state[k++];
@@ -1322,20 +1332,28 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
           slide_param[us] = {u, v};
         },
         16);
-    for (std::size_t k = 0; k < irregular.size(); ++k) {
-      const std::size_t g = irregular[k];
-      const Vec3 delta = irregular_target[k] - x[g];
-      x[g] += options.omega * delta;
-      point_sum[k] = dot(delta, delta);
-    }
-    for (std::size_t s = 0; s < sliding.size(); ++s) {
-      const std::size_t g = sliding[s];
-      const Vec3 delta = slide_target[s] - x[g];
-      x[g] = slide_target[s];
-      slides[s].u = slide_param[s][0];
-      slides[s].v = slide_param[s][1];
-      point_sum[irregular.size() + s] = dot(delta, delta);
-    }
+    parallel_for(
+        0, static_cast<std::int64_t>(irregular.size()),
+        [&](std::int64_t i) {
+          const auto k = static_cast<std::size_t>(i);
+          const std::size_t g = irregular[k];
+          const Vec3 delta = irregular_target[k] - x[g];
+          x[g] += options.omega * delta;
+          point_sum[k] = dot(delta, delta);
+        },
+        4096);
+    parallel_for(
+        0, static_cast<std::int64_t>(sliding.size()),
+        [&](std::int64_t i) {
+          const auto s = static_cast<std::size_t>(i);
+          const std::size_t g = sliding[s];
+          const Vec3 delta = slide_target[s] - x[g];
+          x[g] = slide_target[s];
+          slides[s].u = slide_param[s][0];
+          slides[s].v = slide_param[s][1];
+          point_sum[irregular.size() + s] = dot(delta, delta);
+        },
+        4096);
     double sum = 0.0;
     for (const double value : line_sum) {
       sum += value;

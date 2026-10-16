@@ -121,6 +121,41 @@ TEST(Surfaces, ProjectionAndDerivatives) {
   EXPECT_NEAR(qn.distance, 0.3, 1e-12);
 }
 
+// 11b: values() is eval, du and dv from one evaluation (the same bits); a degree above the
+// stack scratch evaluates through the heap path.
+TEST(Surfaces, NurbsValuesMatchSeparateCallsAndHighDegree) {
+  for (const int degree : {2, 17}) {
+    const int nu = degree + 2;
+    const int nv = 3;
+    std::vector<og::Vec3> control;
+    std::vector<double> weights;
+    for (int i = 0; i < nu; ++i) {
+      for (int j = 0; j < nv; ++j) {
+        control.emplace_back(static_cast<double>(i), static_cast<double>(j), std::sin(i + 2.0 * j));
+        weights.push_back(1.0 + 0.05 * ((i + j) % 4));
+      }
+    }
+    std::vector<double> ku(static_cast<std::size_t>(degree) + 1, 0.0);
+    ku.push_back(0.5);
+    ku.insert(ku.end(), static_cast<std::size_t>(degree) + 1, 1.0);
+    const std::vector<double> kv = {0, 0, 0, 1, 1, 1};
+    const og::NurbsSurface surface(degree, 2, ku, kv, nu, nv, control, weights);
+    for (const double u : {0.0, 0.3, 0.71, 1.0}) {
+      for (const double v : {0.0, 0.4, 1.0}) {
+        const og::SurfacePoint at = surface.values(u, v);
+        const og::Vec3 s = surface.eval(u, v);
+        const og::Vec3 su = surface.du(u, v);
+        const og::Vec3 sv = surface.dv(u, v);
+        EXPECT_EQ(at.s.x, s.x);
+        EXPECT_EQ(at.s.z, s.z);
+        EXPECT_EQ(at.su.y, su.y);
+        EXPECT_EQ(at.sv.z, sv.z);
+        EXPECT_TRUE(std::isfinite(norm(at.su)) && std::isfinite(norm(at.sv)));
+      }
+    }
+  }
+}
+
 TEST(BlockTfi, AnnularSectorIsExactAndVolumeConverges) {
   const og::Grid3D exact = sector(9, 13, 7, 1.0, 2.0, kPi / 3, 1.5);
   const og::Grid3D tfi = og::tfi_block(og::block_faces(exact));

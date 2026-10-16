@@ -1,0 +1,12 @@
+OpenGrid group smoothing, 10 threads available
+
+10d wing stub (3D sketch on the CAD model):
+   1 threads:  43.7 s, 908 iterations, grid digest ac71fc264a183fd8
+   4 threads:  13.3 s, 908 iterations, grid digest ac71fc264a183fd8
+  10 threads:   9.2 s, 908 iterations, grid digest ac71fc264a183fd8
+  speed-up over 11a (39.3 s on 10 threads): 4.3x; threads 1 -> 10: 4.8x; identical grids: True
+
+C-grid template, 1e-5 wall, 30 wall layers (2D group):
+   1 threads:  0.22 s, 142 iterations
+  10 threads:  0.16 s, 142 iterations
+  identical grids: True

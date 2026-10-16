@@ -32,6 +32,8 @@ class Nurbs final : public Curve {
     Vec3 c2;
   };
   [[nodiscard]] Derivatives evaluate(double t) const;
+  // Position and derivatives up to order `wanted` (0: position only; the others are zero).
+  [[nodiscard]] Derivatives evaluate_up_to(double t, int wanted) const;
   [[nodiscard]] int find_span(double u) const;
 
   int degree_;

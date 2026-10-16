@@ -399,7 +399,10 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   stub), allocation-free curve and surface evaluation (half of the busy time was malloc/free
   in NURBS evaluation), the remaining serial sections of the group smoothers.
 - **Acceptance:** results bit-identical for 1-10 threads; the 10d wing stub group smoothing at
-  least 2x faster (39 s); the 9c benchmark not slower.
+  least 2x faster (39 s); the 9c benchmark not slower. *(Built: `examples/11b_performance.py`:
+  wing stub 9.2 s (4.3x), identical grids on 1, 4 and 10 threads; 9c elliptic cases 1.6x
+  faster (2D 1.10 -> 0.68 s, 3D block 0.96 -> 0.58 s), the rest unchanged; 1M-cell ball
+  26.2 -> 22.3 s.)*
 
 ### 11c — Coarse-to-fine group smoothing
 - Grid sequencing (smooth a coarsened copy, interpolate, finish on the fine grid) and/or

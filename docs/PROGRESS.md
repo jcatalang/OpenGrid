@@ -848,6 +848,36 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11b — CPU performance (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `parallel_for`: dynamic schedule in chunks (about 16 per thread) instead of a static
+  partition (69 % of the thread time was idle on the wing stub).
+- `util/scratch.hpp`: stack scratch for the NURBS curve and surface basis tables (no heap
+  allocation per evaluation; half the busy time had been malloc/free); `Nurbs::eval` position
+  only; `Surface::values` (position + derivatives in one NURBS evaluation) used by
+  `project_from`.
+- 3D group smoother: state packing and point updates in parallel.
+- Demo `examples/11b_performance.py`; tests: NURBS curves (high degree, eval vs d1) and
+  surfaces (values vs separate calls, high degree).
+- Tried and dropped: a closed-form projection onto planes (3 % faster, but results changed at
+  1e-7 and the iteration count went 908 -> 954).
+
+### Results (10 threads, M1 Max)
+| Case | Before | After |
+|---|---|---|
+| 10d wing stub group smoothing | 39.3 s | 9.2 s (one thread 43.7 s) |
+| 10d wing stub sketch passes | 27.5 s | 7.5 s |
+| 9c 2D elliptic 500 x 200 | 1.10 s | 0.68 s |
+| 9c 3D elliptic block 81 x 41 x 41 | 0.96 s | 0.58 s |
+| 10b 1M-cell ball | 26.2 s | 22.3 s |
+
+- Every grid is bit-identical to 11a (wing stub digest; demos unchanged except timings).
+
+### Verified
+- `ctest` +2 -> 145 (release and strict CI presets); `pytest` 356 passed, 1 xfailed;
+  clang-tidy on the changed C++ files, ruff, format, ternary check; all demos run.
+
 ## Phase 11a — wall layers (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

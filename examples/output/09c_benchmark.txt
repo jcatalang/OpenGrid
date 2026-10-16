@@ -1,44 +1,44 @@
 OpenGrid performance (Phase 9c)
 Apple M1 Max, Darwin 24.2.0, Python 3.12.15, OpenGrid 0.0.1, OpenMP True, 10 threads
 
-2D structured TFI 1001 x 1001: 1,000,000 cells, 1.78 s  [target < 10 s: met]
+2D structured TFI 1001 x 1001: 1,000,000 cells, 1.83 s  [target < 10 s: met]
     grid (TFI)                           0.01 s
     quality                              0.13 s
-    VTKHDF export                        1.64 s
+    VTKHDF export                        1.69 s
     - min scaled Jacobian 1.000
 
-2D unstructured (delaunay): 1,232,486 cells, 3.39 s  [target < 10 s: met]
-    mesh                                 0.99 s
-    quality                              0.48 s
-    VTKHDF export                        1.92 s
+2D unstructured (delaunay): 1,232,486 cells, 3.40 s  [target < 10 s: met]
+    mesh                                 0.95 s
+    quality                              0.47 s
+    VTKHDF export                        1.99 s
     - min angle 30.1 deg
 
-2D unstructured (advancing front): 1,246,306 cells, 4.13 s  [target < 10 s: met]
-    mesh                                 2.02 s
-    quality                              0.34 s
-    VTKHDF export                        1.77 s
+2D unstructured (advancing front): 1,246,306 cells, 4.15 s  [target < 10 s: met]
+    mesh                                 1.98 s
+    quality                              0.33 s
+    VTKHDF export                        1.85 s
     - min angle 34.7 deg
 
-2D hybrid (boundary layers + triangles): 1,535,441 cells, 4.89 s  [target < 10 s: met]
-    mesh                                 1.87 s
-    quality                              0.62 s
-    VTKHDF export                        2.40 s
+2D hybrid (boundary layers + triangles): 1,535,441 cells, 4.87 s  [target < 10 s: met]
+    mesh                                 1.82 s
+    quality                              0.60 s
+    VTKHDF export                        2.46 s
     - 39980 layer quads, 1495461 triangles
 
-2D elliptic smoothing 500 x 200 (wall control): 99,301 cells, 1.10 s  [target converged < 2 s: met]
-    smoothing                            1.10 s
+2D elliptic smoothing 500 x 200 (wall control): 99,301 cells, 0.68 s  [target converged < 2 s: met]
+    smoothing                            0.68 s
     - converged True in 402 iterations; wall spacing 0.001 .. 0.001 (requested 0.001)
-    - 1 thread: 3.24 s, identical grid
-    - without acceleration: 4000 iterations in 4.95 s, not converged (residual 9.3e-03 of the first)
+    - 1 thread: 2.79 s, identical grid
+    - without acceleration: 4000 iterations in 3.93 s, not converged (residual 9.3e-03 of the first)
 
-3D elliptic block smoothing 81 x 41 x 41 (wall control): 128,000 cells, 0.96 s
-    smoothing                            0.96 s
+3D elliptic block smoothing 81 x 41 x 41 (wall control): 128,000 cells, 0.58 s
+    smoothing                            0.58 s
     - 81 x 41 x 41 points (128000 cells), translate extrusion, elliptic smoothing converged in 285 iterations
 
-3D tetrahedra via Netgen: 4,962,183 cells, 193.39 s  [target volume < 120 s: MISSED]
-    surface meshes                       0.09 s
-    volume (Netgen + optimisation)     186.13 s
+3D tetrahedra via Netgen: 4,962,183 cells, 178.93 s  [target volume < 120 s: MISSED]
+    surface meshes                       0.08 s
+    volume (Netgen + optimisation)     171.60 s
     quality                              0.00 s
-    VTKHDF export                        7.17 s
-    - volume generation 186.2 s; min scaled Jacobian 0.100; 4962183 tetrahedra, 830848 points, 1 shell(s)
+    VTKHDF export                        7.24 s
+    - volume generation 171.7 s; min scaled Jacobian 0.100; 4962183 tetrahedra, 830848 points, 1 shell(s)
 

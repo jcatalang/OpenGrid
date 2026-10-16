@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 
+#include "opengrid/core/util/scratch.hpp"
+
 namespace og {
 namespace {
 
@@ -100,85 +102,100 @@ int Nurbs::find_span(double u) const {
 }
 
 Nurbs::Derivatives Nurbs::evaluate(double t) const {
+  return evaluate_up_to(t, 2);
+}
+
+Nurbs::Derivatives Nurbs::evaluate_up_to(double t, int wanted) const {
   const double scale = u_hi_ - u_lo_;
   const double u = u_lo_ + std::clamp(t, 0.0, 1.0) * scale;
   const int p = degree_;
   const int span = find_span(u);
-  int n_der = 2;
-  if (p < 2) {
+  int n_der = std::min(2, wanted);
+  if (p < n_der) {
     n_der = p;
   }
 
-  // Algorithm A2.3: ders[k][j] = k-th derivative of N_{span-p+j, p}(u).
+  // Algorithm A2.3: ders[k][j] = k-th derivative of N_{span-p+j, p}(u). Flat tables in one
+  // scratch block (no allocation up to high degrees).
   const std::size_t pp = idx(p) + 1;
-  std::vector<std::vector<double>> ndu(pp, std::vector<double>(pp, 0.0));
-  std::vector<double> left(pp, 0.0);
-  std::vector<double> right(pp, 0.0);
-  ndu[0][0] = 1.0;
+  Scratch scratch(pp * pp + 2 * pp + 3 * pp + 2 * pp);
+  double* ndu_data = scratch.data();
+  double* left = ndu_data + pp * pp;
+  double* right = left + pp;
+  double* ders_data = right + pp;
+  double* a_data = ders_data + 3 * pp;
+  auto ndu = [&](int r, int c) -> double& { return ndu_data[idx(r) * pp + idx(c)]; };
+  auto ders = [&](std::size_t k, int j) -> double& { return ders_data[k * pp + idx(j)]; };
+  auto a = [&](std::size_t row, int j) -> double& { return a_data[row * pp + idx(j)]; };
+  ndu(0, 0) = 1.0;
   for (int j = 1; j <= p; ++j) {
     left[idx(j)] = u - knots_[idx(span + 1 - j)];
     right[idx(j)] = knots_[idx(span + j)] - u;
     double saved = 0.0;
     for (int r = 0; r < j; ++r) {
-      ndu[idx(j)][idx(r)] = right[idx(r + 1)] + left[idx(j - r)];
-      const double temp = ndu[idx(r)][idx(j - 1)] / ndu[idx(j)][idx(r)];
-      ndu[idx(r)][idx(j)] = saved + right[idx(r + 1)] * temp;
+      ndu(j, r) = right[idx(r + 1)] + left[idx(j - r)];
+      const double temp = ndu(r, j - 1) / ndu(j, r);
+      ndu(r, j) = saved + right[idx(r + 1)] * temp;
       saved = left[idx(j - r)] * temp;
     }
-    ndu[idx(j)][idx(j)] = saved;
+    ndu(j, j) = saved;
   }
-  std::vector<std::vector<double>> ders(3, std::vector<double>(pp, 0.0));
   for (int j = 0; j <= p; ++j) {
-    ders[0][idx(j)] = ndu[idx(j)][idx(p)];
+    ders(0, j) = ndu(j, p);
   }
-  std::vector<std::vector<double>> a(2, std::vector<double>(pp, 0.0));
-  for (int r = 0; r <= p; ++r) {
-    std::size_t s1 = 0;
-    std::size_t s2 = 1;
-    a[0][0] = 1.0;
+  if (n_der > 0) {
+    for (int r = 0; r <= p; ++r) {
+      std::size_t s1 = 0;
+      std::size_t s2 = 1;
+      a(0, 0) = 1.0;
+      for (int k = 1; k <= n_der; ++k) {
+        double d = 0.0;
+        const int rk = r - k;
+        const int pk = p - k;
+        if (r >= k) {
+          a(s2, 0) = a(s1, 0) / ndu(pk + 1, rk);
+          d = a(s2, 0) * ndu(rk, pk);
+        }
+        int j1 = 1;
+        if (rk < -1) {
+          j1 = -rk;
+        }
+        int j2 = p - r;
+        if (r - 1 <= pk) {
+          j2 = k - 1;
+        }
+        for (int j = j1; j <= j2; ++j) {
+          a(s2, j) = (a(s1, j) - a(s1, j - 1)) / ndu(pk + 1, rk + j);
+          d += a(s2, j) * ndu(rk + j, pk);
+        }
+        if (r <= pk) {
+          a(s2, k) = -a(s1, k - 1) / ndu(pk + 1, r);
+          d += a(s2, k) * ndu(r, pk);
+        }
+        ders(idx(k), r) = d;
+        std::swap(s1, s2);
+      }
+    }
+    double factor = p;
     for (int k = 1; k <= n_der; ++k) {
-      double d = 0.0;
-      const int rk = r - k;
-      const int pk = p - k;
-      if (r >= k) {
-        a[s2][0] = a[s1][0] / ndu[idx(pk + 1)][idx(rk)];
-        d = a[s2][0] * ndu[idx(rk)][idx(pk)];
+      for (int j = 0; j <= p; ++j) {
+        ders(idx(k), j) *= factor;
       }
-      int j1 = 1;
-      if (rk < -1) {
-        j1 = -rk;
-      }
-      int j2 = p - r;
-      if (r - 1 <= pk) {
-        j2 = k - 1;
-      }
-      for (int j = j1; j <= j2; ++j) {
-        a[s2][idx(j)] = (a[s1][idx(j)] - a[s1][idx(j - 1)]) / ndu[idx(pk + 1)][idx(rk + j)];
-        d += a[s2][idx(j)] * ndu[idx(rk + j)][idx(pk)];
-      }
-      if (r <= pk) {
-        a[s2][idx(k)] = -a[s1][idx(k - 1)] / ndu[idx(pk + 1)][idx(r)];
-        d += a[s2][idx(k)] * ndu[idx(r)][idx(pk)];
-      }
-      ders[idx(k)][idx(r)] = d;
-      std::swap(s1, s2);
+      factor *= p - k;
     }
-  }
-  double factor = p;
-  for (int k = 1; k <= n_der; ++k) {
-    for (int j = 0; j <= p; ++j) {
-      ders[idx(k)][idx(j)] *= factor;
-    }
-    factor *= p - k;
   }
 
   // Homogeneous derivatives A^(k) = sum N^(k) w P, w^(k) = sum N^(k) w.
   std::array<Vec3, 3> aw{};
   std::array<double, 3> w{};
-  for (std::size_t k = 0; k < 3; ++k) {
+  std::size_t kinds = 3;
+  if (wanted == 0) {
+    kinds = 1;
+  }
+  for (std::size_t k = 0; k < kinds; ++k) {
     for (int j = 0; j <= p; ++j) {
       const std::size_t i = idx(span - p + j);
-      const double nw = ders[k][idx(j)] * weights_[i];
+      const double nw = ders(k, j) * weights_[i];
       aw[k] += nw * control_points_[i];
       w[k] += nw;
     }
@@ -186,6 +203,9 @@ Nurbs::Derivatives Nurbs::evaluate(double t) const {
   // Rational derivatives (A4.2), then chain rule du/dt = scale.
   Derivatives out;
   out.c0 = aw[0] / w[0];
+  if (wanted == 0) {
+    return out;
+  }
   out.c1 = (aw[1] - w[1] * out.c0) / w[0];
   out.c2 = (aw[2] - 2.0 * w[1] * out.c1 - w[2] * out.c0) / w[0];
   out.c1 *= scale;
@@ -194,7 +214,7 @@ Nurbs::Derivatives Nurbs::evaluate(double t) const {
 }
 
 Vec3 Nurbs::eval(double t) const {
-  return evaluate(t).c0;
+  return evaluate_up_to(t, 0).c0;
 }
 
 Vec3 Nurbs::d1(double t) const {

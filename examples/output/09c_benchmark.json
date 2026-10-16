@@ -7,18 +7,18 @@
    "stages": [
     [
      "grid (TFI)",
-     0.01017174986191094
+     0.009707082994282246
     ],
     [
      "quality",
-     0.13190216687507927
+     0.12849258398637176
     ],
     [
      "VTKHDF export",
-     1.6361588751897216
+     1.6925460000056773
     ]
    ],
-   "total": 1.7782327919267118,
+   "total": 1.8307456669863313,
    "target": 10.0,
    "met": true,
    "notes": [
@@ -31,18 +31,18 @@
    "stages": [
     [
      "mesh",
-     0.9891537909861654
+     0.949871625052765
     ],
     [
      "quality",
-     0.4787872079759836
+     0.4662544170860201
     ],
     [
      "VTKHDF export",
-     1.9186825840733945
+     1.9870575410313904
     ]
    ],
-   "total": 3.3866235830355436,
+   "total": 3.4031835831701756,
    "target": 10.0,
    "met": true,
    "notes": [
@@ -55,18 +55,18 @@
    "stages": [
     [
      "mesh",
-     2.0202965000644326
+     1.9765022499486804
     ],
     [
      "quality",
-     0.3417742499150336
+     0.32676837500184774
     ],
     [
      "VTKHDF export",
-     1.7693152909632772
+     1.8465181249193847
     ]
    ],
-   "total": 4.131386040942743,
+   "total": 4.149788749869913,
    "target": 10.0,
    "met": true,
    "notes": [
@@ -79,18 +79,18 @@
    "stages": [
     [
      "mesh",
-     1.8706704590003937
+     1.8190514580346644
     ],
     [
      "quality",
-     0.6160412500612438
+     0.5950424999464303
     ],
     [
      "VTKHDF export",
-     2.400598374893889
+     2.458643542136997
     ]
    ],
-   "total": 4.887310083955526,
+   "total": 4.872737500118092,
    "target": 10.0,
    "met": true,
    "notes": [
@@ -103,16 +103,16 @@
    "stages": [
     [
      "smoothing",
-     1.0959979998879135
+     0.6810702080838382
     ]
    ],
-   "total": 1.0959979998879135,
+   "total": 0.6810702080838382,
    "target": 2.0,
    "met": true,
    "notes": [
     "converged True in 402 iterations; wall spacing 0.001 .. 0.001 (requested 0.001)",
-    "1 thread: 3.24 s, identical grid",
-    "without acceleration: 4000 iterations in 4.95 s, not converged (residual 9.3e-03 of the first)"
+    "1 thread: 2.79 s, identical grid",
+    "without acceleration: 4000 iterations in 3.93 s, not converged (residual 9.3e-03 of the first)"
    ]
   },
   {
@@ -121,10 +121,10 @@
    "stages": [
     [
      "smoothing",
-     0.9627754159737378
+     0.580465666949749
     ]
    ],
-   "total": 0.9627754159737378,
+   "total": 0.580465666949749,
    "target": null,
    "met": null,
    "notes": [
@@ -137,26 +137,26 @@
    "stages": [
     [
      "surface meshes",
-     0.0898195409681648
+     0.08468129206448793
     ],
     [
      "volume (Netgen + optimisation)",
-     186.12780691706575
+     171.5988669169601
     ],
     [
      "quality",
-     0.0034665409475564957
+     0.0009718749206513166
     ],
     [
      "VTKHDF export",
-     7.171206165803596
+     7.241447082953528
     ]
    ],
-   "total": 193.39229916478507,
+   "total": 178.92596716689877,
    "target": 120.0,
    "met": false,
    "notes": [
-    "volume generation 186.2 s; min scaled Jacobian 0.100; 4962183 tetrahedra, 830848 points, 1 shell(s)"
+    "volume generation 171.7 s; min scaled Jacobian 0.100; 4962183 tetrahedra, 830848 points, 1 shell(s)"
    ]
   }
  ]

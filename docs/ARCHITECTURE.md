@@ -848,7 +848,8 @@ segment, so derivative jumps at knots never cost accuracy.
 
 ### Performance and packaging (Phase 9c)
 - **Parallel loops** (`util/parallel.hpp`): `parallel_for(begin, end, body, grain)` is an
-  OpenMP `parallel for schedule(static)` when built with `OG_WITH_OPENMP` (default ON; serial
+  OpenMP `parallel for` (11b: `schedule(dynamic, chunk)` with about 16 chunks per thread;
+  9c-10e: `schedule(static)`) when built with `OG_WITH_OPENMP` (default ON; serial
   with a warning when OpenMP is not found), a plain loop otherwise. Determinism rule: a body
   writes only its own outputs, and sums are formed afterwards in index order (per-line or
   per-chunk partials with a partition that never depends on the thread count) — no OpenMP
@@ -1146,6 +1147,24 @@ segment, so derivative jumps at knots never cost accuracy.
   residual, restarts from the best iterate like a blow-up (after two restarts the plain
   iteration continues). The plain iteration converged on layered grids where the mixing
   stalled near 1e-2 and then jumped to NaN in one step.
+
+### CPU performance (Phase 11b)
+- Dynamic scheduling in `parallel_for` (see Parallel loops): loops over sliding nodes mix
+  cheap plane projections with NURBS ones, and a static partition left 69 % of the thread time
+  idle on the 10d wing stub. The schedule never changes results (each index writes its own
+  outputs).
+- No heap allocation in geometry evaluation: `util/scratch.hpp` (`Scratch`, 256 doubles on the
+  stack, heap above) holds the basis-function tables of `Nurbs::evaluate_up_to` and of the
+  surface basis (before: vectors of vectors on every call - half of the busy time).
+  `Nurbs::eval` computes positions only (`evaluate_up_to(t, 0)`, the same bits as the full
+  path); `Surface::values(u, v)` returns position and both derivatives from one evaluation
+  (NURBS surfaces), used by `project_from` (before: three full evaluations per gradient).
+- The 3D group smoother's state packing and point updates run in parallel.
+- Wing stub (159k nodes, 908 iterations): 39.3 s -> 9.2 s on 10 threads (43.7 s on one; 4.8x
+  from 1 to 10 threads on 8 performance + 2 efficiency cores). Per section on 10 threads: line
+  sweeps 30 %, Anderson mixing 25 % (two passes over 20 history columns of the 477k state:
+  near its memory-traffic floor), sliding projections 27 %, coefficients 7 %. 1M-cell ball:
+  26.2 -> 22.3 s (line sweeps 51 %, Anderson 27 %).
 
 ## 7. 3D tet backend decision
 

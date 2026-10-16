@@ -253,9 +253,11 @@ history). Phase tags show where each item came from.
 - **Group default wall spacing** [10a]: None keeps the initial first-cell height at each node
   (the single-domain smoother interpolates it from the side boundaries).
 - **Planar 2D groups** [10a]: 2D groups need domains in a z = const plane (blocks: 10b).
-- **3D speed target missed** [10b]: a 1M-cell group of blocks takes 27 s (target 10 s):
-  ~330 iterations at ~57 ms (memory-bound line sweeps along strided directions) plus the
-  sliding projections. A coarse-grid start or multigrid would be needed.
+- **3D speed target missed** [10b, 11b]: a 1M-cell group of blocks takes 22 s after 11b
+  (27 s before; target 10 s): ~330 iterations at ~63 ms, half of it in the line sweeps
+  (gathers along strided directions, 21 colours with a barrier each) and a quarter in the
+  Anderson mixing (memory-bound). Single-threaded speed is the limit now (the 10d wing stub:
+  43.7 s on one thread, 9.2 s on ten); coarse-to-fine smoothing is 11c.
 - **3D wall grids are not smoothed** [10b]: wall faces stay fixed, and wall control copies
   their grid into the first layers. On the sphere in a box the cubed sphere's own grid turns by
   36° at its patch seams, so grid lines near the wall kink by up to 31° there (1.5° without

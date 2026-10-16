@@ -3,8 +3,10 @@
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
 #include "curve_fixtures.hpp"
+#include "opengrid/core/geom/nurbs.hpp"
 
 using og::Vec3;
 
@@ -171,4 +173,33 @@ TEST(Nurbs, InvalidInput) {
   EXPECT_THROW(og::Nurbs(2, {0, 0, 0, 1, 1, 1}, ctrl, {1, 0, 1}), std::invalid_argument);
   EXPECT_THROW(og::Nurbs(2, {0, 0, 1, 0, 1, 1}, ctrl, {1, 1, 1}), std::invalid_argument);
   EXPECT_THROW(og::Nurbs(2, {0, 0, 0, 1, 1, 1}, ctrl, {1, 1}), std::invalid_argument);
+}
+
+// 11b: allocation-free evaluation. eval (position only) and d1 (the full path) agree, and
+// degrees above the stack scratch (the heap fallback) evaluate like low degrees.
+TEST(Nurbs, PositionOnlyAndFullPathsAgreeAtLowAndHighDegree) {
+  for (const int degree : {1, 3, 18}) {
+    const int n = degree + 6;
+    std::vector<og::Vec3> control;
+    std::vector<double> weights;
+    for (int i = 0; i < n; ++i) {
+      control.emplace_back(static_cast<double>(i), std::sin(0.7 * i), 0.1 * i * i);
+      weights.push_back(1.0 + 0.1 * (i % 3));
+    }
+    std::vector<double> knots(static_cast<std::size_t>(degree) + 1, 0.0);
+    const int inner = n - degree - 1;
+    for (int k = 1; k <= inner; ++k) {
+      knots.push_back(static_cast<double>(k) / (inner + 1));
+    }
+    knots.insert(knots.end(), static_cast<std::size_t>(degree) + 1, 1.0);
+    const og::Nurbs curve(degree, knots, control, weights);
+    EXPECT_NEAR(norm(curve.eval(0.0) - control.front()), 0.0, 1e-12);  // clamped ends
+    EXPECT_NEAR(norm(curve.eval(1.0) - control.back()), 0.0, 1e-12);
+    for (const double t : {0.13, 0.41, 0.77}) {  // not on a knot (k / 6)
+      const double h = 1e-6;
+      const og::Vec3 fd = (curve.eval(t + h) - curve.eval(t - h)) / (2.0 * h);
+      const og::Vec3 d = curve.d1(t);
+      EXPECT_NEAR(norm(fd - d), 0.0, 1e-5 * (1.0 + norm(d)));
+    }
+  }
 }

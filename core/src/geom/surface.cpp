@@ -1,11 +1,14 @@
 #include "opengrid/core/geom/surface.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+#include "opengrid/core/util/scratch.hpp"
 
 namespace og {
 namespace {
@@ -17,32 +20,34 @@ std::size_t idx(int i) {
 }
 
 // B-spline basis functions and first derivatives (Piegl & Tiller A2.3, n = 1) on knot span
-// `span`: values[j] = N_{span-p+j}(u), derivs[j] = N'_{span-p+j}(u).
-void basis(const std::vector<double>& knots, int p, int span, double u, std::vector<double>& values,
-           std::vector<double>& derivs) {
-  std::vector<std::vector<double>> ndu(idx(p + 1), std::vector<double>(idx(p + 1), 0.0));
-  std::vector<double> left(idx(p + 1), 0.0);
-  std::vector<double> right(idx(p + 1), 0.0);
-  ndu[0][0] = 1.0;
+// `span`: values[j] = N_{span-p+j}(u), derivs[j] = N'_{span-p+j}(u) (p + 1 entries each).
+void basis(const std::vector<double>& knots, int p, int span, double u, double* values,
+           double* derivs) {
+  const std::size_t pp = idx(p + 1);
+  Scratch table(pp * pp + 2 * pp);
+  double* ndu_data = table.data();  // ndu[a][b] = ndu_data[a * pp + b]
+  double* left = ndu_data + pp * pp;
+  double* right = left + pp;
+  auto ndu = [&](int a, int b) -> double& { return ndu_data[idx(a) * pp + idx(b)]; };
+  ndu(0, 0) = 1.0;
   for (int j = 1; j <= p; ++j) {
     left[idx(j)] = u - knots[idx(span + 1 - j)];
     right[idx(j)] = knots[idx(span + j)] - u;
     double saved = 0.0;
     for (int r = 0; r < j; ++r) {
-      ndu[idx(j)][idx(r)] = right[idx(r + 1)] + left[idx(j - r)];
+      ndu(j, r) = right[idx(r + 1)] + left[idx(j - r)];
       double temp = 0.0;
-      if (ndu[idx(j)][idx(r)] != 0.0) {
-        temp = ndu[idx(r)][idx(j - 1)] / ndu[idx(j)][idx(r)];
+      if (ndu(j, r) != 0.0) {
+        temp = ndu(r, j - 1) / ndu(j, r);
       }
-      ndu[idx(r)][idx(j)] = saved + right[idx(r + 1)] * temp;
+      ndu(r, j) = saved + right[idx(r + 1)] * temp;
       saved = left[idx(j - r)] * temp;
     }
-    ndu[idx(j)][idx(j)] = saved;
+    ndu(j, j) = saved;
   }
-  values.assign(idx(p + 1), 0.0);
-  derivs.assign(idx(p + 1), 0.0);
   for (int j = 0; j <= p; ++j) {
-    values[idx(j)] = ndu[idx(j)][idx(p)];
+    values[idx(j)] = ndu(j, p);
+    derivs[idx(j)] = 0.0;
   }
   if (p == 0) {
     return;
@@ -51,10 +56,10 @@ void basis(const std::vector<double>& knots, int p, int span, double u, std::vec
     // First derivative: p * (N_{r,p-1} / (u_{i+p} - u_i) - N_{r+1,p-1} / (u_{i+p+1} - u_{i+1})).
     double d = 0.0;
     if (r >= 1) {
-      d += ndu[idx(r - 1)][idx(p - 1)] / ndu[idx(p)][idx(r - 1)];
+      d += ndu(r - 1, p - 1) / ndu(p, r - 1);
     }
     if (r <= p - 1) {
-      d -= ndu[idx(r)][idx(p - 1)] / ndu[idx(p)][idx(r)];
+      d -= ndu(r, p - 1) / ndu(p, r);
     }
     derivs[idx(r)] = p * d;
   }
@@ -150,11 +155,16 @@ SurfaceProjection Surface::project(const Vec3& p, int samples) const {
   return project_from(p, bu, bv);
 }
 
+SurfacePoint Surface::values(double u, double v) const {
+  return {eval(u, v), du(u, v), dv(u, v)};
+}
+
 SurfaceProjection Surface::project_from(const Vec3& p, double u, double v) const {
   auto gradient = [&](double uu, double vv, double& gu, double& gv) {
-    const Vec3 r = eval(uu, vv) - p;
-    gu = dot(r, du(uu, vv));
-    gv = dot(r, dv(uu, vv));
+    const SurfacePoint at = values(uu, vv);
+    const Vec3 r = at.s - p;
+    gu = dot(r, at.su);
+    gv = dot(r, at.sv);
   };
   for (int iteration = 0; iteration < 100; ++iteration) {
     double gu = 0.0;
@@ -352,7 +362,7 @@ NurbsSurface::NurbsSurface(int degree_u, int degree_v, std::vector<double> knots
   }
 }
 
-NurbsSurface::Values NurbsSurface::evaluate(double u, double v) const {
+SurfacePoint NurbsSurface::evaluate(double u, double v) const {
   const double lo_u = ku_[idx(pu_)];
   const double hi_u = ku_[idx(nu_)];
   const double lo_v = kv_[idx(pv_)];
@@ -361,10 +371,11 @@ NurbsSurface::Values NurbsSurface::evaluate(double u, double v) const {
   const double vv = lo_v + std::clamp(v, 0.0, 1.0) * (hi_v - lo_v);
   const int su = find_span(ku_, pu_, nu_, uu);
   const int sv = find_span(kv_, pv_, nv_, vv);
-  std::vector<double> nu_val;
-  std::vector<double> nu_der;
-  std::vector<double> nv_val;
-  std::vector<double> nv_der;
+  Scratch scratch(2 * idx(pu_ + 1) + 2 * idx(pv_ + 1));
+  double* nu_val = scratch.data();
+  double* nu_der = nu_val + idx(pu_ + 1);
+  double* nv_val = nu_der + idx(pu_ + 1);
+  double* nv_der = nv_val + idx(pv_ + 1);
   basis(ku_, pu_, su, uu, nu_val, nu_der);
   basis(kv_, pv_, sv, vv, nv_val, nv_der);
   // Homogeneous sums: A = sum N M w P, W = sum N M w, and their u / v derivatives.
@@ -390,7 +401,7 @@ NurbsSurface::Values NurbsSurface::evaluate(double u, double v) const {
       wv += bv;
     }
   }
-  Values out;
+  SurfacePoint out;
   out.s = a / w;
   // Chain rule for the mapping of [0, 1] onto the knot domain.
   out.su = (au - wu * out.s) / w * (hi_u - lo_u);
@@ -406,6 +417,9 @@ Vec3 NurbsSurface::du(double u, double v) const {
 }
 Vec3 NurbsSurface::dv(double u, double v) const {
   return evaluate(u, v).sv;
+}
+SurfacePoint NurbsSurface::values(double u, double v) const {
+  return evaluate(u, v);
 }
 
 }  // namespace og

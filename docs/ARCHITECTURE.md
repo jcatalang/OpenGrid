@@ -55,7 +55,7 @@ will be decided then.
 | Dependency | Use | License | Linking | Status |
 |---|---|---|---|---|
 | C++ std lib (libc++ / libstdc++) | core | Apache-2.0 w/ LLVM exc. / GPL w/ runtime exc. | dynamic | required |
-| Eigen 3 | small dense/sparse linear algebra | MPL-2.0 | header-only | required |
+| Eigen (5.0 on conda-forge) | sparse Cholesky / preconditioned CG (`highorder/curving.cpp`) | MPL-2.0 | header-only, private to `og_core` | required |
 | nanobind | Python bindings | BSD-3 | static into extension | required |
 | scikit-build-core, CMake, Ninja | build | Apache-2.0 / BSD-3 | build-time | required |
 | GoogleTest | C++ tests | BSD-3 | test-only | required |
@@ -1217,6 +1217,26 @@ segment, so derivative jumps at knots never cost accuracy.
   MSH 4.1 writer), `io/cgns_elements.py` on the C++ `write_cgns_elements` (the 3D CGNS
   writer generalised: base of cell dimension 2 or 3, all SIDS types up to order 4, periodic
   vertex connections), `io/highorder.py` (`write_vtkhdf_elements`, `write_elements_h5`).
+
+### Curved boundary elements (Phase 11g)
+- `Session.high_order(order, curved=True)`: after `build_elements`, `model/curving.py` moves
+  the boundary's high-order nodes onto the geometry and `og::extend_displacement`
+  (`core/src/highorder/curving.cpp`, Eigen) carries the displacement into the mesh;
+  `model/shape.py` (Lagrange bases of all kinds) checks every changed element's Jacobian.
+- Where each boundary node goes: the assemblies record every boundary connector (2D) and
+  boundary face source (3D, with its face domain and, for block faces, its grid), patched or
+  not. 2D: projection onto the connector's curves. 3D: border edges of a face domain onto the
+  connector whose curves are nearest (smoothing groups slide nodes, so no coordinate
+  matching), other nodes onto the face domain's surface, or the degree-p interpolation of a
+  structured face's own grid when it has none; planar faces stay. Periodic patches stay
+  straight.
+- The extension: Dirichlet values on the whole boundary, free nodes within 3 boundary-element
+  lengths (normalised Dijkstra), weights 1 / length^3 on the element lattices' neighbour edges;
+  sparse Cholesky up to 20k unknowns, CG with incomplete Cholesky above (3D fill-in made
+  the direct solve take 42 s at 57k unknowns, CG 1.4 s).
+- The 2D assembly takes a connector's nodes from the structured grid row it bounds (before:
+  connector nodes merged by coordinates, which failed for group-smoothed domains whose
+  boundary nodes slide).
 
 ## 7. 3D tet backend decision
 

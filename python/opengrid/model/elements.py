@@ -47,6 +47,11 @@ class ElementMesh:
     patch_types: list
     # (source patch, target patch, transform, target node ids, matching source node ids)
     periodic: list = field(default_factory=list)
+    # Shared-node keys: edges (low vertex, high vertex, p x weight on low) numbered from
+    # ``vertices``; faces (sorted vertices padded with -1, p^2 x weights) after the edges.
+    edge_keys: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), dtype=np.int64))
+    face_keys: np.ndarray = field(default_factory=lambda: np.zeros((0, 8), dtype=np.int64))
+    curving: dict = field(default_factory=dict)  # report of curve_boundary (curved elements)
 
     @property
     def elements(self) -> int:
@@ -88,11 +93,72 @@ class ElementMesh:
         nv = len(lagrange.VERTICES[kind])
         return np.einsum("jk,ekd->ejd", weights, self.points[conn[:, :nv]])
 
+    def sorted_keys(self, which: str) -> "SortedRows":
+        """The edge or face keys sorted for lookups (cached; the keys never change)."""
+        cache = self.__dict__.setdefault("_sorted", {})
+        if which not in cache:
+            table = self.edge_keys
+            if which == "face":
+                table = self.face_keys
+            cache[which] = SortedRows(table)
+        return cache[which]
+
+    def edge_nodes(self, a, b) -> np.ndarray:
+        """(m, p - 1) ids of the high-order nodes on the edges (a[k], b[k]) of the linear mesh,
+        ordered from a to b (-1 where the edge does not exist)."""
+        a = np.atleast_1d(np.asarray(a, dtype=np.int64))
+        b = np.atleast_1d(np.asarray(b, dtype=np.int64))
+        p = self.order
+        out = np.full((len(a), max(p - 1, 0)), -1, dtype=np.int64)
+        if p < 2 or len(self.edge_keys) == 0:
+            return out
+        lo = np.minimum(a, b)
+        hi = np.maximum(a, b)
+        for m in range(1, p):
+            # Node m from a: weight (p - m) / p on a.
+            weight = np.where(a < b, p - m, m)
+            at = _lookup(self.sorted_keys("edge"), np.column_stack([lo, hi, weight]))
+            found = at >= 0
+            out[found, m - 1] = self.vertices + at[found]
+        return out
+
     def counts(self) -> dict:
         out = {kind: len(c) for kind, c in self.cells.items()}
         for kind, c in self.faces.items():
             out[f"boundary {kind}"] = len(c)
         return out
+
+
+def _rows(a: np.ndarray) -> np.ndarray:
+    """Rows of an int64 array as single opaque values (equal rows <=> equal values; their sort
+    order is the bytes', not the numbers')."""
+    a = np.ascontiguousarray(a, dtype=np.int64)
+    return a.view(np.dtype((np.void, a.dtype.itemsize * a.shape[1]))).reshape(-1)
+
+
+class SortedRows:
+    """Rows of an int64 table sorted once for repeated lookups."""
+
+    def __init__(self, table: np.ndarray):
+        keys = _rows(table)
+        self.order = np.argsort(keys, kind="stable")
+        self.ordered = keys[self.order]
+
+
+def _lookup(table, wanted: np.ndarray) -> np.ndarray:
+    """Index of each wanted row in ``table`` (rows of int64, or their SortedRows), -1 where
+    absent."""
+    if not isinstance(table, SortedRows):
+        table = SortedRows(table)
+    order = table.order
+    ordered = table.ordered
+    probe = _rows(wanted)
+    at = np.minimum(np.searchsorted(ordered, probe), max(len(ordered) - 1, 0))
+    out = np.full(len(probe), -1, dtype=np.int64)
+    if len(ordered):
+        found = ordered[at] == probe
+        out[found] = order[at[found]]
+    return out
 
 
 def _gather(assembly, mask) -> np.ndarray:
@@ -278,6 +344,8 @@ def build_elements(assembly, order: int) -> ElementMesh:
         patch_types=list(assembly.patch_types),
     )
     mesh.periodic = _periodic(assembly, mesh, refs, edge_keys, face_keys)
+    mesh.edge_keys = edge_keys
+    mesh.face_keys = face_keys
     return mesh
 
 

@@ -1054,18 +1054,31 @@ class MainWindow(QMainWindow):
         return summary
 
     def export_high_order(
-        self, path: str | None = None, order: int | None = None, nodes: str = "equispaced"
+        self,
+        path: str | None = None,
+        order: int | None = None,
+        nodes: str = "equispaced",
+        curved: bool | None = None,
     ) -> dict | None:
-        """Straight-sided order-p elements of every mesh cell: Gmsh, CGNS, VTKHDF Lagrange
-        cells, or .h5 with the chosen node set."""
-        if order is None:
+        """Order-p elements of every mesh cell (boundary elements curved onto the geometry, or
+        straight-sided): Gmsh, CGNS, VTKHDF Lagrange cells, or .h5 with the chosen node set."""
+        if order is None or curved is None:
             from PySide6.QtWidgets import QInputDialog
 
+        if order is None:
             order, ok = QInputDialog.getInt(
                 self, "High-order elements", "Order (CGNS: up to 4):", 2, 1, 6
             )
             if not ok:
                 return None
+        if curved is None:
+            choices = ["curved boundary elements", "straight-sided elements"]
+            choice, ok = QInputDialog.getItem(
+                self, "High-order elements", "Elements:", choices, 0, False
+            )
+            if not ok:
+                return None
+            curved = choice == choices[0]
         if path is None:
             path, chosen = QFileDialog.getSaveFileName(
                 self,
@@ -1081,7 +1094,9 @@ class MainWindow(QMainWindow):
                 nodes = "gll"
             elif "Gauss nodes" in chosen:
                 nodes = "gauss"
-        summary = self._run(lambda: self.session.export_high_order(path, order=order, nodes=nodes))
+        summary = self._run(
+            lambda: self.session.export_high_order(path, order=order, nodes=nodes, curved=curved)
+        )
         if summary:
             log.info("exported %s: %s", path, summary)
         return summary

@@ -30,6 +30,7 @@
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
 #include "opengrid/core/gpu/gpu.hpp"
+#include "opengrid/core/highorder/curving.hpp"
 #include "opengrid/core/highorder/elements.hpp"
 #include "opengrid/core/highorder/nodes.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
@@ -320,6 +321,39 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       "interval count a multiple of p): (nodes (elements, (p + 1)^d, 3) in tensor order with i "
       "fastest, min Jacobian, max Jacobian (per element, at the (p + 2)^d GLL points), "
       "elements per direction (i, j, k)). nodes: 'equispaced', 'gll' or 'gauss'.");
+  m.def(
+      "extend_displacement",
+      [](const PointsIn& points,
+         const nb::ndarray<const std::int64_t, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>&
+             edges,
+         const nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>& fixed,
+         const PointsIn& displacement,
+         const nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu>& radius,
+         double exponent) {
+        og::DisplacementExtensionInput in;
+        in.exponent = exponent;
+        in.points = points_from(points);
+        in.displacement = points_from(displacement);
+        in.edges.resize(edges.shape(0));
+        for (std::size_t k = 0; k < edges.shape(0); ++k) {
+          in.edges[k] = {edges(k, 0), edges(k, 1)};
+        }
+        in.fixed.assign(fixed.data(), fixed.data() + fixed.shape(0));
+        in.radius.assign(radius.data(), radius.data() + radius.shape(0));
+        og::DisplacementExtension out;
+        {
+          const nb::gil_scoped_release release;
+          out = og::extend_displacement(in);
+        }
+        return std::make_tuple(to_numpy(out.displacement), out.solved, out.seeds, out.iterations);
+      },
+      nb::arg("points"), nb::arg("edges"), nb::arg("fixed"), nb::arg("displacement"),
+      nb::arg("radius"), nb::arg("exponent") = 3.0,
+      "Extend the displacement of the fixed nodes into the free ones (weighted graph Laplacian, "
+      "weights 1 / length^2, sparse Cholesky) within the region of normalised distance <= 1 "
+      "from the seeds (fixed nodes with radius > 0 and a non-zero displacement): (displacement "
+      "(n, 3), solved free nodes, seeds, conjugate-gradient iterations or 0 for a direct "
+      "solve).");
   m.attr("gpu_min_nodes") = og::kGpuMinNodes;
   m.attr("gpu_tolerance") = og::kGpuTolerance;
 

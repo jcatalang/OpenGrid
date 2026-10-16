@@ -1,0 +1,18 @@
+curved boundary elements (OpenGrid 11g)
+
+cylinder ring: element edges off the circle, straight-sided -> curved
+  p = 1: 16 edges 1.9e-02 -> 1.9e-02, 32 edges 4.8e-03 -> 4.8e-03 (rate 2.0; straight-sided 2.0)
+  p = 2: 16 edges 1.9e-02 -> 4.6e-05, 32 edges 4.8e-03 -> 2.9e-06 (rate 4.0; straight-sided 2.0)
+  p = 3: 16 edges 1.9e-02 -> 1.1e-04, 32 edges 4.8e-03 -> 6.9e-06 (rate 4.0; straight-sided 2.0)
+  p = 4: 16 edges 1.9e-02 -> 3.4e-07, 32 edges 4.8e-03 -> 5.3e-09 (rate 6.0; straight-sided 2.0)
+  p = 5: 16 edges 1.9e-02 -> 1.3e-06, 32 edges 4.8e-03 -> 1.9e-08 (rate 6.0; straight-sided 2.0)
+
+coarse cylinder (16 wall edges), 1e-5 first cell, order 4: wall nodes moved up to 1.9e-02 (1921 first cells); 15296 nodes followed; scaled Jacobian of the curved elements 0.823 (straight-sided 0.915)
+
+NACA 0012 C-grid, 1e-5 wall, 24 layers, order 4 (0.58 s): 13248 quadrilaterals; wall nodes off the airfoil 2.2e-04 (straight-sided) -> 2.8e-17; 3370 curved elements; scaled Jacobian of the curved elements 0.480 (straight-sided 0.480)
+  written: Gmsh 13640 elements / 212752 nodes, CGNS 3 sections
+
+sphere in a box, hexahedral layers, order 3 (1.1 s): 7245 tetra, 216 pyramid, 864 hexa; sphere faces off the sphere 8.8e-03 -> 2.1e-05; scaled Jacobian of the curved elements 0.623 (straight-sided 0.712)
+sphere in a box, prism layers, order 3 (1.1 s): 6082 tetra, 2048 prism; sphere faces off the sphere 1.3e-02 -> 8.5e-05; scaled Jacobian of the curved elements 0.638 (straight-sided 0.966)
+
+CAD bracket (STEP), fluid volume, order 2 (7.8 s): 56475 tetra, 992 pyramid, 47600 prism, 10912 hexa; nodes on its 6 NURBS faces off them 4.7e-03 -> 6.8e-16; scaled Jacobian of the curved elements 0.426 (straight-sided 0.432)

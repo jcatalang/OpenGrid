@@ -848,6 +848,64 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11g — curved boundary elements (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `model/curving.py` + `Session.high_order(order, curved=True)` (now the default;
+  `export_high_order(..., curved=)`, GUI choice): the boundary's high-order nodes moved onto
+  the geometry - 2D: the connectors' curves; 3D: border edges of each face domain onto the
+  nearest of its connectors' curves, other nodes onto its surface, or the degree-p
+  interpolation of a structured face's grid without one; planar faces and periodic patches
+  stay - then the displacement extended into the mesh and every changed element checked
+  (folds: ValidationError with element, kind and location). Report `mesh.curving`: moved and
+  solved nodes, iterations, curved elements, their scaled Jacobian curved and straight-sided.
+- `core/src/highorder/curving.cpp` (`og::extend_displacement`, binding
+  `_core.extend_displacement`): weighted graph Laplacian on the element lattices' neighbour
+  edges (1 / length^3), Dirichlet boundary, region of normalised distance <= 1 from the moved
+  nodes (3 boundary-element lengths, multi-source Dijkstra); Eigen sparse Cholesky up to 20k
+  unknowns, conjugate gradients with incomplete Cholesky above. Eigen (already in the
+  environment) is now linked by the core (private, header-only).
+- `model/shape.py`: Lagrange shape functions and gradients of all seven kinds at any order
+  (tensor products, Silvester's simplex formula, a rational pyramid basis in collapsed
+  coordinates), Jacobians at the order-(p + 2) lattice.
+- `ElementMesh.edge_nodes`, cached key lookups; assemblies record every boundary connector /
+  face source; without patches `high_order` works (no boundary elements).
+- Fixed: the 2D assembly took a connector's nodes by merging the connector's own nodes with the
+  grids by coordinates, which fails for group-smoothed domains (their boundary nodes slide):
+  326 of the 392 patch lines of the C-grid template's export pointed at stray points (Gmsh,
+  CGNS, VTKHDF exports of such models). Connector nodes now come from the grid row they bound.
+- Demo `examples/11g_curved_elements.py`; tests `core/tests/test_curving.cpp`,
+  `tests/python/test_curved_elements.py`.
+
+### Results
+| Cylinder ring, element edges vs the circle | 16 wall edges | 32 | rate |
+|---|---|---|---|
+| straight-sided, any p | 1.9e-2 | 4.8e-3 | 2.0 |
+| p = 2 | 4.6e-5 | 2.9e-6 | 4.0 |
+| p = 3 | 1.1e-4 | 6.9e-6 | 4.0 |
+| p = 4 | 3.4e-7 | 5.3e-9 | 6.0 |
+| p = 5 | 1.3e-6 | 1.9e-8 | 6.0 |
+
+- Thin layers: 16 wall edges over a 1e-5 first cell (wall nodes moved 1.9e-2 = 1921 first
+  cells), order 4: valid, scaled Jacobian 0.823 (straight-sided 0.915). The weight exponent:
+  1 / length^2 lost 0.20 there, ^3 0.10, ^4 0.08 (but more on the C-grid): 3.
+- NACA 0012 C-grid (1e-5 wall, 24 layers), order 4 in 0.55 s: wall nodes 2.2e-4 -> 3e-17 off
+  the airfoil, quality unchanged (0.480, the far field's).
+- Sphere in a box, order 3 (1.1 s each): hexahedral layers 8.8e-3 -> 2.1e-5 off the sphere
+  (scaled Jacobian 0.712 -> 0.623); prism layers on triangulated faces 1.3e-2 -> 8.5e-5
+  (0.966 -> 0.638: a tetrahedron on top of the layer stack, its bottom face curved).
+- O-grid ball (32000 hexahedra), order 4: 8.6e-4 -> 1.7e-11, 567k unknowns in 92 CG
+  iterations, 10 s (37 s before caching the key lookups and BLAS Jacobians).
+- CAD bracket (STEP), fluid volume, order 2 (116k elements, 7.8 s): nodes on its NURBS faces
+  4.7e-3 -> 7e-16.
+- Pipe template (block faces without surfaces, grid interpolation), orders 2-4: wall nodes
+  3.3e-4 -> 7.7e-6 / 1.2e-6 / 2.6e-7; quality unchanged; planar end caps untouched.
+
+### Verified
+- `ctest` +3 -> 154; `pytest` +17 (and the 11f tests on curved defaults); strict CI build,
+  clang-tidy on the new C++ (`-DEIGEN_DONT_VECTORIZE`, noted in CLAUDE.md), ruff, clang-format,
+  ternary check, API docs; demos 01-11g run.
+
 ## Phase 11f — straight-sided high-order elements of every cell type (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

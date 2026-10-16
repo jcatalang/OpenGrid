@@ -1,4 +1,5 @@
-"""Phase 11f demo: straight-sided high-order elements of every cell type, Gmsh / CGNS / VTKHDF.
+"""Phase 11f demo: straight-sided high-order elements of every cell type, Gmsh / CGNS / VTKHDF
+(``curved=False``; the curved boundary elements of 11g: examples/11g_curved_elements.py).
 
   * Node orders: OpenGrid's generated node orders against each format's own reference, for
     every element kind (line, triangle, quadrilateral, tetrahedron, pyramid, prism,
@@ -92,7 +93,7 @@ def main() -> int:
     )
     for p in (1, 2, 3, 4):
         t = time.perf_counter()
-        mesh = og.high_order(p)
+        mesh = og.high_order(p, curved=False)
         built = time.perf_counter() - t
         counts = mesh.counts()
         report.append(
@@ -101,10 +102,12 @@ def main() -> int:
             f"({built * 1e3:.0f} ms); wall nodes off the cylinder by up to "
             f"{wall_distance(mesh, 1.0):.2e}"
         )
-    mesh4 = og.high_order(4)
+    mesh4 = og.high_order(4, curved=False)
     info = {}
     for suffix in ("msh", "cgns", "vtkhdf"):
-        info[suffix] = og.export_high_order(OUTPUT / f"11f_cylinder_p4.{suffix}", order=4)
+        info[suffix] = og.export_high_order(
+            OUTPUT / f"11f_cylinder_p4.{suffix}", order=4, curved=False
+        )
     report.append(
         f"  order 4 written: Gmsh {info['msh']['elements']} elements / {info['msh']['nodes']} "
         f"nodes, CGNS {info['cgns']['sections']} sections in {info['cgns']['zones']} zone, "
@@ -123,7 +126,7 @@ def main() -> int:
     first = ", with the linear volume mesh"
     for p in (2, 3, 4):
         t = time.perf_counter()
-        mesh = layers.high_order(p)
+        mesh = layers.high_order(p, curved=False)
         built = time.perf_counter() - t
         c = mesh.counts()
         report.append(
@@ -135,7 +138,7 @@ def main() -> int:
     times = {}
     for suffix in ("msh", "cgns", "vtkhdf"):
         t = time.perf_counter()
-        layers.export_high_order(OUTPUT / f"11f_layers_p3.{suffix}", order=3)
+        layers.export_high_order(OUTPUT / f"11f_layers_p3.{suffix}", order=3, curved=False)
         times[suffix] = time.perf_counter() - t
     report.append(
         "  order 3 written: "

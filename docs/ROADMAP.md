@@ -460,3 +460,16 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   `io/cgns_elements.py`, `examples/11f_high_order_elements.py`): orders 1-6 (CGNS 1-4),
   Gmsh / CGNS / VTKHDF / HDF5, boundary elements per patch, zones, periodic links. The curved
   structured elements of 11e became `curved_high_order`.)*
+
+### 11g — Curved boundary elements
+- Requested by the user (2026-10-16), after straight-sided walls were shown to cap high-order
+  accuracy at curved walls: the elements of 11f with their boundary nodes on the geometry
+  (curves, surfaces, CAD faces) and the neighbouring elements following, including thin
+  boundary-layer stacks, for every cell type. Acceptance: boundary nodes on the geometry to
+  rounding; element edges converging at h^(p+1) on a circle (straight-sided: h^2); every changed
+  element checked for a positive Jacobian, folds reported. *(Built (`model/curving.py`,
+  `core/src/highorder/curving.cpp` on Eigen, `model/shape.py`,
+  `examples/11g_curved_elements.py`): curved by default (`high_order(order, curved=True)`); the
+  displacement of the boundary nodes extended by a stiffened graph Laplacian within three
+  boundary-element lengths; boundary layers of 1e-5 under a sagitta 1900 cells thick stay
+  valid. Faces without a surface are curved from their own grid; planar faces stay.)*

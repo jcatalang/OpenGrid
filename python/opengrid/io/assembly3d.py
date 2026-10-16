@@ -134,11 +134,16 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
     patch_types = [p.params["patch_type"] for p in store.entities("patch")]
     boundary_cells = []
     boundary_patch = []
+    boundary_sources = []  # every boundary face source, patched or not
     if topology is not None:
         for entry in topology["entries"]:
-            if entry["patch"] is None:
-                continue
-            patch = patch_names.index(entry["patch"])
+            patch = None
+            if entry["patch"] is not None:
+                patch = patch_names.index(entry["patch"])
+            domains = [key[1] for key in entry["keys"] if key[0] == "domain"]
+            domain = None
+            if domains:
+                domain = domains[0]
             if entry["block"] is not None:
                 block_id, face = entry["block"]
                 grid = grids[block_id]
@@ -146,17 +151,46 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
                 index = np.arange(ni * nj * nk).reshape(nk, nj, ni) + starts[block_id]
                 ids = face_array(index[..., None], face)[..., 0]
                 q = np.stack([ids[:-1, :-1], ids[:-1, 1:], ids[1:, 1:], ids[1:, :-1]], axis=-1)
+                n2, n1 = ids.shape
+                jj, ii = np.meshgrid(np.arange(n2 - 1), np.arange(n1 - 1), indexing="ij")
+                cell_ij = np.stack([ii.reshape(-1), jj.reshape(-1)], axis=1)
                 q = q.reshape(-1, 4)
+                boundary_sources.append(
+                    {
+                        "block": (block_id, face),
+                        "volume": None,
+                        "domain": domain,
+                        "cells": inverse[q],  # face-grid order: (i, j), (i+1, j), ...
+                        "grid": face_array(grid, face),
+                        "cell_ij": cell_ij,
+                    }
+                )
                 if face in REVERSED_FACES:
                     q = q[:, ::-1]
-                for row in q:
-                    boundary_cells.append(inverse[row])
-                    boundary_patch.append(patch)
+                if patch is not None:
+                    for row in q:
+                        boundary_cells.append(inverse[row])
+                        boundary_patch.append(patch)
             else:
                 volume_id, domain = entry["volume"]
-                for cell in meshes[volume_id]["faces"][domain]:
-                    boundary_cells.append(inverse[np.asarray(cell) + starts[volume_id]])
-                    boundary_patch.append(patch)
+                cells = [
+                    inverse[np.asarray(cell) + starts[volume_id]]
+                    for cell in meshes[volume_id]["faces"][domain]
+                ]
+                boundary_sources.append(
+                    {
+                        "block": None,
+                        "volume": (volume_id, domain),
+                        "domain": domain,
+                        "cells": cells,
+                        "grid": None,
+                        "cell_ij": None,
+                    }
+                )
+                if patch is not None:
+                    for cell in cells:
+                        boundary_cells.append(cell)
+                        boundary_patch.append(patch)
     lengths = np.array([len(c) for c in connectivity], dtype=np.int64)
     return MeshAssembly(
         points=merged,
@@ -177,4 +211,5 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
         dimension=3,
         boundary_cells=boundary_cells,
         boundary_patch=np.asarray(boundary_patch, dtype=np.int32),
+        boundary_sources=boundary_sources,
     )

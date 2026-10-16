@@ -45,6 +45,11 @@ class MeshAssembly:
     # 3D: boundary faces (triangles and quads, outward) and their patch indices.
     boundary_cells: list = field(default_factory=list)
     boundary_patch: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
+    # Where the boundary comes from, patched or not (curved high-order elements). 2D:
+    # (connector id, point ids in the connector's order) per boundary connector; 3D: one dict
+    # per boundary face source (see io/assembly3d.py).
+    boundary_connectors: list = field(default_factory=list)
+    boundary_sources: list = field(default_factory=list)
 
     def cells(self, mask=None) -> list[np.ndarray]:
         """Point ids of each (selected) cell."""
@@ -82,6 +87,23 @@ def zone_assignment(session) -> tuple[list[str], dict[str, int]]:
     return zone_names, domain_zone
 
 
+def _record_rows(session, entity, index, rows: dict) -> None:
+    """Pool indices of each connector of a structured domain, from its grid's boundary rows:
+    edges 0 .. 3 run counter-clockwise (bottom along i, right along j, top and left back),
+    each a chain of connectors joined at shared end nodes."""
+    sides = [index[0, :], index[:, -1], index[-1, ::-1], index[::-1, 0]]
+    for side, edge in zip(sides, entity.params["edges"], strict=True):
+        start = 0
+        for item in edge:
+            n = len(session.connectors.nodes(item["connector"]).points)
+            segment = side[start : start + n]
+            if item["reversed"]:
+                segment = segment[::-1]
+            if len(segment) == n:
+                rows.setdefault(item["connector"], segment)
+            start += n - 1
+
+
 def assemble(
     session, topology=None, quality: bool = True, periodic=(), domains=None
 ) -> MeshAssembly:
@@ -99,12 +121,17 @@ def assemble(
     cell_zone = []
     cell_ij = []
     data: dict[str, list[np.ndarray]] = {}
+    # Connector nodes on structured grid rows (pool indices, connector order): smoothing groups
+    # slide boundary nodes along their curves, so the grid, not the connector's own nodes, says
+    # where a connector's nodes are.
+    grid_rows: dict[int, np.ndarray] = {}
     for number, entity in enumerate(entities):
         if entity.kind == "domain":
             grid = session.domain_grid(entity.name)
             nj, ni, _ = grid.shape
             pool.append(grid.reshape(-1, 3))
             index = np.arange(ni * nj).reshape(nj, ni) + offset
+            _record_rows(session, entity, index, grid_rows)
             q = np.stack(
                 [index[:-1, :-1], index[:-1, 1:], index[1:, 1:], index[1:, :-1]], axis=-1
             ).reshape(-1, 4)
@@ -156,7 +183,10 @@ def assemble(
                 continue
             if item["connector"] in boundary:
                 needed.append(item["connector"])
+    needed.extend(boundary)  # every boundary connector (curved high-order elements)
     for connector_id in sorted(set(needed)):
+        if connector_id in grid_rows:
+            continue  # its nodes are a structured grid's row
         nodes = session.connectors.nodes(connector_id).points
         connector_slots[connector_id] = (offset, len(nodes))
         pool.append(np.asarray(nodes))
@@ -171,8 +201,11 @@ def assemble(
         connectivity = inverse[np.concatenate(cells)]
 
     def connector_ids(connector_id, reverse=False):
-        start, n = connector_slots[connector_id]
-        ids = inverse[start : start + n]
+        if connector_id in grid_rows:
+            ids = inverse[grid_rows[connector_id]]
+        else:
+            start, n = connector_slots[connector_id]
+            ids = inverse[start : start + n]
         if reverse:
             ids = ids[::-1]
         return ids
@@ -189,6 +222,7 @@ def assemble(
             ids = connector_ids(item["connector"], use.reversed)
             lines.append(np.stack([ids[:-1], ids[1:]], axis=1))
             line_patch.append(np.full(len(ids) - 1, index, dtype=np.int32))
+    boundary_connectors = [(c, connector_ids(c)) for c in sorted(boundary)]
     periodic_links = []
     names = [p.name for p in patches]
     for source, target, pairs in periodic:
@@ -231,4 +265,5 @@ def assemble(
         points_before_merge=points_before_merge,
         cell_data={key: np.concatenate(parts) for key, parts in data.items()},
         periodic=periodic_links,
+        boundary_connectors=boundary_connectors,
     )

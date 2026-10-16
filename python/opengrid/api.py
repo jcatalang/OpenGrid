@@ -1214,33 +1214,49 @@ class Session:
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
     def _linear_assembly(self):
-        """The linear mesh of the whole model as exported (boundary validated)."""
+        """The linear mesh of the whole model as exported: with patches the boundary must
+        validate (boundary elements per patch); without, there are no boundary elements."""
         from opengrid.io.assembly import assemble
 
-        report = self._require_valid_boundary()
+        periodic = ()
+        if self.store.entities("patch"):
+            periodic = self._require_valid_boundary().periodic
         if self.is_3d():
             from opengrid.io.assembly3d import assemble_blocks
             from opengrid.model.volumes import analyze_3d
 
             return assemble_blocks(self, analyze_3d(self), quality=False)
-        return assemble(self, self.topology(), quality=False, periodic=report.periodic)
+        return assemble(self, self.topology(), quality=False, periodic=periodic)
 
-    def high_order(self, order: int = 2):
-        """Straight-sided order-``order`` elements (1 .. 6) of every mesh cell: triangles and
-        quadrilaterals (2D), tetrahedra, pyramids, prisms and hexahedra (3D), with the
-        equispaced Lagrange nodes on straight edges, planar triangles and bilinear
-        quadrilateral faces, shared nodes merged exactly, and boundary elements (lines /
-        triangles / quadrilaterals) per patch; the boundary must validate. Returns an
+    def high_order(self, order: int = 2, curved: bool = True):
+        """Order-``order`` elements (1 .. 6) of every mesh cell: triangles and quadrilaterals
+        (2D), tetrahedra, pyramids, prisms and hexahedra (3D), the same cells as the linear
+        mesh with equispaced Lagrange nodes, shared nodes merged exactly, and boundary
+        elements (lines / triangles / quadrilaterals) per patch (with patches the boundary
+        must validate). ``curved``: boundary nodes moved onto the geometry (curves,
+        surfaces) and the displacement extended into the neighbouring elements, which are
+        checked for validity (ValidationError for folded elements); False: straight-sided
+        elements (straight edges, planar triangles, bilinear quadrilateral faces). Returns an
         ElementMesh (``points``, ``cells`` / ``faces`` per kind in Gmsh node order,
-        ``connectivity(kind, fmt)``, ``element_nodes(kind, nodes)``)."""
+        ``connectivity(kind, fmt)``, ``element_nodes(kind, nodes)``, ``curving`` report)."""
+        from opengrid.model.curving import curve_boundary
         from opengrid.model.elements import build_elements
 
-        return build_elements(self._linear_assembly(), order)
+        assembly = self._linear_assembly()
+        mesh = build_elements(assembly, order)
+        if curved:
+            curve_boundary(self, assembly, mesh)
+        return mesh
 
     def export_high_order(
-        self, path, order: int = 2, nodes: str = "equispaced", base_name: str = "OpenGrid"
+        self,
+        path,
+        order: int = 2,
+        nodes: str = "equispaced",
+        base_name: str = "OpenGrid",
+        curved: bool = True,
     ) -> dict:
-        """Write ``high_order(order)`` by extension: ``.msh`` (Gmsh 4.1 high-order element
+        """Write ``high_order(order, curved)`` by extension: ``.msh`` (Gmsh 4.1 high-order element
         types, physical groups, periodic links), ``.cgns`` (SIDS types up to order 4, one
         unstructured zone per zone, BCs per patch), ``.vtkhdf`` (VTK Lagrange cells) or ``.h5``
         (element node coordinates in the node set ``nodes``: "equispaced", or "gll" / "gauss"
@@ -1257,7 +1273,7 @@ class Session:
             raise ValueError(
                 f"{suffix} elements carry equispaced nodes: write the {nodes!r} node set to .h5"
             )
-        mesh = self.high_order(order)
+        mesh = self.high_order(order, curved)
         if suffix == ".h5":
             return write_elements_h5(path, mesh, nodes)
         if suffix == ".cgns":

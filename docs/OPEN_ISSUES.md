@@ -269,12 +269,19 @@ history). Phase tags show where each item came from.
   can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
   moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
   the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
-- **Straight-sided elements at curved walls** [11f]: `high_order` keeps every cell's linear
-  geometry, so a curved wall is the polygon of the linear mesh at every order (the cylinder
-  of the demo: edges off by the sagitta 7.7e-4, against 1e-8 for curved order-4 elements).
-  High-order DG / CG solvers lose their accuracy at such walls (Bassi and Rebay, J. Comput.
-  Phys. 138 (1997): spurious entropy at a polygonal airfoil); curved boundary elements are
-  available for structured grids only (11e).
+- **Curved boundary elements** [11g]: `high_order` curves the boundary by default. Folded
+  elements are reported, not repaired: there is no untangling or high-order mesh optimisation
+  (a single block wrapped onto a sphere folds at its corners; the O-grid does not). Quality
+  drops where a coarse element sits on top of a curved layer stack (0.97 -> 0.64 on the
+  triangulated sphere). The extension is a stiffened graph Laplacian (weights 1 / length^3,
+  chosen on four cases), not elasticity, over a region of 3 boundary-element lengths; CG
+  (tolerance 1e-10) above 20k unknowns, 92 - 900 iterations seen. Faces without a surface are
+  curved from their own grid (degree-p interpolation: the pipe wall 2.6e-7 off its cylinder
+  at order 4, against 1e-11 for projected surfaces); give curved faces a surface for exact
+  nodes. Periodic patches and internal walls stay straight; VTKHDF draws pyramids linear
+  (curved ones too). Projection is the closest point on the connector's curves or the face's
+  surface (no parameter-interval check); validity is sampled at the order-(p + 2) lattice, not
+  bounded (Bezier bounds would be rigorous).
 - **Straight-sided element details** [11f]: quadrilateral faces are bilinear, planar only
   when their four vertices are coplanar (hexahedra of smooth grids have slightly warped
   faces). Orders 1-6 (CGNS defines up to 4). GLL / Gauss node sets for quadrilaterals and
@@ -286,7 +293,7 @@ history). Phase tags show where each item came from.
   second implementation). Gmsh 4.15 cannot evaluate prisms of order >= 3 itself, and its
   multithreaded Jacobian evaluation crashed on the 35k-cell order-4 file (single-threaded it
   reads and evaluates it); a solver's reader is the real check. The element mesh covers the
-  whole model (no subset), and the boundary must validate.
+  whole model (no subset); with patches the boundary must validate.
 - **GPU smoothing does not pay yet** [11d]: the experimental OpenCL path (`opengrid.set_gpu`,
   off by default) runs the 3D group smoother's line sweeps 2.2x faster than the CPU on the 1M-
   cell ball, but the whole iteration only 1.2x (Anderson mixing and sliding projections stay

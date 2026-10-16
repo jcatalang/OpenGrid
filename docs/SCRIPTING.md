@@ -206,9 +206,12 @@ og.auto_topology(curves)  # a sketch of four-sided blocks
 See `examples/10e_templates_auto.py`.
 
 ## High-order elements
-Straight-sided elements of every mesh cell (the default):
+The elements of every mesh cell, with the boundary nodes on the geometry (curved walls) and
+the elements next to them following:
 ```python
 mesh = og.high_order(order=3)  # triangles, quads, tets, pyramids, prisms, hexes + boundary
+print(mesh.curving)  # moved nodes, scaled Jacobian of the curved elements (straight-sided)
+flat = og.high_order(order=3, curved=False)  # straight-sided elements
 print(mesh.counts(), len(mesh.points))  # shared edge / face nodes merged exactly
 conn = mesh.connectivity("tetra", "cgns")  # (elements, 20) in CGNS's node order
 og.export_high_order("case_p3.msh", order=3)  # Gmsh 4.1 high-order types, physical groups
@@ -216,8 +219,9 @@ og.export_high_order("case_p3.cgns", order=3)  # SIDS TETRA_20 ... HEXA_64, BCs 
 og.export_high_order("case_p3.vtkhdf", order=3)  # VTK Lagrange cells (ParaView)
 og.export_high_order("case_p3_gll.h5", order=3, nodes="gll")  # quads / hexes: GLL nodes
 ```
-Orders 1-6 (CGNS: up to 4). Curved elements of structured grids (p x p grid cells per element,
-interval counts multiples of the order) are the opt-in alternative for curved walls:
+Orders 1-6 (CGNS: up to 4); exports take ``curved=False`` too. Folded elements after curving
+raise a ValidationError naming them. The curved elements of 11e agglomerate p x p structured
+grid cells into one element (interval counts multiples of the order):
 ```python
 og.create_template("cgrid", body=["upper", "lower"], wall=1e-5, layers=24, interval_multiple=4)
 mesh = og.curved_high_order(order=4, nodes="gll")  # (elements, 25, 3) GLL nodes, curved
@@ -225,7 +229,8 @@ print(mesh.scaled_jacobian.min())
 og.export_curved_high_order("naca_p4.vtkhdf", order=4)  # VTK Lagrange cells
 og.export_curved_high_order("naca_p4_gauss.h5", order=4, nodes="gauss")  # DG solution points
 ```
-See `examples/11f_high_order_elements.py` and `examples/11e_high_order.py`.
+See `examples/11g_curved_elements.py`, `examples/11f_high_order_elements.py` and
+`examples/11e_high_order.py`.
 
 ## GPU (experimental)
 ```python

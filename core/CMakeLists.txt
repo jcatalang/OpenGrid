@@ -46,6 +46,7 @@ add_library(og_core STATIC
   src/gpu/gpu.cpp
   src/highorder/nodes.cpp
   src/highorder/elements.cpp
+  src/highorder/curving.cpp
   src/gpu/multiblock3d_sweeps.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
@@ -57,6 +58,12 @@ target_compile_definitions(og_core PRIVATE
   OG_VERSION_STRING="${PROJECT_VERSION}")
 # The core library is linked into the Python extension module.
 set_target_properties(og_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Eigen (header-only, MPL-2.0; see docs/ARCHITECTURE.md): sparse linear algebra, used in .cpp
+# files only so the core's headers stay independent of it.
+find_package(Eigen3 REQUIRED NO_MODULE)
+target_link_libraries(og_core PRIVATE Eigen3::Eigen)
+message(STATUS "OpenGrid: Eigen ${Eigen3_VERSION}")
 
 # Optional CGNS support (zlib-like license; see docs/ARCHITECTURE.md).
 if(OG_WITH_CGNS)

@@ -241,7 +241,7 @@ def _expected_nodes(mesh) -> int:
 def test_2d_hybrid_elements():
     og = hybrid()
     for p in (1, 2, 3, 5):
-        mesh = og.high_order(p)
+        mesh = og.high_order(p, curved=False)  # straight-sided (curving: test_curved_elements)
         assert set(mesh.cells) == {"triangle", "quad"}
         assert set(mesh.faces) == {"line"}
         assert mesh.vertices == len(og.high_order(1).points)
@@ -583,5 +583,5 @@ def test_gui_export(qtbot, tmp_path):
     qtbot.addWidget(window)
     window.session = channel()
     window.session.pair_periodic("left", "right")
-    summary = window.export_high_order(str(tmp_path / "c.msh"), order=2)
+    summary = window.export_high_order(str(tmp_path / "c.msh"), order=2, curved=True)
     assert summary["order"] == 2 and summary["elements"] > 0

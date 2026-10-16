@@ -306,6 +306,25 @@ history). Phase tags show where each item came from.
   (dimensions, walls, relax); no 3D axis handles; deleting single blocks has no tool.
 - **Sketch kink metric** [10d]: the airfoil group reports a 22° interface kink three cells
   from the trailing edge, where the C-lines turn by the 14° wedge (8° six cells away).
+- **Wing-in-box template below target** [10e]: min scaled Jacobian 0.25 (target 0.4). The
+  extruded C-grid's TFI is 0.55 in its wake and ring blocks; the 3D group smoothing lowers it
+  at the end planes, where nodes slide on the planes within half an interval; a limit of 1.5
+  (used by the other extruded templates) folds the C-grid's cells.
+- **Automatic topology: two-element airfoil fails** [10e]: the cross field is right (index sum
+  -1) but in the slot between main element and flap the separatrices from the flap's leading
+  edge and the main trailing edge leave a five-cornered face and a triangle. No repair of
+  faces with other corner counts exists; the case is a strict xfail in the tests.
+- **Automatic topology is heuristic** [10e]: singularities next to the boundary are snapped
+  onto it (within 4 local mesh sizes; -1/4 joining a junction, +1/4 a convex-corner mark),
+  boundary separatrices start straight and evenly spaced; tuned on the four test cases. The
+  layouts are valid but not optimised: the bracket's fillet corners make thin blocks (min
+  scaled Jacobian 0.13); no layout simplification (merging thin blocks, moving singularities)
+  is done. The field is harmonic plus a unit-length smoothing, not an optimised frame field.
+- **Templates fix their boundary vertices** [10e]: sliding them drifted (C-grid sides,
+  towards the trailing edge) or had a neutral mode (rotation along a circle); the C-grid's and
+  O-grid's vertices are where the template puts them. Channel templates relax (2D).
+- **Template GUI** [10e]: O-grid, C-grid and butterfly from the selection; the channel and 3D
+  templates are scripting only (they need the four sides named).
 - **Groups and topology edits** [10a, 10b]: members follow splits, joins and O-grids; a 2D
   group's member order changes when an O-grid replaces a member.
 - **Picture bug in 9b** [10a]: `09b_topology.png` coloured cells by the wrong quality values

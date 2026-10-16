@@ -1,0 +1,18 @@
+templates (min scaled Jacobian after the group smoothing; target >= 0.4):
+  ogrid (ellipse)                4 blocks    0.1 s  min SJ 0.953 (met)
+  butterfly (disk)               5 blocks    0.1 s  min SJ 0.864 (met)
+  cgrid (NACA 0012)             12 blocks    0.5 s  min SJ 0.430 (met)
+  hgrid (bump)                   3 blocks    0.1 s  min SJ 0.989 (met)
+  body_in_channel (cylinder)    12 blocks    1.1 s  min SJ 0.782 (met)
+  pipe                           5 blocks    0.5 s  min SJ 0.864 (met)
+  cylinder_in_channel           12 blocks    2.7 s  min SJ 0.673 (met)
+  bump_channel                   3 blocks    0.4 s  min SJ 0.993 (met)
+  wing_in_box (C-H)             12 blocks    1.9 s  min SJ 0.249 (MISSED)
+  sphere_in_box                 32 blocks   11.9 s  min SJ 0.525 (met)
+  (wing_in_box: the extruded C-grid's wake and ring blocks lose quality at the end planes in the 3D smoothing - 0.55 as TFI; larger slide limits fold them; see OPEN_ISSUES)
+
+automatic topology (cross field):
+  airfoil_in_box     2 singularities (indices -0.25, -0.25), corners +0.50: sum +0.00 = Euler characteristic +0; 6 separatrices; 6 four-sided blocks (0.9 s), min scaled Jacobian 0.995
+  two_element        4 singularities (indices -0.25, -0.25, -0.25, -0.25), corners +0.00: sum -1.00 = Euler characteristic -1; 12 separatrices; FAILED: a face near (1.084, -0.882) has 5 corners, not 4
+  plate_three_holes  12 singularities (indices -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25), corners +1.00: sum -2.00 = Euler characteristic -2; 24 separatrices; 32 four-sided blocks (1.2 s), min scaled Jacobian 0.706
+  bracket_section    8 singularities (indices -0.25, -0.25, -0.25, -0.25, +0.25, +0.25, +0.25, +0.25), corners +0.00: sum +0.00 = Euler characteristic +0; 12 separatrices; 24 four-sided blocks (0.7 s), min scaled Jacobian 0.131

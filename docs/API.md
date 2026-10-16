@@ -322,6 +322,36 @@ of a sketch that lie near them - within ``tolerance``, by default the ends withi
 fifth of the edge length and the middle within half of it (the nearest of them; the
 GUI's "assign selected geometry"). One edit.
 
+### `create_template(kind: str, name: str | None = None, **options) -> str`
+
+A topology template (opengrid.model.templates): the far-field geometry it needs and
+a sketch with no user-placed vertices. 2D: ``"ogrid"`` (body, radius, blocks,
+radial_points, wall), ``"butterfly"`` (boundary, core, radial_points), ``"cgrid"``
+(body with a sharp trailing edge, radius, downstream, ring, radial_points=(inner,
+outer), wall, wake), ``"hgrid"`` (bottom, right, top, left, blocks=(nx, ny),
+normal_points, wall, wall_sides), ``"body_in_channel"`` (body, bottom, right, top,
+left, margin, radial_points, wall). 3D: ``"pipe"``, ``"cylinder_in_channel"``,
+``"bump_channel"``, ``"wing_in_box"`` (the 2D template's options plus ``length`` and
+``span_points``: extruded along z) and ``"sphere_in_box"`` (center, radius, box, cube,
+points, radial_points, outer_points, wall). All take ``spacing`` (default: a
+twentieth of the median boundary edge) and ``relax``. One undo step; returns the
+sketch.
+
+### `auto_topology(curves, size: float | None = None, spacing: float | None = None, relax: bool = False, name: str | None = None) -> str`
+
+Automatic 2D block topology (opengrid.model.crossfield): a cross field of the region
+bounded by the closed loops of ``curves`` (triangulated with mesh ``size``, default
+1/200 of their total length), its separatrices traced from the singularities and
+corners to the boundary (created as polylines ``separatrix-<k>``) and a sketch whose
+blocks are the four-sided faces they cut (point counts from ``spacing``). One undo
+step; returns the sketch (edit it like any other).
+
+### `cross_field(curves, size: float | None = None)`
+
+The cross field of a planar region and its separatrices, without creating anything:
+a Layout with ``field`` (points, triangles, complex values z = exp(4 i theta),
+corners, singularities, ``index_sum()`` and ``euler()``) and ``separatrices``.
+
 ## Blocks (structured 3D)
 
 ### `create_block(faces=None, extrusion=None, name: str | None = None, smoothing=None, quality_floor=None) -> str`

@@ -344,9 +344,26 @@ class MainWindow(QMainWindow):
             ),
             "sketch_regenerate": self._action("Regenerate sketch", self.regenerate_sketch),
             "sketch_report": self._action("Sketch report", self.sketch_report),
+            "template_ogrid": self._action(
+                "Template: O-grid around the selected body",
+                lambda: self.template_from_selection("ogrid"),
+            ),
+            "template_cgrid": self._action(
+                "Template: C-grid around the selected body (sharp trailing edge)",
+                lambda: self.template_from_selection("cgrid"),
+            ),
+            "template_butterfly": self._action(
+                "Template: butterfly inside the selected closed curve",
+                lambda: self.template_from_selection("butterfly"),
+            ),
+            "auto_topology": self._action(
+                "Automatic topology (2D) from the selected curves",
+                self.auto_topology_from_selection,
+                tip="Cross-field block decomposition of the region the curves bound",
+            ),
         }
         for key, action in self.topology_actions.items():
-            if key in ("split_domain", "split_block", "ogrid", "sketch_assign"):
+            if key in ("split_domain", "split_block", "ogrid", "sketch_assign", "template_ogrid"):
                 topology_menu.addSeparator()
             topology_menu.addAction(action)
 
@@ -1236,6 +1253,38 @@ class MainWindow(QMainWindow):
         name = self._run(lambda: self.session.assign_sketch_geometry(sketch, geometry))
         if name:
             log.info("%s: assigned %s", name, ", ".join(geometry))
+            self._after_sketch(name)
+        return name
+
+    def _selected_curves(self) -> list[str]:
+        from opengrid.model.connectors import CURVE_KINDS
+
+        return [n for n in self.selected_names() if self.session.store.get(n).kind in CURVE_KINDS]
+
+    def template_from_selection(self, kind: str) -> str | None:
+        """A 2D template from the selected curves (the body, or the boundary)."""
+        curves = self._selected_curves()
+        if not curves:
+            self.statusBar().showMessage("Select the curves of the body first", 5000)
+            return None
+        key = "body"
+        if kind == "butterfly":
+            key = "boundary"
+        name = self._run(lambda: self.session.create_template(kind, **{key: curves}))
+        if name:
+            log.info("template %s: %s", kind, name)
+            self._after_sketch(name)
+        return name
+
+    def auto_topology_from_selection(self) -> str | None:
+        curves = self._selected_curves()
+        if not curves:
+            self.statusBar().showMessage("Select the curves bounding the region first", 5000)
+            return None
+        name = self._run(lambda: self.session.auto_topology(curves))
+        if name:
+            log.info("automatic topology: %s", name)
+            self.scene.rebuild()
             self._after_sketch(name)
         return name
 

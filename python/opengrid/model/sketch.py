@@ -66,6 +66,7 @@ DEFAULT_SKETCH = {
     "fixed": (),
     "pinned": (),
     "relax": True,
+    "slide_limit": 0.5,
     "tolerance": 1e-8,
     "max_iterations": 4000,
     "outputs": (),
@@ -350,6 +351,7 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
     relax = merged["relax"]
     if not isinstance(relax, bool):
         issues.append(Issue(f"{where}: relax", f"must be true or false, got {relax!r}"))
+    slide_limit = _number(merged["slide_limit"], f"{where}: slide_limit", issues, True)
     tolerance = _number(merged["tolerance"], f"{where}: tolerance", issues, True)
     iterations = _int(merged["max_iterations"], f"{where}: max_iterations", issues)
     if iterations is not None and iterations < 1:
@@ -381,6 +383,7 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
         "fixed": tuple(sorted(fixed)),
         "pinned": tuple(sorted(pinned)),
         "relax": relax,
+        "slide_limit": slide_limit,
         "tolerance": tolerance,
         "max_iterations": iterations,
         "outputs": tuple(sorted(outputs)),
@@ -570,10 +573,7 @@ def _scale(store, params) -> float:
 def _curve_candidates(curve, point) -> list[float]:
     t, _p, _d = curve.project(tuple(float(c) for c in point))
     out = [float(t)]
-    start = np.asarray(curve.eval(0.0))
-    end = np.asarray(curve.eval(1.0))
-    closed = float(np.linalg.norm(start - end)) <= 1e-9 * max(1.0, float(np.max(np.abs(start))))
-    if closed and (t <= 1e-9 or t >= 1.0 - 1e-9):
+    if _closed(curve) and (t <= 1e-9 or t >= 1.0 - 1e-9):
         out = [0.0, 1.0]
     return out
 
@@ -627,7 +627,7 @@ def place_vertices(store, params: dict, lattice: Lattice, drawn=None) -> Placeme
             curve = store.geometry(on_curves[0])
             t, p, _d = curve.project(tuple(point))
             positions[v] = np.asarray(p)
-            if t <= 1e-9 or t >= 1.0 - 1e-9:
+            if (t <= 1e-9 or t >= 1.0 - 1e-9) and not _closed(curve):
                 classes.append("fixed")
             else:
                 classes.append("curve")
@@ -648,25 +648,42 @@ def place_vertices(store, params: dict, lattice: Lattice, drawn=None) -> Placeme
     return Placement(positions, classes, curve_of, issues, warnings)
 
 
-def _edge_params(curve, pa, pb) -> tuple[float, float]:
-    """Curve parameters of an edge's ends (for a closed curve: the pair whose arc contains the
-    projection of the edge's midpoint, the shorter one when both do)."""
+def _closed(curve) -> bool:
+    start = np.asarray(curve.eval(0.0))
+    end = np.asarray(curve.eval(1.0))
+    return float(np.linalg.norm(start - end)) <= 1e-9 * max(1.0, float(np.max(np.abs(start))))
+
+
+def _edge_pieces(curve, pa, pb) -> list[tuple[float, float]]:
+    """Pieces (t0, t1) of the curve along an edge from pa to pb: one piece; on a closed curve
+    the arc that contains the projection of the edge's midpoint - across the curve's seam
+    (two pieces) when needed."""
     ta = _curve_candidates(curve, pa)
     tb = _curve_candidates(curve, pb)
     tm = float(curve.project(tuple(0.5 * (np.asarray(pa) + np.asarray(pb))))[0])
-    best = (ta[0], tb[0])
+    best = None
     best_score = math.inf
     for a in ta:
         for b in tb:
             if a == b:
                 continue
-            score = abs(b - a)
-            if not min(a, b) - 1e-12 <= tm <= max(a, b) + 1e-12:
-                score += 2.0
-            if score < best_score:
+            if min(a, b) - 1e-12 <= tm <= max(a, b) + 1e-12 and abs(b - a) < best_score:
                 best = (a, b)
-                best_score = score
-    return best
+                best_score = abs(b - a)
+    if best is not None:
+        return [best]
+    a = ta[0]
+    b = tb[0]
+    if not _closed(curve) or a == b:
+        return [(a, b)]
+    # Across the seam: from a away from b to the curve's end, then on to b.
+    if a < b:
+        return [(a, 0.0), (1.0, b)]
+    return [(a, 1.0), (0.0, b)]
+
+
+def _pieces_length(curve, pieces) -> float:
+    return sum(curve.length_between(min(t0, t1), max(t0, t1)) for t0, t1 in pieces)
 
 
 # ------------------------------------------------------------------------------ generation
@@ -707,14 +724,28 @@ def _family_dimensions(store, params, lattice, placement) -> tuple[dict, list[Is
             length = float(np.linalg.norm(pb - pa))
             if key in curves:
                 curve = store.geometry(curves[key])
-                t0, t1 = _edge_params(curve, pa, pb)
-                length = curve.length_between(min(t0, t1), max(t0, t1))
+                length = _pieces_length(curve, _edge_pieces(curve, pa, pb))
             longest = max(longest, length)
         points = max(2, math.ceil(longest / params["spacing"] - 1e-9) + 1)
         for key in keys:
             out[key] = points
         del root
     return out, issues
+
+
+def _along_extrusions(store, surfaces, direction) -> bool:
+    """Whether every surface is extruded along ``direction``: the edge between them is then
+    the straight line they share."""
+    d = np.asarray(direction, dtype=float)
+    d = d / np.linalg.norm(d)
+    for surface in surfaces:
+        entity = store.get(surface)
+        if entity.kind != "extruded_surface":
+            return False
+        e = np.asarray(entity.params["direction"], dtype=float)
+        if abs(abs(float(d @ e)) / float(np.linalg.norm(e)) - 1.0) > 1e-9:
+            return False
+    return True
 
 
 def _reverse_distribution(d: dict) -> dict:
@@ -791,12 +822,12 @@ def plan(
             raise ValidationError([Issue(f"sketch edge {key}", "has coincident vertices")])
         if key in curves:
             curve = store.geometry(curves[key])
-            t0, t1 = _edge_params(curve, pa, pb)
-            if t0 == t1:
+            pieces = [(t0, t1) for t0, t1 in _edge_pieces(curve, pa, pb) if t0 != t1]
+            if not pieces:
                 raise ValidationError(
                     [Issue(f"sketch edge {key}", "both vertices are at one point of its curve")]
                 )
-            segments = ({"curve": curves[key], "t0": t0, "t1": t1},)
+            segments = tuple({"curve": curves[key], "t0": t0, "t1": t1} for t0, t1 in pieces)
         else:
             on = sorted(
                 {surfaces[f] for f in surfaces if key in lattice.face_edges(f)},
@@ -812,7 +843,7 @@ def plan(
                 points[-1] = tuple(pb.tolist())
                 items.append((line_key, "spline", {"points": tuple(points)}))
             else:
-                if lattice.dim == 3 and len(on) > 1:
+                if lattice.dim == 3 and len(on) > 1 and not _along_extrusions(store, on, pb - pa):
                     names = ", ".join(store.get(s).name for s in on)
                     warnings.append(
                         f"sketch edge {key} lies between surfaces {names} and has no curve: "
@@ -877,6 +908,7 @@ def plan(
             "walls": tuple(walls),
             "pinned": tuple(f"@c{a}-{b}" for a, b in sorted(pinned)),
             "joints": "fixed",
+            "slide_limit": params["slide_limit"],
             "tolerance": params["tolerance"],
             "max_iterations": params["max_iterations"],
         }
@@ -923,6 +955,7 @@ def plan(
             "walls": tuple(walls),
             "pinned": tuple(f"@{face_role[f]}" for f in sorted(pinned)),
             "joints": "fixed",
+            "slide_limit": params["slide_limit"],
             "tolerance": params["tolerance"],
             "max_iterations": params["max_iterations"],
         }
@@ -1143,6 +1176,17 @@ def _vertex_passes(store, sketch_id, lattice, placement, joints: dict, held: set
             x = image
             break
         size = _block_size(placement.positions, lattice)
+        far = [
+            float(np.linalg.norm(image[3 * k : 3 * k + 3] - x[3 * k : 3 * k + 3])) > 2.0 * h[v]
+            for k, v in enumerate(order)
+        ]
+        if any(far):
+            # Still far from the fixed point: the passes' slide limit clips the moves, so the
+            # map is not smooth there - damped plain steps until close.
+            history_x.clear()
+            history_r.clear()
+            x = x + 0.5 * (image - x)
+            continue
         x = _anderson_step(x, image, history_x, history_r, 0.25 * size[order])
     for k, v in enumerate(order):
         placement.positions[v] = joints[v](x[3 * k : 3 * k + 3])

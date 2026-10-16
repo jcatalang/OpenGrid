@@ -204,7 +204,7 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
 
-## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a-10d done)*
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, done: 10a-10e)*
 
 Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
 user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
@@ -363,7 +363,11 @@ the existing patches, exports and quality checks keep working on the result.
   - Singularity counts satisfy the index theorem (tested).
 - **GUI:** Topology → Templates menu, and an Automatic topology action (2D).
 - **Demo:** each template on its geometry, and automatic topology for the two-element airfoil
-  and the plate with holes.
+  and the plate with holes. *(Built: `examples/10e_templates_auto.py`. Nine templates meet
+  0.4; wing in box (C-H) reaches 0.25 - missed. Automatic topology: valid layouts for the
+  airfoil in a box, the plate with three holes and the bracket section; the two-element
+  airfoil fails (a five-cornered face in the slot) - missed; the index theorem holds in all
+  four. See OPEN_ISSUES.)*
 
 References: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
 ch. VI–VII (multiblock); W. A. Spekreijse, J. Comput. Phys. 118 (1995) 38–61 (irregular points);

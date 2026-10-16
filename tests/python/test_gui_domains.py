@@ -94,7 +94,8 @@ def test_cancel_smoothing(window, qtbot):
         name="ring",
     )
     assert window.run_smoother("ring")
-    qtbot.waitUntil(lambda: window.smoother_dock._progress.iteration > 3, timeout=10000)
+    # Cancel at once: this small domain can reach round-off within a few milliseconds, before
+    # a cancel that waits for some iterations arrives (a race seen under load).
     window.smoother_dock.cancel()
     qtbot.waitUntil(lambda: not window.smoother_dock.running, timeout=10000)
     assert "cancelled" in window.smoother_dock.status.text()

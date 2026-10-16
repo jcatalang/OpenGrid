@@ -92,6 +92,9 @@ GROUPS = [
             "sketch_suggestions",
             "accept_sketch_suggestions",
             "assign_sketch_geometry",
+            "create_template",
+            "auto_topology",
+            "cross_field",
         ],
     ),
     (

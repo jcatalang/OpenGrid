@@ -166,14 +166,33 @@ while it is in a group.
 og.import_cad("airfoil.step", name="cad", domains="none")
 og.delete(og.names("connector"))
 og.create_sketch(vertices, blocks, dimensions={(0, 1): 41, (1, 2): 31}, relax=False, name="c")
-og.assign_sketch_geometry("c", og.names("nurbs"))      # curves near the sketch's edges
+og.assign_sketch_geometry("c", og.names("nurbs"))  # curves near the sketch's edges
 og.edit_sketch("c", walls={(1, 2): 1e-3, (0, 1): 2e-3}, relax=True)  # (0, 1): a wake cut
-print(og.sketch_report("c"))                            # where each vertex went
+print(og.sketch_report("c"))  # where each vertex went
 og.smooth_group("c-group")
-og.move_handle("c", "vertices", 9, (0.8, 0.65))         # as a mouse drag
+og.move_handle("c", "vertices", 9, (0.8, 0.65))  # as a mouse drag
 ```
 The sketch owns `c-c0-1`, `c-d0`, ..., `c-group`; edit the sketch, not them. See
 `examples/10d_sketch_topology.py` (2D airfoil, sphere in a box, wing stub).
+
+### Templates and automatic topology
+```python
+og.create_template("cgrid", body=["upper", "lower"], wall=1e-3)  # 2D C-grid
+og.create_template(
+    "bump_channel",
+    bottom="bottom",
+    right="right",
+    top="top",
+    left="left",
+    blocks=(3, 1),
+    wall=5e-3,
+    length=1.0,
+)  # 3D, extruded
+layout = og.cross_field(curves)  # field, singularities, separatrices
+print(layout.field.index_sum(), layout.field.euler())
+og.auto_topology(curves)  # a sketch of four-sided blocks
+```
+See `examples/10e_templates_auto.py`.
 
 ## Threads
 Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by

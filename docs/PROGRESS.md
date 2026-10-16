@@ -848,6 +848,45 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10e — templates and automatic topology (2026-10-16) — approved (pre-authorised)
+
+### Built
+- `model/templates.py` + `Session.create_template`: 2D ogrid, butterfly, cgrid, hgrid,
+  body_in_channel; 3D pipe, cylinder_in_channel, bump_channel, wing_in_box (extruded) and
+  sphere_in_box. Sketch: edges across closed-curve seams, `slide_limit`.
+- `model/crossfield.py` + `Session.auto_topology` / `cross_field`: cross field, singularities,
+  index theorem, separatrices, block decomposition into a sketch.
+- GUI: Topology -> Template: O-grid / C-grid / butterfly from the selected curves, Automatic
+  topology (2D) from the selected curves.
+- Demo `examples/10e_templates_auto.py`; tests `tests/python/test_templates.py`.
+- Test fix: `test_cancel_smoothing` cancels at once (the small domain could reach round-off
+  before a delayed cancel: a timing race, failing about every second full run).
+
+### Results
+| Template | Blocks | min scaled Jacobian | Target 0.4 |
+|---|---|---|---|
+| O-grid (ellipse) | 4 | 0.953 | met |
+| Butterfly (disk) | 5 | 0.864 | met |
+| C-grid (NACA 0012) | 12 | 0.430 | met |
+| H-grid (bump channel) | 3 | 0.989 | met |
+| Body in channel (cylinder) | 12 | 0.782 | met |
+| Pipe (3D) | 5 | 0.864 | met |
+| Cylinder in channel (3D) | 12 | 0.673 | met |
+| Bump channel (3D) | 3 | 0.993 | met |
+| Wing in box, C-H (3D) | 12 | 0.249 | **missed** |
+| Sphere in box (3D) | 32 | 0.525 | met |
+
+| Automatic topology | Singularities | Index sum = Euler | Blocks (min SJ) |
+|---|---|---|---|
+| Airfoil in a box | 2 x -1/4 | 0 = 0 | 6 (0.995) |
+| Two-element airfoil | 4 x -1/4 | -1 = -1 | **failed**: a face in the slot has 5 corners |
+| Plate with three holes | 12 x -1/4 | -2 = -2 | 32 (0.706) |
+| Bracket section | 4 x -1/4, 4 x +1/4 | 0 = 0 | 24 (0.131) |
+
+### Verified
+- `pytest` +21 (`test_templates.py`; the two-element case is a strict xfail) -> 349 passed;
+  ruff, format, ternary check, API docs; demos 10d and 10e run (no C++ changes).
+
 ## Phase 10d — sketch topology (2026-10-16) — approved (pre-authorised)
 
 ### Built

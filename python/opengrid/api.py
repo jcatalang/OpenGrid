@@ -714,6 +714,59 @@ class Session:
             changes["surfaces"] = surfaces
         return self.edit_sketch(name, **changes)
 
+    def create_template(self, kind: str, name: str | None = None, **options) -> str:
+        """A topology template (opengrid.model.templates): the far-field geometry it needs and
+        a sketch with no user-placed vertices. 2D: ``"ogrid"`` (body, radius, blocks,
+        radial_points, wall), ``"butterfly"`` (boundary, core, radial_points), ``"cgrid"``
+        (body with a sharp trailing edge, radius, downstream, ring, radial_points=(inner,
+        outer), wall, wake), ``"hgrid"`` (bottom, right, top, left, blocks=(nx, ny),
+        normal_points, wall, wall_sides), ``"body_in_channel"`` (body, bottom, right, top,
+        left, margin, radial_points, wall). 3D: ``"pipe"``, ``"cylinder_in_channel"``,
+        ``"bump_channel"``, ``"wing_in_box"`` (the 2D template's options plus ``length`` and
+        ``span_points``: extruded along z) and ``"sphere_in_box"`` (center, radius, box, cube,
+        points, radial_points, outer_points, wall). All take ``spacing`` (default: a
+        twentieth of the median boundary edge) and ``relax``. One undo step; returns the
+        sketch."""
+        from opengrid.model.templates import create_template
+
+        kwargs = dict(options)
+        kwargs["name"] = name
+        return self._sketch_command(
+            "create_template", create_template, f"Template {kind}", (kind,), kwargs
+        )
+
+    def auto_topology(
+        self,
+        curves,
+        size: float | None = None,
+        spacing: float | None = None,
+        relax: bool = False,
+        name: str | None = None,
+    ) -> str:
+        """Automatic 2D block topology (opengrid.model.crossfield): a cross field of the region
+        bounded by the closed loops of ``curves`` (triangulated with mesh ``size``, default
+        1/200 of their total length), its separatrices traced from the singularities and
+        corners to the boundary (created as polylines ``separatrix-<k>``) and a sketch whose
+        blocks are the four-sided faces they cut (point counts from ``spacing``). One undo
+        step; returns the sketch (edit it like any other)."""
+        from opengrid.model.crossfield import auto_topology
+
+        kwargs = {"curves": curves, "size": size, "spacing": spacing, "relax": relax, "name": name}
+        kwargs = {k: v for k, v in kwargs.items() if v is not None and not (k == "relax" and not v)}
+        return self._sketch_command(
+            "auto_topology", auto_topology, "Automatic topology", (), kwargs
+        )
+
+    def cross_field(self, curves, size: float | None = None):
+        """The cross field of a planar region and its separatrices, without creating anything:
+        a Layout with ``field`` (points, triangles, complex values z = exp(4 i theta),
+        corners, singularities, ``index_sum()`` and ``euler()``) and ``separatrices``."""
+        from opengrid.model.crossfield import trace_layout
+
+        if isinstance(curves, str):
+            curves = [curves]
+        return trace_layout(self.store, [self.store.get(c).id for c in curves], size)
+
     def _sketch(self, name: str):
         entity = self.store.get(name)
         if entity.kind != "sketch":

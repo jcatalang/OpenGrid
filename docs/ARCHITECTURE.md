@@ -1063,6 +1063,39 @@ segment, so derivative jumps at knots never cost accuracy.
   assigned; `assign_sketch_geometry` (GUI: "assign selected geometry") assigns the given
   geometry with ends within 20 % and the middle within 50 % (chords of curves sag).
 
+### Templates and automatic topology (Phase 10e)
+- **Templates** (`model/templates.py`, `Session.create_template(kind, ...)`, one command):
+  each builds the far-field geometry it needs (arcs, lines, extruded surfaces, translated end
+  curves) and a sketch. 2D: ogrid, butterfly, cgrid, hgrid, body_in_channel; boundary loops
+  are ordered counter-clockwise and cut at their curve junctions plus points where rays from
+  the centroid meet them; boundary edges are assigned to the curve holding both ends.
+  Templates fix the boundary vertices where sliding has a neutral mode or drifts (circles,
+  airfoil sides); the C-grid clusters body, ring and far-field edges alike at the leading and
+  trailing edges (TFI starts nearly orthogonal) and sets body point counts from the body's own
+  lengths. 3D: pipe, cylinder_in_channel, bump_channel, wing_in_box extrude the 2D template -
+  relaxed and smoothed in 2D first (a temporary sketch in the same transaction, removed again)
+  - along z: faces on extruded surfaces, edges at both ends on the curves and their
+  translated copies, no 3D vertex passes, end-plane slide limit 1.5 (0.5 for the C-grid,
+  which folds at 1.5); sphere_in_box builds the 32-block cubed-sphere layout.
+- **Sketch extensions:** an edge on a closed curve may run across its seam (a two-piece
+  connector); a seam point is no curve end; `slide_limit` passed to the group.
+- **Automatic topology** (`model/crossfield.py`, `Session.auto_topology`, `cross_field`):
+  triangulation with boundary nodes placed every 3 degrees of tangent turning (so 4 theta is
+  resolved at leading edges); boundary values exp(4 i theta) from the curves' own tangents,
+  corners only at curve junctions (exact tangents; seams of smooth closed curves excluded);
+  harmonic interpolation (CG) and a unit-length smoothing; singularities by the winding of
+  arg z around triangles; index check (Poincare-Hopf). Sources: corners and junctions;
+  singularities within 4 local mesh sizes of the boundary snap onto it - a -1/4 joins the
+  nearest junction (e.g. the leading edge's pair: an H-cut there), a +1/4 becomes a convex
+  corner mark (no separatrix, but a vertex); close interior ones merge. Interior sources find
+  their directions on a circle (a cross direction radial); boundary sources take n - 1 - 4 I
+  evenly spaced directions, start straight, then follow the field. Streamlines (midpoint rule,
+  local step) end on the boundary (exact curve point), at a source, or at a junction they land
+  next to; duplicates (the same line from both ends) are dropped. The network of 10c cuts the
+  region; marks split their edges; a face's corners are its vertices except seams; each face
+  must have four (else reported by position). The sketch's interior edges are assigned to the
+  separatrix polylines.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

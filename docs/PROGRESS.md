@@ -848,6 +848,20 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11c — coarse-to-fine smoothing (2026-10-16) — assessed, not built
+
+- Prototype (scratch, not in the code): the coarse grid is every other node of each block of
+  the merged layout (all interval counts even), smoothed with the same settings; its
+  displacement is interpolated (trilinear in index space) onto the fine starting grid.
+- 1M-cell ball (10b, 65 x 33 points per block): cold 328 iterations / 21.0 s; coarse 134k
+  nodes, not converged in 2000 iterations (17.0 s, stall guard fired twice); fine 218
+  iterations / 13.5 s with the cold run's absolute stopping level; total 30.5 s. The result
+  differs from the cold one by 9.6e-3 (domain size 1): sliding nodes' limits are relative to
+  their starting positions. 33-point ball: cold and sequenced both run to 2000 iterations at a
+  residual floor (relative 1.5e-6).
+- Decision: not built (target 2x). The iteration counts are set by a residual floor and
+  the slide limits rather than by smooth error modes; see OPEN_ISSUES.
+
 ## Phase 11b — CPU performance (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

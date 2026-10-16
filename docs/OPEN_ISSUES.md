@@ -253,6 +253,13 @@ history). Phase tags show where each item came from.
 - **Group default wall spacing** [10a]: None keeps the initial first-cell height at each node
   (the single-domain smoother interpolates it from the side boundaries).
 - **Planar 2D groups** [10a]: 2D groups need domains in a z = const plane (blocks: 10b).
+- **Coarse-to-fine smoothing not built** [11c]: grid sequencing was prototyped on the 1M-cell
+  ball (every other node, displacement interpolated to the fine grid): 1.5x fewer fine
+  iterations at best, a coarse level that stalls itself, and a different result (slide limits
+  are relative to the start). Group runs often end at a residual floor (relative ~1e-6, e.g.
+  the 33-point ball runs to the 2000-iteration limit) that no coarse start removes; likely
+  sliding nodes clamped at their slide limits. Neither a stagnation criterion nor multigrid
+  was built.
 - **3D speed target missed** [10b, 11b]: a 1M-cell group of blocks takes 22 s after 11b
   (27 s before; target 10 s): ~330 iterations at ~63 ms, half of it in the line sweeps
   (gathers along strided directions, 21 colours with a barrier each) and a quarter in the

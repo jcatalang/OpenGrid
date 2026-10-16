@@ -408,7 +408,13 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
 - Grid sequencing (smooth a coarsened copy, interpolate, finish on the fine grid) and/or
   multigrid for the group smoothers.
 - **Acceptance:** at least 2x fewer fine-grid iterations on the 1M-cell ball (10b) and the
-  wing stub, same converged grid (to the tolerance).
+  wing stub, same converged grid (to the tolerance). *(Assessed with a prototype, not built:
+  on the 1M-cell ball the fine level needed 218 instead of 328 iterations with the same
+  absolute stopping level (1.5x), but the coarse level itself stalled (2000 iterations, 17 s;
+  total 30.5 s against 21.0 s), and the grid moved by 1 % of the domain because slide limits
+  are measured from the starting positions. A smaller ball (n = 33) stalls at a residual
+  floor (relative 1.5e-6 after 2000 iterations) with or without the coarse start. The
+  iteration counts are set by that floor, not by smooth error modes.)*
 
 ### 11d — GPU assessment (and backend if it pays)
 - Precision study: the elliptic update in float32, in double-float (two float32) positions with

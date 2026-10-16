@@ -43,6 +43,8 @@ add_library(og_core STATIC
   src/structured/surface_elliptic.cpp
   src/structured/hyperbolic.cpp
   src/structured/wall_layers.cpp
+  src/gpu/gpu.cpp
+  src/gpu/multiblock3d_sweeps.cpp
   src/io/cgns_structured.cpp)
 add_library(OpenGrid::core ALIAS og_core)
 
@@ -65,6 +67,20 @@ if(OG_WITH_CGNS)
     message(STATUS "OpenGrid: CGNS export enabled")
   else()
     message(WARNING "OpenGrid: CGNS library not found; CGNS export disabled")
+  endif()
+endif()
+
+# Optional OpenCL for the GPU sweeps (core/include/opengrid/core/gpu/gpu.hpp): the macOS
+# framework, or an ICD loader elsewhere (conda-forge ocl-icd / khronos-opencl-icd-loader).
+if(OG_WITH_OPENCL)
+  find_package(OpenCL)
+  if(OpenCL_FOUND)
+    target_link_libraries(og_core PRIVATE OpenCL::OpenCL)
+    target_compile_definitions(og_core PRIVATE OG_WITH_OPENCL CL_TARGET_OPENCL_VERSION=120
+                                               CL_SILENCE_DEPRECATION)
+    message(STATUS "OpenGrid: OpenCL ${OpenCL_VERSION_STRING} enabled (GPU sweeps)")
+  else()
+    message(STATUS "OpenGrid: OpenCL not found; GPU sweeps disabled")
   endif()
 endif()
 

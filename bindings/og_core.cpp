@@ -29,6 +29,7 @@
 #include "opengrid/core/geom/line.hpp"
 #include "opengrid/core/geom/nurbs.hpp"
 #include "opengrid/core/geom/polyline.hpp"
+#include "opengrid/core/gpu/gpu.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality2d.hpp"
 #include "opengrid/core/quality/quality_cells.hpp"
@@ -212,6 +213,54 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
   m.def("set_thread_count", &og::set_thread_count, nb::arg("n"),
         "Set the number of threads of parallel loops (results do not depend on it).");
   m.def("openmp_enabled", &og::openmp_enabled, "Whether the core was built with OpenMP.");
+  m.def(
+      "gpu_info",
+      [] {
+        const og::GpuInfo info = og::gpu_info();
+        std::map<std::string, std::string> out;
+        out["built"] = std::to_string(static_cast<int>(info.built));
+        out["available"] = std::to_string(static_cast<int>(info.available));
+        out["platform"] = info.platform;
+        out["device"] = info.device;
+        out["version"] = info.version;
+        out["compute_units"] = std::to_string(info.compute_units);
+        out["float64"] = std::to_string(static_cast<int>(info.float64));
+        out["reason"] = info.reason;
+        return out;
+      },
+      "GPU compute (OpenCL): built, available (a device passed the self-test), platform, "
+      "device, version, compute_units, float64, reason (all strings).");
+  m.def(
+      "set_gpu_mode",
+      [](const std::string& mode) {
+        if (mode == "off") {
+          og::set_gpu_mode(og::GpuMode::Off);
+        } else if (mode == "auto") {
+          og::set_gpu_mode(og::GpuMode::Auto);
+        } else if (mode == "on") {
+          og::set_gpu_mode(og::GpuMode::On);
+        } else {
+          throw std::invalid_argument("GPU mode must be 'off', 'auto' or 'on'");
+        }
+      },
+      nb::arg("mode"),
+      "GPU use: 'off', 'auto' (devices that passed the self-test, grids with at least "
+      "gpu_min_nodes nodes) or 'on'.");
+  m.def(
+      "gpu_mode",
+      [] {
+        const og::GpuMode mode = og::gpu_mode();
+        if (mode == og::GpuMode::Off) {
+          return std::string("off");
+        }
+        if (mode == og::GpuMode::On) {
+          return std::string("on");
+        }
+        return std::string("auto");
+      },
+      "The GPU mode: 'off', 'auto' or 'on'.");
+  m.attr("gpu_min_nodes") = og::kGpuMinNodes;
+  m.attr("gpu_tolerance") = og::kGpuTolerance;
 
   nb::class_<og::Curve>(m, "Curve", "Parametric curve x(t), t in [0, 1].")
       .def(

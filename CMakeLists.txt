@@ -8,6 +8,7 @@ option(OG_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(OG_WITH_CGNS "Build CGNS export (needs the CGNS library)" ON)
 option(OG_WITH_OCCT "Build STEP/IGES import (needs OpenCASCADE; skipped if not found)" ON)
 option(OG_WITH_OPENMP "Parallel loops with OpenMP (serial if OpenMP is not found)" ON)
+option(OG_WITH_OPENCL "GPU sweeps with OpenCL (skipped if OpenCL is not found)" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

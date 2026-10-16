@@ -205,6 +205,14 @@ og.auto_topology(curves)  # a sketch of four-sided blocks
 ```
 See `examples/10e_templates_auto.py`.
 
+## GPU (experimental)
+```python
+opengrid.gpu_info()   # {"available": True, "device": "Apple M1 Max", ...} after a self-test
+opengrid.set_gpu("on")   # 3D group smoothing: line sweeps on the GPU; "auto": >= 200k nodes
+```
+Off by default: on the 1M-cell ball it is 1.2x faster per iteration and stops at a relative
+residual of 1e-5 (the CPU at 1e-6); see docs/PROGRESS.md (11d).
+
 ## Threads
 Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by
 default, or `OMP_NUM_THREADS`), `opengrid.set_threads(n)` changes it. Results never depend on

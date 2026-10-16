@@ -1166,6 +1166,22 @@ segment, so derivative jumps at knots never cost accuracy.
   near its memory-traffic floor), sliding projections 27 %, coefficients 7 %. 1M-cell ball:
   26.2 -> 22.3 s (line sweeps 51 %, Anderson 27 %).
 
+### GPU compute (Phase 11d, experimental)
+- `core/src/gpu/gpu.cpp` (runtime: device, kernels, self-test, mode), `kernels.hpp` (OpenCL C:
+  float-float `ffdiff` / `ffadd`, `coefficients`, `relax_lines`), `multiblock3d_sweeps.cpp`
+  (the 3D group smoother's sweeps on the device). OpenCL 1.2 only (Apple's implementation is
+  frozen there), optional at build time (`OG_WITH_OPENCL`), no float64 on the device: positions
+  as float-float, everything else float32 in delta form (tools/gpu/precision_study.py: 2e-7 of
+  the local cell at a 1e-6 wall; plain float32 6 % off). `og_core` links OpenCL privately;
+  without it the API reports "built without OpenCL".
+- In `smooth_multiblock_3d`, when `use_gpu(n)`: the topology (regular nodes' 27-slot stencils,
+  lines, colours) is uploaded once; each iteration the CPU computes the wall sources per
+  regular node, the device runs the coefficients and the line colours, and the positions come
+  back (mapped, float-float <-> float64 on the CPU threads); the rest of the iteration is
+  unchanged. Results are deterministic on one device, not bit-identical to the CPU's.
+- Measured (PROGRESS 11d): 1.2x per iteration on the 1M-cell ball and slower to the same
+  accuracy, so the mode defaults to off.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

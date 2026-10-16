@@ -1,0 +1,8 @@
+GPU compute (OpenCL)
+  Apple M1 Max (Apple, OpenCL 1.2, 32 compute units, float64: False); self-test passed
+
+1M-cell ball (10b), 10 CPU threads:
+  CPU               21.5 s, 328 iterations (66 ms each), final relative residual 9.9e-07
+  GPU line sweeps   15.6 s, 290 iterations (54 ms each), final relative residual 1.0e-05
+  GPU grid vs CPU grid: at most 7.1e-02 of the local cell size (the GPU stops at a relative residual of 1e-05, the CPU at 1e-6)
+  speed-up 1.38x - the GPU path is experimental and off by default (Anderson mixing and sliding projections stay on the CPU)

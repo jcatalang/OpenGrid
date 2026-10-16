@@ -427,7 +427,12 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   differences are accurate to 2e-7 of the local cell height at a 1e-6 wall, plain float32 is
   off by 6 %. Kernels on a 1M-node block: GPU 7.4x (line relaxation) and 9x (point Jacobi)
   faster than the same kernels in float64 on the 10 CPU threads; launch overhead cancels the
-  gain below ~200k nodes. Decision: build the backend for large 3D groups.)*
+  gain below ~200k nodes. Decision: build the backend for large 3D groups.)* *(Built
+  (`core/src/gpu`, `examples/11d_gpu.py`): detection, self-test, modes, the line sweeps of
+  the 3D group smoother on the GPU. Measured on the 1M-cell ball: device sweeps 2.2x faster
+  than the CPU's, the whole iteration 1.2x (Anderson and sliding projections stay on the
+  CPU), and the GPU colouring needs more iterations - to the CPU's accuracy the GPU run is
+  slower. Experimental, off by default.)*
 
 ### 11e — High-order elements (CG / DG)
 - Curved high-order elements from the meshes: quadrilaterals and hexahedra of order p from the

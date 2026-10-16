@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
+#include "opengrid/core/gpu/gpu.hpp"
 #include "opengrid/core/structured/wall_layers.hpp"
 #include "opengrid/core/util/anderson.hpp"
 #include "opengrid/core/util/parallel.hpp"
@@ -812,6 +814,20 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
   };
   // Coefficients from the neighbours' positions given by `pos` (an offset -> point accessor:
   // the stored neighbours, or mirror images across a symmetry plane).
+  // Wall sources at node g along its frame axes (sum over the walls whose lines reach it).
+  auto source_of = [&](std::size_t g) {
+    std::array<double, 3> src{};
+    for (const WallReach& r : reach[g]) {
+      const auto& s = wall_s[r.wall];
+      src[static_cast<std::size_t>(dir_axis(r.normal))] += dir_sign(r.normal) * s[0] * r.weight;
+      for (int m = 0; m < 2; ++m) {
+        const int t = r.tangent[static_cast<std::size_t>(m)];
+        src[static_cast<std::size_t>(dir_axis(t))] +=
+            dir_sign(t) * s[static_cast<std::size_t>(m) + 1] * r.weight;
+      }
+    }
+    return src;
+  };
   auto coefficients_with = [&](std::size_t g, const auto& pos) {
     std::array<Vec3, 3> d;
     for (int m = 0; m < 3; ++m) {
@@ -825,16 +841,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     const double g23 = dot(d[1], d[2]);
     const std::array<double, 3> a = {g22 * g33 - g23 * g23, g11 * g33 - g13 * g13,
                                      g11 * g22 - g12 * g12};
-    std::array<double, 3> src{};
-    for (const WallReach& r : reach[g]) {
-      const auto& s = wall_s[r.wall];
-      src[static_cast<std::size_t>(dir_axis(r.normal))] += dir_sign(r.normal) * s[0] * r.weight;
-      for (int m = 0; m < 2; ++m) {
-        const int t = r.tangent[static_cast<std::size_t>(m)];
-        src[static_cast<std::size_t>(dir_axis(t))] +=
-            dir_sign(t) * s[static_cast<std::size_t>(m) + 1] * r.weight;
-      }
-    }
+    const std::array<double, 3> src = source_of(g);
     Coefficients c{};
     c.diag = 0.0;
     for (int m = 0; m < 3; ++m) {
@@ -1155,6 +1162,55 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
 
   auto updates = static_cast<double>(line_nodes.size() + irregular.size() + sliding.size());
   updates = std::max(updates, 1.0);
+  // GPU sweeps (gpu/gpu.hpp): coefficients and line relaxation on the device, in float32
+  // arithmetic on float-float positions; the run then converges at max(tolerance,
+  // kGpuTolerance). Everything else stays here.
+  std::unique_ptr<Multiblock3DSweeps> device;
+  double tolerance = options.tolerance;
+  std::vector<std::array<float, 3>> sources;
+  if (use_gpu(static_cast<std::int64_t>(n)) && !lines.empty() &&
+      std::cmp_less(n, std::numeric_limits<std::int32_t>::max())) {
+    try {
+      Multiblock3DTopology t;
+      t.nodes = n;
+      for (const std::size_t g : regular) {
+        t.regular.push_back(static_cast<std::int32_t>(g));
+        std::array<std::int32_t, 27> s{};
+        for (std::size_t q = 0; q < 27; ++q) {
+          s[q] = static_cast<std::int32_t>(topo[g].nb[q]);
+        }
+        t.stencil.push_back(s);
+      }
+      for (const Line& line : lines) {
+        t.line_offset.push_back(static_cast<std::int32_t>(line.offset));
+        t.line_size.push_back(static_cast<std::int32_t>(line.size));
+        t.line_end0.push_back(static_cast<std::int32_t>(line.end0));
+        t.line_end1.push_back(static_cast<std::int32_t>(line.end1));
+      }
+      for (std::size_t k = 0; k < line_nodes.size(); ++k) {
+        t.line_nodes.push_back(static_cast<std::int32_t>(line_nodes[k]));
+        t.line_prev.push_back(static_cast<std::int8_t>(line_prev[k]));
+        t.line_next.push_back(static_cast<std::int8_t>(line_next[k]));
+      }
+      for (const std::vector<std::size_t>& group : by_colour) {
+        std::vector<std::int32_t> ids;
+        ids.reserve(group.size());
+        for (const std::size_t l : group) {
+          ids.push_back(static_cast<std::int32_t>(l));
+        }
+        t.colours.push_back(std::move(ids));
+      }
+      device = std::make_unique<Multiblock3DSweeps>(t);
+      tolerance = std::max(tolerance, kGpuTolerance);
+      sources.resize(regular.size());
+      result.warnings.push_back("multiblock 3D: line sweeps on the GPU (" + device->device() +
+                                "; float32 arithmetic, converged at a relative residual of " +
+                                "at most 1e-5)");
+    } catch (const std::exception& error) {
+      device.reset();
+      result.warnings.push_back(std::string("multiblock 3D: GPU not used (") + error.what() + ")");
+    }
+  }
   double first_residual = 0.0;
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
     if (progress != nullptr && progress->cancelled()) {
@@ -1165,22 +1221,34 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       pack(before);
     }
     update_walls();
-    parallel_for(
-        0, static_cast<std::int64_t>(regular.size()),
-        [&](std::int64_t k) {
-          const std::size_t g = regular[static_cast<std::size_t>(k)];
-          frozen[g] = coefficients(g);
-          frozen[g].cross = cross_term(g, frozen[g]);
-        },
-        1024);
-    for (const std::vector<std::size_t>& group : by_colour) {
+    if (device) {
       parallel_for(
-          0, static_cast<std::int64_t>(group.size()),
+          0, static_cast<std::int64_t>(regular.size()),
           [&](std::int64_t k) {
-            const std::size_t l = group[static_cast<std::size_t>(k)];
-            line_sum[l] = relax_line(l);
+            const std::array<double, 3> s = source_of(regular[static_cast<std::size_t>(k)]);
+            sources[static_cast<std::size_t>(k)] = {
+                static_cast<float>(s[0]), static_cast<float>(s[1]), static_cast<float>(s[2])};
           },
-          4);
+          1024);
+      device->sweep(x, sources, options.omega, line_sum);
+    } else {
+      parallel_for(
+          0, static_cast<std::int64_t>(regular.size()),
+          [&](std::int64_t k) {
+            const std::size_t g = regular[static_cast<std::size_t>(k)];
+            frozen[g] = coefficients(g);
+            frozen[g].cross = cross_term(g, frozen[g]);
+          },
+          1024);
+      for (const std::vector<std::size_t>& group : by_colour) {
+        parallel_for(
+            0, static_cast<std::int64_t>(group.size()),
+            [&](std::int64_t k) {
+              const std::size_t l = group[static_cast<std::size_t>(k)];
+              line_sum[l] = relax_line(l);
+            },
+            4);
+      }
     }
     // Irregular nodes (Jacobi).
     parallel_for(
@@ -1393,7 +1461,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       }
     }
     result.iterations = iteration + 1;
-    if (residual <= options.tolerance * first_residual || residual <= 1e-13 * size ||
+    if (residual <= tolerance * first_residual || residual <= 1e-13 * size ||
         residual <= options.absolute_tolerance) {
       result.converged = true;
       break;

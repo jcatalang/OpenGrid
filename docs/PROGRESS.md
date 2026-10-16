@@ -848,6 +848,44 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11d — GPU backend, experimental (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `core/include/opengrid/core/gpu/gpu.hpp`, `core/src/gpu/` (optional `OG_WITH_OPENCL`, the
+  macOS framework or an ICD loader): device selection (the GPU with the most compute units),
+  kernels built once, a float-float self-test (a driver that reassociates fails it), modes
+  off / auto (>= 200k nodes) / on; `opengrid.gpu_info()`, `opengrid.set_gpu()`,
+  `opengrid.gpu_mode()`; the GUI logs the compute devices at start.
+- `Multiblock3DSweeps`: the coefficient pass and the line relaxation of the 3D group smoother
+  on the device (float-float positions, float32 delta form, `FP_CONTRACT OFF`); the device
+  colours lines that share nodes (8 colours on the 1M-cell ball instead of 21) and double
+  buffers positions; mapped buffers. Anderson mixing, sliding, irregular and wall updates stay
+  on the CPU; GPU runs stop at max(tolerance, 1e-5).
+- Demo `examples/11d_gpu.py`; tests `core/tests/test_gpu.cpp`, `tests/python/test_gpu.py`
+  (skipped without a device).
+
+### Results (M1 Max, 1M-cell ball)
+| | CPU | GPU line sweeps |
+|---|---|---|
+| sweeps per iteration | 36 ms | 16.6 ms (first version with the CPU colours: 22 ms) |
+| whole iteration | 64-66 ms | 54 ms |
+| run (tolerance 1e-6 / 1e-5) | 21.5 s, 328 iterations | 15.6 s, 290 iterations |
+| grid vs the CPU's | - | up to 7 % of the local cell size (stopped at 1e-5) |
+| to the CPU's accuracy | 328 iterations | floor 1.3e-6 (~570 iterations): slower than the CPU |
+
+- 10d wing stub (159k nodes, lines of ~9 nodes): GPU sweeps 4.1 ms per iteration = the CPU's
+  4.0 ms (latency-bound: ~1200 short lines per launch).
+- Decision: kept as an experimental option, off by default (it does not accelerate to the
+  same accuracy). What it would take: Anderson mixing on the device, a line solver with more
+  parallelism (parallel cyclic reduction, or structured per-block kernels with interface
+  exchange - where the benchmark's 7-9x comes from), and faster CAD projections of sliding
+  nodes (CPU-bound).
+
+### Verified
+- `ctest` +2 -> 147 (release and strict CI presets, OpenCL deprecation warnings silenced);
+  `pytest` +2; clang-tidy on the new and changed C++, ruff, format, ternary check; GPU vs CPU
+  agreement and repeatability tested on a sheared, wall-clustered box.
+
 ## Phase 11d (assessment) — GPU precision and speed (2026-10-16)
 
 Tools in `tools/gpu/` (not part of the package; `opencl_bench.py` needs pyopencl):

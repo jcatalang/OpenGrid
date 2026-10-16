@@ -38,6 +38,22 @@ from opengrid.validation import ValidationError
 
 log = logging.getLogger("opengrid")
 
+
+def compute_summary() -> str:
+    """One line on the compute devices: CPU threads and the GPU (OpenCL) if one passed the
+    self-test. Rendering is VTK's OpenGL on the system's GPU driver either way."""
+    text = f"Compute: {opengrid.threads()} CPU threads"
+    gpu = opengrid.gpu_info()
+    if gpu["available"]:
+        text += (
+            f"; GPU {gpu['device']} ({gpu['version'].strip()}, {gpu['compute_units']} compute "
+            f"units), experimental GPU smoothing {opengrid.gpu_mode()} (opengrid.set_gpu)"
+        )
+    else:
+        text += f"; no GPU compute ({gpu['reason']})"
+    return text
+
+
 SNAP_PIXELS = 10.0
 PICK_PIXELS = 8.0
 CLICK_MOVE_PIXELS = 4.0
@@ -122,6 +138,7 @@ class MainWindow(QMainWindow):
         logging.getLogger("opengrid").setLevel(logging.INFO)
         self._refresh_all()
         log.info("OpenGrid %s (core %s) started", opengrid.__version__, opengrid.core_version())
+        log.info("%s", compute_summary())
 
     # ------------------------------------------------------------------ setup
     def _create_viewport(self, off_screen: bool):

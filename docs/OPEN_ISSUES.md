@@ -260,6 +260,14 @@ history). Phase tags show where each item came from.
   the 33-point ball runs to the 2000-iteration limit) that no coarse start removes; likely
   sliding nodes clamped at their slide limits. Neither a stagnation criterion nor multigrid
   was built.
+- **GPU smoothing does not pay yet** [11d]: the experimental OpenCL path (`opengrid.set_gpu`,
+  off by default) runs the 3D group smoother's line sweeps 2.2x faster than the CPU on the 1M-
+  cell ball, but the whole iteration only 1.2x (Anderson mixing and sliding projections stay
+  on the CPU), its colouring converges more slowly (Jacobi within a colour), and its float32
+  residual floor (~1.3e-6) is above the default 1e-6: GPU runs stop at 1e-5 and differ from
+  the CPU grid by up to 7 % of the local cell size. Short lines (the 10d wing stub: ~9 nodes)
+  are latency-bound on the device (no gain). OpenCL is deprecated on macOS (Metal is the
+  native API); only the 3D group smoother has a GPU path; tested on one device (M1 Max).
 - **3D speed target missed** [10b, 11b]: a 1M-cell group of blocks takes 22 s after 11b
   (27 s before; target 10 s): ~330 iterations at ~63 ms, half of it in the line sweeps
   (gathers along strided directions, 21 colours with a barrier each) and a quarter in the

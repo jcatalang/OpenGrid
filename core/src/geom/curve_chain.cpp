@@ -135,8 +135,7 @@ double CurveChain::project_param(const Vec3& p, double lo, double hi) const {
         t_best = t;
       }
     }
-    const double t =
-        curve.polish_projection(p, t_best, std::min(ta, tb), std::max(ta, tb));
+    const double t = curve.polish_projection(p, t_best, std::min(ta, tb), std::max(ta, tb));
     const double d = distance(curve.eval(t), p);
     if (d < best_d) {
       best_d = d;

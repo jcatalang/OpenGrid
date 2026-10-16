@@ -14,6 +14,7 @@
   {"generator": {"algorithm": "advancing_front", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.15, "inflation": {"connectors": [3, 4], "first_height": 1e-05, "growth_rate": 1.2, "layers": 60, "total_thickness": null, "transition": true}, "max_points": 2000000, "max_size": null, "min_angle": 25.0, "refine": true, "smoothing": "angle_based", "smoothing_iterations": 5, "sources": []}, "id": 7, "loops": [[{"connector": 6, "reversed": false}], [{"connector": 3, "reversed": false}, {"connector": 4, "reversed": true}]], "name": "flow", "surface": null, "type": "unstructured_domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 10,
  "patches": [

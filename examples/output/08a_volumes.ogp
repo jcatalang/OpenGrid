@@ -88,6 +88,7 @@
   {"edges": [[{"connector": 70, "reversed": false}], [{"connector": 63, "reversed": false}], [{"connector": 75, "reversed": true}], [{"connector": 54, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 78, "name": "chan-zmax", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 86,
  "patches": [

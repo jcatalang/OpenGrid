@@ -33,10 +33,12 @@
   {"edges": [[{"connector": 4, "reversed": false}], [{"connector": 15, "reversed": false}], [{"connector": 21, "reversed": true}], [{"connector": 13, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": []}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 27, "name": "pipe-1", "surface": null, "type": "domain"},
   {"edges": [[{"connector": 6, "reversed": false}], [{"connector": 17, "reversed": false}], [{"connector": 23, "reversed": true}], [{"connector": 15, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": []}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 28, "name": "pipe-2", "surface": null, "type": "domain"},
   {"edges": [[{"connector": 8, "reversed": false}], [{"connector": 11, "reversed": false}], [{"connector": 25, "reversed": true}], [{"connector": 17, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": []}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 29, "name": "pipe-3", "surface": null, "type": "domain"},
-  {"edges": [[{"connector": 19, "reversed": false}], [{"connector": 21, "reversed": false}], [{"connector": 23, "reversed": false}], [{"connector": 25, "reversed": false}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": []}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 30, "name": "pipe-core", "surface": null, "type": "domain"},
-  {"acceleration": 10, "domains": [26, 27, 28, 29, 30], "id": 31, "max_iterations": 2000, "name": "pipe-group", "omega": 1.0, "slide": "auto", "tolerance": 1e-06, "type": "smoothing_group", "walls": []}
+  {"edges": [[{"connector": 19, "reversed": false}], [{"connector": 21, "reversed": false}], [{"connector": 23, "reversed": false}], [{"connector": 25, "reversed": false}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "laplace", "max_iterations": 2000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": []}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 30, "name": "pipe-core", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [
+  {"acceleration": 20, "blocks": [], "domains": [26, 27, 28, 29, 30], "id": 31, "max_iterations": 2000, "name": "pipe-group", "omega": 1.0, "slide": "auto", "tolerance": 1e-06, "type": "smoothing_group", "walls": []}
+ ],
  "name_counters": {},
  "next_id": 32,
  "patches": [],

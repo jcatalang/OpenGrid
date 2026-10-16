@@ -848,6 +848,40 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10b — multi-block smoothing groups, 3D (2026-10-15) — approved (pre-authorised)
+
+### Built
+- C++ `structured/multiblock_elliptic3d.cpp` + binding `_core.smooth_multiblock_3d`: one
+  elliptic smoothing over the hexahedra of several blocks (floating interfaces, edges and
+  corners; irregular edges; sliding on surfaces and curves; wall control along grid lines;
+  line relaxation across blocks; thread-independent).
+- Python `model/groups3d.py`: groups of six-face blocks (`create_smoothing_group(blocks=...)`,
+  face walls and sliding faces), face roles, planes for planar sliding faces, routing of block
+  grids and face displays, block topology edits keep groups; project section `groups`.
+- GUI: Smoothing group from selected blocks (selected faces become walls), blocks in the
+  property panel, a selected block runs its group in the dock.
+- Anderson accelerator: fused passes (bitwise identical results, ~2x faster on big states).
+- Group default Anderson depth 20 (was 10): 2D 68k O-grid 575 -> 436 iterations, 1M-cell
+  ball ~800 -> 320.
+- Demo `examples/10b_multiblock_3d.py`: sphere in a box (CGNS export), the solid ball, a
+  1M-cell timing.
+
+### Results
+| Case | Per block | Smoothing group |
+|---|---|---|
+| Split sphere block (vs unsplit) | — | equal to 1e-9 (point sets) |
+| Ball (core + 6 shells): min scaled Jacobian | 0.577 | 0.750 |
+| Ball: interface kink | — | 0.52° (away from irregular edges and face edges) |
+| Ball: nodes on the sphere | — | 2.2e-16 |
+| Sphere in a box: first-cell height on the sphere | — | 0.01000 .. 0.01000 |
+| Sphere in a box: min scaled Jacobian | 0.577 | 0.327 (box corners: three blocks in one 90° corner) |
+| Sphere in a box: interface kink | — | 31° with wall control (inherited from the cubed sphere's own 36° grid turns at its seams); 1.5° without |
+| 1M-cell ball | — | 328 iterations, 27 s (target 10 s **missed**) |
+
+### Verified
+- `ctest` +2 → 135 (split block = single block, bad input); `pytest` +5 (`test_groups3d.py`).
+- Strict CI build, clang-tidy, ruff, clang-format, ternary check, API docs; all demos run.
+
 ## Phase 10a — multi-block smoothing groups, 2D (2026-10-15) — approved (pre-authorised)
 
 ### Built

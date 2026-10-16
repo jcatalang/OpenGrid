@@ -498,17 +498,16 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         }
         auto* classes = new std::uint8_t[n];
         std::copy(result.node_class.begin(), result.node_class.end(), classes);
-        const nb::capsule owner(classes,
-                                [](void* ptr) noexcept { delete[] static_cast<std::uint8_t*>(ptr); });
+        const nb::capsule owner(
+            classes, [](void* ptr) noexcept { delete[] static_cast<std::uint8_t*>(ptr); });
         nb::ndarray<nb::numpy, std::uint8_t, nb::ndim<1>> node_class(classes, {n}, owner);
         return std::make_tuple(to_numpy(out), node_class, to_numpy(result.residuals),
-                               result.iterations, result.converged, result.cancelled,
-                               result.lines, result.colours, result.warnings);
+                               result.iterations, result.converged, result.cancelled, result.lines,
+                               result.colours, result.warnings);
       },
-      nb::arg("points"), nb::arg("quads"), nb::arg("fixed"), nb::arg("chains"),
-      nb::arg("slides"), nb::arg("walls"), nb::arg("omega") = 1.0,
-      nb::arg("max_iterations") = 2000, nb::arg("tolerance") = 1e-6,
-      nb::arg("acceleration") = 10, nb::arg("progress") = nb::none(),
+      nb::arg("points"), nb::arg("quads"), nb::arg("fixed"), nb::arg("chains"), nb::arg("slides"),
+      nb::arg("walls"), nb::arg("omega") = 1.0, nb::arg("max_iterations") = 2000,
+      nb::arg("tolerance") = 1e-6, nb::arg("acceleration") = 20, nb::arg("progress") = nb::none(),
       "Elliptic smoothing of a planar multi-block grid as one grid (GIL released). quads are "
       "counter-clockwise node ids; slides are (node, chain index); walls are (node, spacing "
       "(<= 0: initial), decay, relaxation, max_source). Returns (points, node_class "

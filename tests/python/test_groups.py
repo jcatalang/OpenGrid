@@ -260,6 +260,6 @@ def test_groups_follow_topology_edits():
     assert len(og.entity("g").params["walls"]) == 1
     created = og.ogrid_domain(low, fraction=0.5)
     members = [og.store.get(d).name for d in og.entity("g").params["domains"]]
-    assert members == [high, third, *created]
+    assert sorted(members) == sorted([high, third, *created])
     assert og.smooth_group("g").converged
     assert replays(og)

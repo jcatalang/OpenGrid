@@ -91,6 +91,7 @@
   {"edges": [[{"connector": 74, "reversed": false}], [{"connector": 67, "reversed": false}], [{"connector": 79, "reversed": true}], [{"connector": 58, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 82, "name": "cube_zmax", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 88,
  "patches": [

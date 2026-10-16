@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "opengrid/core/geom/curve.hpp"
+#include "opengrid/core/geom/curve_chain.hpp"
 #include "opengrid/core/geom/surface.hpp"
 #include "opengrid/core/io/cgns_structured.hpp"
 #include "opengrid/core/quality/quality3d.hpp"
@@ -29,6 +30,7 @@
 #include "opengrid/core/structured/elliptic3d.hpp"
 #include "opengrid/core/structured/extrude.hpp"
 #include "opengrid/core/structured/hyperbolic.hpp"
+#include "opengrid/core/structured/multiblock_elliptic3d.hpp"
 #include "opengrid/core/structured/surface_elliptic.hpp"
 #include "opengrid/core/structured/surface_tfi.hpp"
 #include "opengrid/core/structured/tfi3d.hpp"
@@ -240,6 +242,81 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       },
       nb::arg("surface"), nb::arg("bottom"), nb::arg("right"), nb::arg("top"), nb::arg("left"),
       "Parametric TFI on a surface; returns (grid (nj, ni, 3), largest boundary-node distance).");
+
+  m.def(
+      "smooth_multiblock_3d",
+      [](const Points& points, const Cells<8>& hexes,
+         const nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>& fixed,
+         const std::vector<std::shared_ptr<og::Surface>>& surfaces,
+         const std::vector<std::shared_ptr<og::CurveChain>>& chains,
+         const std::vector<std::tuple<std::int64_t, std::string, std::size_t>>& slides,
+         const std::vector<std::tuple<std::int64_t, double, double, double, double>>& walls,
+         double omega, int max_iterations, double tolerance, int acceleration,
+         og::SmoothingProgress* progress, double slide_limit) {
+        const std::size_t n = points.shape(0);
+        if (fixed.shape(0) != n) {
+          throw std::invalid_argument("fixed must have one entry per point");
+        }
+        og::Multiblock3DInput input;
+        input.xyz.assign(points.data(), points.data() + 3 * n);
+        input.hexes = index_input<8>(hexes);
+        input.fixed.assign(fixed.data(), fixed.data() + n);
+        input.surfaces.assign(surfaces.begin(), surfaces.end());
+        input.chains.assign(chains.begin(), chains.end());
+        for (const auto& [node, kind, index] : slides) {
+          og::Multiblock3DSlide slide;
+          slide.node = node;
+          slide.index = index;
+          if (kind == "surface") {
+            slide.target = og::SlideTarget::Surface;
+          } else if (kind == "chain") {
+            slide.target = og::SlideTarget::Chain;
+          } else {
+            throw std::invalid_argument("slide kind must be 'surface' or 'chain'");
+          }
+          input.slides.push_back(slide);
+        }
+        for (const auto& [node, spacing, decay, relaxation, max_source] : walls) {
+          input.walls.push_back({node, spacing, decay, relaxation, max_source});
+        }
+        og::MultiblockOptions options;
+        options.omega = omega;
+        options.max_iterations = max_iterations;
+        options.tolerance = tolerance;
+        options.acceleration = acceleration;
+        options.slide_limit = slide_limit;
+        og::Multiblock3DResult result;
+        {
+          const nb::gil_scoped_release release;
+          result = og::smooth_multiblock_3d(input, options, progress);
+        }
+        auto* coords = new double[3 * n];
+        std::copy(result.xyz.begin(), result.xyz.end(), coords);
+        const nb::capsule owner(coords, [](void* p) noexcept { delete[] static_cast<double*>(p); });
+        nb::ndarray<nb::numpy, double, nb::ndim<2>> out(coords, {n, 3}, owner);
+        auto* classes = new std::uint8_t[n];
+        std::copy(result.node_class.begin(), result.node_class.end(), classes);
+        const nb::capsule class_owner(
+            classes, [](void* p) noexcept { delete[] static_cast<std::uint8_t*>(p); });
+        nb::ndarray<nb::numpy, std::uint8_t, nb::ndim<1>> node_class(classes, {n}, class_owner);
+        auto* res = new double[result.residuals.size()];
+        std::copy(result.residuals.begin(), result.residuals.end(), res);
+        const nb::capsule res_owner(res,
+                                    [](void* p) noexcept { delete[] static_cast<double*>(p); });
+        nb::ndarray<nb::numpy, double, nb::ndim<1>> residuals(res, {result.residuals.size()},
+                                                              res_owner);
+        return std::make_tuple(out, node_class, residuals, result.iterations, result.converged,
+                               result.cancelled, result.lines, result.colours, result.warnings);
+      },
+      nb::arg("points"), nb::arg("hexes"), nb::arg("fixed"), nb::arg("surfaces"), nb::arg("chains"),
+      nb::arg("slides"), nb::arg("walls"), nb::arg("omega") = 1.0, nb::arg("max_iterations") = 2000,
+      nb::arg("tolerance") = 1e-6, nb::arg("acceleration") = 20, nb::arg("progress") = nb::none(),
+      nb::arg("slide_limit") = 0.5,
+      "Elliptic smoothing of a multi-block hexahedral grid as one grid (GIL released). hexes: "
+      "corner c = i + 2 j + 4 k, right-handed; slides: (node, 'surface' | 'chain', index); "
+      "walls: (node, spacing (<= 0: initial), decay, relaxation, max_source). Returns (points, "
+      "node_class (0 fixed, 1 regular, 2 irregular, 3 sliding), residuals, iterations, "
+      "converged, cancelled, lines, colours, warnings).");
 
   m.def(
       "tfi_block",

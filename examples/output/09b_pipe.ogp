@@ -42,6 +42,7 @@
   {"edges": [[{"connector": 19, "reversed": false}], [{"connector": 21, "reversed": false}], [{"connector": 23, "reversed": false}], [{"connector": 25, "reversed": false}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 30, "name": "pipe-core", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 39,
  "patches": [

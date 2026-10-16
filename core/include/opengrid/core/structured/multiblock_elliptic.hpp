@@ -73,7 +73,10 @@ struct MultiblockOptions {
   double omega = 1.0;
   int max_iterations = 2000;
   double tolerance = 1e-6;
-  int acceleration = 10;  // Anderson depth (0: plain relaxation)
+  int acceleration = 20;  // Anderson depth (0: plain relaxation)
+  // Sliding nodes stay within this fraction of their initial boundary intervals of their
+  // initial position (3D; the 2D smoother uses 1/2 of the intervals towards each neighbour).
+  double slide_limit = 0.5;
 };
 
 // Node classes reported per node.

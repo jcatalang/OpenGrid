@@ -28,6 +28,7 @@ add_library(og_core STATIC
   src/structured/tfi.cpp
   src/structured/elliptic.cpp
   src/structured/multiblock_elliptic.cpp
+  src/structured/multiblock_elliptic3d.cpp
   src/quality/quality2d.cpp
   src/quality/quality_tri.cpp
   src/quality/quality_cells.cpp

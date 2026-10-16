@@ -395,11 +395,13 @@ class BlockEvaluator:
     def __init__(self, store, domains):
         self.store = store
         self.domains = domains
+        self.groups = None  # GroupEvaluator: members of 3D smoothing groups take their grids there
         self._cache: OrderedDict[str, dict] = OrderedDict()
 
-    def _inputs(self, entity_id: int) -> tuple[str, list]:
+    def _inputs(self, entity_id: int, raw: bool = False) -> tuple[str, list]:
         params = self.store.get(entity_id).params
         digest = hashlib.sha256(repr(params).encode())
+        digest.update(repr(raw).encode())
         grids = []
         refs = params["faces"]
         if refs is None:
@@ -410,9 +412,33 @@ class BlockEvaluator:
             digest.update(g.tobytes())
         return digest.hexdigest(), grids
 
-    def evaluate(self, entity_id: int) -> dict:
-        """{"grid", "faces": {face: domain id or None}, "mirrored"}."""
-        key, grids = self._inputs(entity_id)
+    def evaluate(self, entity_id: int, raw: bool = False, compute: bool = True) -> dict:
+        """{"grid", "faces": {face: domain id or None}, "mirrored", "warnings", "smoothing",
+        "group"}. A member of a 3D smoothing group gets its part of the group's result (run now
+        unless ``compute`` is False: then the unsmoothed grid); ``raw``: the block's own grid
+        without its smoothing (the group's input)."""
+        if not raw and self.groups is not None:
+            group = self.groups.group_of_block(entity_id)
+            if group is not None:
+                base = self.evaluate(entity_id, raw=True)
+                cached = self.groups.result(group)
+                if cached is None and compute:
+                    cached = self.groups.smooth(group)
+                if cached is None:
+                    return dict(base, group=group)
+                smoothing = {
+                    "iterations": cached.iterations,
+                    "converged": cached.converged,
+                    "residuals": cached.residuals,
+                }
+                return dict(
+                    base,
+                    grid=cached.grids[entity_id],
+                    smoothing=smoothing,
+                    warnings=list(base["warnings"]) + list(cached.warnings),
+                    group=group,
+                )
+        key, grids = self._inputs(entity_id, raw)
         if key in self._cache:
             self._cache.move_to_end(key)
             return self._cache[key]
@@ -460,7 +486,7 @@ class BlockEvaluator:
             faces = {f: None for f in FACE_NAMES}
             faces["kmin"] = e["domain"]
         smoothing = None
-        if params["smoothing"] is not None:
+        if params["smoothing"] is not None and not raw:
             sm = params["smoothing"]
             walls = [
                 (
@@ -494,6 +520,7 @@ class BlockEvaluator:
             "mirrored": bool(mirrored),
             "warnings": warnings,
             "smoothing": smoothing,
+            "group": None,
         }
         self._cache[key] = result
         while len(self._cache) > self.CACHE_SIZE:

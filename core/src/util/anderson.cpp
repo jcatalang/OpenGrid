@@ -43,56 +43,65 @@ void AndersonAccelerator::reset() {
   primed_ = false;
 }
 
-double AndersonAccelerator::dot(const double* a, const double* b) const {
-  const std::size_t chunks = (size_ + kChunk - 1) / kChunk;
-  std::vector<double> partial(chunks, 0.0);
-  chunked(size_, [&](std::size_t begin, std::size_t end) {
-    double sum = 0.0;
-    for (std::size_t k = begin; k < end; ++k) {
-      sum += a[k] * b[k];
-    }
-    partial[begin / kChunk] = sum;
-  });
-  double total = 0.0;
-  for (const double value : partial) {
-    total += value;
-  }
-  return total;
-}
-
 bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>& g) {
+  // One pass for the residual, the new difference columns and the saved state; one pass for
+  // all dot products (each still summed in index order within fixed chunks, then over the
+  // chunks in order: the same values as separate dot products, for any thread count).
+  const bool primed = primed_;
+  const std::size_t slot = next_;
+  double* df = &df_[slot * size_];
+  double* dg = &dg_[slot * size_];
   chunked(size_, [&](std::size_t begin, std::size_t end) {
     for (std::size_t k = begin; k < end; ++k) {
-      f_[k] = g[k] - u[k];
-    }
-  });
-  if (primed_) {
-    const std::size_t slot = next_;
-    double* df = &df_[slot * size_];
-    double* dg = &dg_[slot * size_];
-    chunked(size_, [&](std::size_t begin, std::size_t end) {
-      for (std::size_t k = begin; k < end; ++k) {
-        df[k] = f_[k] - last_f_[k];
+      const double fk = g[k] - u[k];
+      f_[k] = fk;
+      if (primed) {
+        df[k] = fk - last_f_[k];
         dg[k] = g[k] - last_g_[k];
       }
-    });
+      last_f_[k] = fk;
+      last_g_[k] = g[k];
+    }
+  });
+  if (primed) {
     count_ = std::min(count_ + 1, depth_);
     next_ = (next_ + 1) % depth_;
-    for (std::size_t s = 0; s < count_; ++s) {
-      const double value = dot(&df_[s * size_], df);
-      gram_[slot * depth_ + s] = value;
-      gram_[s * depth_ + slot] = value;
-    }
   }
-  std::copy(f_.begin(), f_.end(), last_f_.begin());
-  std::copy(g.begin(), g.end(), last_g_.begin());
   primed_ = true;
   if (count_ == 0) {
     return false;
   }
-  std::vector<double> gamma(count_);
-  for (std::size_t s = 0; s < count_; ++s) {
-    gamma[s] = dot(&df_[s * size_], f_.data());
+  const std::size_t m = count_;
+  const std::size_t chunks = (size_ + kChunk - 1) / kChunk;
+  // Per chunk: m products with the new column (Gram row) and m with the residual.
+  std::vector<double> partial(chunks * 2 * m, 0.0);
+  chunked(size_, [&](std::size_t begin, std::size_t end) {
+    double* out = &partial[(begin / kChunk) * 2 * m];
+    for (std::size_t s = 0; s < m; ++s) {
+      const double* column = &df_[s * size_];
+      double with_new = 0.0;
+      double with_f = 0.0;
+      for (std::size_t k = begin; k < end; ++k) {
+        with_new += column[k] * df[k];
+        with_f += column[k] * f_[k];
+      }
+      out[2 * s] = with_new;
+      out[2 * s + 1] = with_f;
+    }
+  });
+  std::vector<double> gamma(m, 0.0);
+  std::vector<double> row(m, 0.0);
+  for (std::size_t c = 0; c < chunks; ++c) {
+    for (std::size_t s = 0; s < m; ++s) {
+      row[s] += partial[(c * m + s) * 2];
+      gamma[s] += partial[(c * m + s) * 2 + 1];
+    }
+  }
+  if (primed) {
+    for (std::size_t s = 0; s < m; ++s) {
+      gram_[slot * depth_ + s] = row[s];
+      gram_[s * depth_ + slot] = row[s];
+    }
   }
   if (!solve(gamma)) {
     reset();
@@ -101,7 +110,7 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
   chunked(size_, [&](std::size_t begin, std::size_t end) {
     for (std::size_t k = begin; k < end; ++k) {
       double value = g[k];
-      for (std::size_t s = 0; s < count_; ++s) {
+      for (std::size_t s = 0; s < m; ++s) {
         value -= gamma[s] * dg_[s * size_ + k];
       }
       g[k] = value;

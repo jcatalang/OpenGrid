@@ -20,6 +20,7 @@
   {"edges": [[{"connector": 4, "reversed": true}, {"connector": 3, "reversed": false}], [{"connector": 9, "reversed": false}], [{"connector": 8, "reversed": false}], [{"connector": 9, "reversed": true}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "thomas_middlecoff", "max_iterations": 20000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.0001}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "hermite_tfi"}, "id": 11, "name": "ring", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 21,
  "patches": [

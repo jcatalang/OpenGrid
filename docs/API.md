@@ -187,7 +187,8 @@ Run the domain's elliptic smoother (cached); ``progress`` is an optional
 ### `domain_grid(name: str, compute: bool = True) -> numpy.ndarray`
 
 Grid points (nj, ni, 3); runs the elliptic smoother if configured and not cached
-(``compute=False`` returns the TFI grid instead while smoothing is pending).
+(``compute=False`` returns the TFI grid instead while smoothing is pending). A face of
+a block in a smoothed 3D group is returned where the group moved it.
 
 ### `unstructured_mesh(name: str) -> dict`
 
@@ -205,18 +206,22 @@ One-line summary of a structured or unstructured domain.
 
 ## Multi-block smoothing groups
 
-### `create_smoothing_group(domains, walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 10) -> str`
+### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=()) -> str`
 
-Smooth planar structured ``domains`` together as one grid: interfaces
-and block corners move, grid lines continue across interfaces, and irregular points
-(3 or 5+ domains around a node) are relaxed too. ``walls``: connectors (or dicts
-``{"connector", "spacing" (None: the initial first-cell height), "decay",
-"relaxation", "max_source"}``) with first-cell height and orthogonality control; they
-stay fixed. ``slide``: boundary connectors whose nodes slide along their curves ("auto":
-every boundary connector that is not a wall; () for none). Connectors used by domains
-outside the group stay fixed. Members' own elliptic settings are ignored. The control
-is Laplace plus the wall sources; ``acceleration`` is the Anderson depth (default 10;
-0: plain relaxation).
+Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one
+grid (as one grid): interfaces and block corners move, grid lines continue across
+interfaces, and irregular points (3 or 5+ domains around a node) are relaxed too.
+``walls``: connectors (or dicts ``{"connector", "spacing" (None: the initial
+first-cell height), "decay", "relaxation", "max_source"}``) with first-cell height and
+orthogonality control; they stay fixed. ``slide``: boundary connectors whose nodes
+slide along their curves ("auto": every boundary connector that is not a wall; () for
+none). Connectors used by domains outside the group stay fixed. Members' own elliptic
+settings are ignored. The control is Laplace plus the wall sources; ``acceleration``
+is the Anderson depth (default 20; 0: plain relaxation). With ``blocks``: ``walls``
+and ``slide`` name block faces (domains); sliding faces move on their surface (or
+plane), boundary edges between faces on different surfaces along their connectors;
+faces shared with blocks or volumes outside the group stay fixed. Members' own
+smoothing settings are ignored.
 
 ### `smooth_group(name: str, progress=None) -> opengrid.model.groups.GroupResult`
 

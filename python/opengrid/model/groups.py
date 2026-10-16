@@ -1,4 +1,5 @@
-"""Smoothing groups: planar structured domains smoothed together as one grid.
+"""Smoothing groups: planar structured domains (2D) or six-face blocks (3D) smoothed together
+as one grid. The 3D evaluation is in model/groups3d.py.
 
 A ``smoothing_group`` lists structured domains. Their grids are no longer smoothed one by one:
 the TFI grids of all members are merged into one node set (nodes shared through connectors
@@ -17,6 +18,12 @@ Connectors, by their uses:
 
 Members must be planar (z = const) structured domains without a surface. Parameters never
 use the keys id/name/type (project record keys).
+
+With ``blocks`` instead of ``domains`` (3D), the roles belong to the block faces (domains):
+shared by two member blocks: interface; used by a block or volume outside: fixed; otherwise a
+wall (``walls`` name faces: {"domain", "spacing", ...}), sliding (``slide``: "auto" or a tuple
+of faces; the face's surface, or its plane for planar faces) or fixed. Boundary edges between
+sliding faces on different surfaces slide along their connectors.
 """
 
 import hashlib
@@ -34,14 +41,23 @@ from opengrid.validation import Issue, ValidationError
 KIND = "smoothing_group"
 DEFAULT_GROUP = {
     "domains": (),
+    "blocks": (),
     "walls": (),
     "slide": "auto",
     "omega": 1.0,
     "max_iterations": 2000,
     "tolerance": 1e-6,
     # Deeper than for single domains: Laplace smoothing of a whole multi-block grid has slow
-    # global modes (a 68k-node O-grid: 1367 iterations at depth 5, 456 at depth 10).
-    "acceleration": 10,
+    # global modes (a 68k-node O-grid: 575 iterations at depth 10, 436 at depth 20; a 1M-cell
+    # ball of blocks: about 800 at depth 10, 320 at depth 20).
+    "acceleration": 20,
+}
+DEFAULT_GROUP_WALL3D = {
+    "domain": None,
+    "spacing": None,
+    "decay": 0.1,
+    "relaxation": 0.1,
+    "max_source": 100.0,
 }
 DEFAULT_GROUP_WALL = {
     "connector": None,
@@ -88,50 +104,78 @@ def member_connectors(store, domain_ids) -> set[int]:
     }
 
 
+def block_faces(store, block_ids) -> set[int]:
+    """Face domains of six-face blocks."""
+    return {f for b in block_ids for f in store.get(b).params["faces"] or ()}
+
+
+def _members(store, raw, kind, where, issues) -> list[int]:
+    if isinstance(raw, (str, int)):
+        raw = [raw]
+    members = []
+    for index, item in enumerate(raw):
+        label = f"{where}: {kind}s[{index}]"
+        ref = _ref(store, item, kind, label, issues)
+        if ref is None:
+            continue
+        if ref in members:
+            issues.append(Issue(label, "listed twice"))
+            continue
+        params = store.get(ref).params
+        if kind == "domain" and params.get("surface") is not None:
+            issues.append(Issue(label, f"{store.get(ref).name!r} lies on a surface"))
+            continue
+        if kind == "block" and params["faces"] is None:
+            name = store.get(ref).name
+            issues.append(Issue(label, f"{name!r} is extruded (six-face blocks only)"))
+            continue
+        members.append(ref)
+    return members
+
+
 def normalize_group(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
     for key in sorted(set(raw) - set(DEFAULT_GROUP)):
         issues.append(Issue(f"{where}: {key}", "unexpected key"))
     merged = dict(DEFAULT_GROUP)
     merged.update(raw)
-    domains_raw = merged["domains"]
-    if isinstance(domains_raw, (str, int)):
-        domains_raw = [domains_raw]
+    three_d = bool(merged["blocks"])
+    if three_d and merged["domains"]:
+        issues.append(Issue(where, "give domains (2D) or blocks (3D), not both"))
     domains = []
-    for index, item in enumerate(domains_raw):
-        ref = _ref(store, item, "domain", f"{where}: domains[{index}]", issues)
-        if ref is None:
-            continue
-        if ref in domains:
-            issues.append(Issue(f"{where}: domains[{index}]", "listed twice"))
-            continue
-        if store.get(ref).params.get("surface") is not None:
-            issues.append(
-                Issue(f"{where}: domains[{index}]", f"{store.get(ref).name!r} lies on a surface")
-            )
-            continue
-        domains.append(ref)
-    if not domains_raw:
-        issues.append(Issue(f"{where}: domains", "at least one domain is required"))
-    connectors = member_connectors(store, domains)
+    blocks = []
+    if three_d:
+        blocks = _members(store, merged["blocks"], "block", where, issues)
+        allowed = block_faces(store, blocks)
+        ref_key = "domain"
+        defaults = DEFAULT_GROUP_WALL3D
+        what = "a face of a member block"
+    else:
+        if not merged["domains"]:
+            issues.append(Issue(f"{where}: domains", "at least one domain is required"))
+        domains = _members(store, merged["domains"], "domain", where, issues)
+        allowed = member_connectors(store, domains)
+        ref_key = "connector"
+        defaults = DEFAULT_GROUP_WALL
+        what = "used by a member domain"
     walls = []
     seen = set()
     for index, item in enumerate(merged["walls"]):
         label = f"{where}: walls[{index}]"
         if isinstance(item, (str, int)) and not isinstance(item, bool):
-            item = {"connector": item}
+            item = {ref_key: item}
         if not isinstance(item, dict):
-            issues.append(Issue(label, f"expected a connector or a dict, got {item!r}"))
+            issues.append(Issue(label, f"expected a {ref_key} or a dict, got {item!r}"))
             continue
-        for key in sorted(set(item) - set(DEFAULT_GROUP_WALL)):
+        for key in sorted(set(item) - set(defaults)):
             issues.append(Issue(f"{label}.{key}", "unexpected key"))
-        wall = dict(DEFAULT_GROUP_WALL)
+        wall = dict(defaults)
         wall.update(item)
-        ref = _ref(store, wall["connector"], "connector", f"{label}.connector", issues)
+        ref = _ref(store, wall[ref_key], ref_key, f"{label}.{ref_key}", issues)
         if ref is None:
             continue
-        if ref not in connectors:
-            issues.append(Issue(label, f"{store.get(ref).name!r} is not used by a member domain"))
+        if ref not in allowed:
+            issues.append(Issue(label, f"{store.get(ref).name!r} is not {what}"))
             continue
         if ref in seen:
             issues.append(Issue(label, f"{store.get(ref).name!r} listed twice"))
@@ -139,7 +183,7 @@ def normalize_group(raw: dict, store, where: str) -> dict:
         seen.add(ref)
         walls.append(
             {
-                "connector": ref,
+                ref_key: ref,
                 "spacing": _number(
                     wall["spacing"], f"{label}.spacing", issues, positive=True, optional=True
                 ),
@@ -159,13 +203,11 @@ def normalize_group(raw: dict, store, where: str) -> dict:
         refs = []
         for index, item in enumerate(slide):
             label = f"{where}: slide[{index}]"
-            ref = _ref(store, item, "connector", label, issues)
+            ref = _ref(store, item, ref_key, label, issues)
             if ref is None:
                 continue
-            if ref not in connectors:
-                issues.append(
-                    Issue(label, f"{store.get(ref).name!r} is not used by a member domain")
-                )
+            if ref not in allowed:
+                issues.append(Issue(label, f"{store.get(ref).name!r} is not {what}"))
                 continue
             if ref in seen:
                 issues.append(Issue(label, f"{store.get(ref).name!r} is a wall (walls stay fixed)"))
@@ -196,9 +238,10 @@ def normalize_group(raw: dict, store, where: str) -> dict:
         )
     if issues:
         raise ValidationError(issues)
-    walls.sort(key=lambda w: w["connector"])
+    walls.sort(key=lambda w: w[ref_key])
     return {
         "domains": tuple(domains),
+        "blocks": tuple(blocks),
         "walls": tuple(walls),
         "slide": slide,
         "omega": omega,
@@ -208,9 +251,15 @@ def normalize_group(raw: dict, store, where: str) -> dict:
     }
 
 
+def _wall_ref(wall: dict) -> int:
+    if "domain" in wall:
+        return wall["domain"]
+    return wall["connector"]
+
+
 def group_references(params: dict) -> set[int]:
-    refs = set(params["domains"])
-    refs.update(w["connector"] for w in params["walls"])
+    refs = set(params["domains"]) | set(params["blocks"])
+    refs.update(_wall_ref(w) for w in params["walls"])
     if params["slide"] != "auto":
         refs.update(params["slide"])
     return refs
@@ -219,10 +268,14 @@ def group_references(params: dict) -> set[int]:
 def group_script_params(params: dict, store) -> dict:
     result = dict(params)
     result["domains"] = tuple(store.get(d).name for d in params["domains"])
+    result["blocks"] = tuple(store.get(b).name for b in params["blocks"])
     walls = []
     for wall in params["walls"]:
         named = dict(wall)
-        named["connector"] = store.get(wall["connector"]).name
+        key = "connector"
+        if "domain" in wall:
+            key = "domain"
+        named[key] = store.get(wall[key]).name
         walls.append(named)
     result["walls"] = tuple(walls)
     if params["slide"] != "auto":
@@ -500,8 +553,12 @@ def interface_kinks(
 
 
 # ---------------------------------------------------------------------------- evaluation
-def run_group(layout: GroupLayout, params: dict, progress=None):
+def run_group(layout, params: dict, progress=None):
     """The solver call alone (touches no model state: safe on a worker thread)."""
+    if params["blocks"]:
+        from opengrid.model.groups3d import run_group_3d
+
+        return run_group_3d(layout, params, progress)
     return _core.smooth_multiblock(
         layout.points,
         layout.quads,
@@ -527,6 +584,7 @@ class GroupEvaluator:
         self.store = store
         self.connectors = connectors
         self.domains = domains
+        self.blocks = None  # BlockEvaluator (3D groups); set by the session
         self._results: OrderedDict[str, GroupResult] = OrderedDict()
 
     def group_of(self, domain_id: int) -> int | None:
@@ -543,9 +601,55 @@ class GroupEvaluator:
             return found[0].id
         return None
 
+    def group_of_block(self, block_id: int) -> int | None:
+        found = [e for e in self.store.entities(KIND) if block_id in e.params["blocks"]]
+        if len(found) > 1:
+            names = ", ".join(e.name for e in found)
+            raise ValidationError(
+                [Issue(self.store.get(block_id).name, f"is in several smoothing groups ({names})")]
+            )
+        if found:
+            return found[0].id
+        return None
+
+    def group_of_face(self, domain_id: int) -> int | None:
+        """The 3D group whose member blocks have this domain as a face (cached result only)."""
+        for entity in self.store.entities(KIND):
+            for b in entity.params["blocks"]:
+                if domain_id in (self.store.get(b).params["faces"] or ()):
+                    return entity.id
+        return None
+
+    def face_grid(self, domain_id: int) -> np.ndarray | None:
+        """A face domain's nodes as placed by a cached 3D group result, or None."""
+        group = self.group_of_face(domain_id)
+        if group is None:
+            return None
+        cached = self.result(group)
+        if cached is None or domain_id not in cached.faces:
+            return None
+        return cached.faces[domain_id]
+
     def _check(self, group_id: int) -> None:
         entity = self.store.get(group_id)
         issues = []
+        for b in entity.params["blocks"]:
+            others = [
+                e.name
+                for e in self.store.entities(KIND)
+                if e.id != group_id and b in e.params["blocks"]
+            ]
+            if others:
+                issues.append(
+                    Issue(
+                        entity.name,
+                        f"block {self.store.get(b).name!r} is also in {', '.join(others)}",
+                    )
+                )
+        if entity.params["blocks"]:
+            if issues:
+                raise ValidationError(issues)
+            return
         for d in entity.params["domains"]:
             others = [
                 e.name
@@ -578,6 +682,17 @@ class GroupEvaluator:
     def key(self, group_id: int) -> str:
         entity = self.store.get(group_id)
         digest = hashlib.sha256(repr(entity.params).encode())
+        if entity.params["blocks"]:
+            from opengrid.model.groups3d import face_roles
+
+            faces = {}
+            for b in entity.params["blocks"]:
+                block_key, _grids = self.blocks._inputs(b, raw=True)
+                digest.update(block_key.encode())
+                faces[b] = self.blocks.evaluate(b, raw=True)["faces"]
+            roles = face_roles(self.store, entity.params, faces)
+            digest.update(repr(sorted(roles.items())).encode())
+            return digest.hexdigest()
         for d in entity.params["domains"]:
             digest.update(self.domains.key(d).encode())
         digest.update(repr(sorted(connector_roles(self.store, entity.params).items())).encode())
@@ -590,11 +705,20 @@ class GroupEvaluator:
         """Cache key, solver input and parameters (on the thread that owns the model)."""
         self._check(group_id)
         params = self.store.get(group_id).params
+        if params["blocks"]:
+            from opengrid.model.groups3d import build_layout_3d
+
+            layout = build_layout_3d(self.store, self.connectors, self.domains, self.blocks, params)
+            return self.key(group_id), layout, params
         grids = {d: self.domains.initial_grid(d) for d in params["domains"]}
         return self.key(group_id), build_layout(self.store, self.connectors, grids, params), params
 
-    def finish(self, params: dict, layout: GroupLayout, raw) -> GroupResult:
-        """GroupResult from the output of :func:`run_group`."""
+    def finish(self, params: dict, layout, raw):
+        """GroupResult (GroupResult3D for blocks) from the output of :func:`run_group`."""
+        if params["blocks"]:
+            from opengrid.model.groups3d import finish_3d
+
+            return finish_3d(layout, params, raw)
         (
             points,
             classes,
@@ -653,6 +777,11 @@ class GroupEvaluator:
         """Nodes of an interface or sliding connector as placed by a cached group result (in
         the connector's own order), or None when no smoothed group moves it."""
         for entity in self.store.entities(KIND):
+            if entity.params["blocks"]:
+                moved = self._moved_in_faces(entity.id, connector_id)
+                if moved is not None:
+                    return moved
+                continue
             if not any(
                 item["connector"] == connector_id
                 for d in entity.params["domains"]
@@ -681,15 +810,39 @@ class GroupEvaluator:
                         p += m - 1
         return None
 
+    def _moved_in_faces(self, group_id: int, connector_id: int) -> np.ndarray | None:
+        cached = self.result(group_id)
+        if cached is None:
+            return None
+        for d, grid in sorted(cached.faces.items()):
+            nj, ni = grid.shape[:2]
+            for k, edge in enumerate(self.store.get(d).params["edges"]):
+                p = 0
+                for item in edge:
+                    m = self.store.get(item["connector"]).params["dimension"]
+                    if item["connector"] == connector_id:
+                        points = np.array(
+                            [grid[_position(k, p + a, ni, nj)[::-1]] for a in range(m)]
+                        )
+                        if item["reversed"]:
+                            points = points[::-1]
+                        return np.ascontiguousarray(points)
+                    p += m - 1
+        return None
+
     def status(self, group_id: int) -> str:
         entity = self.store.get(group_id)
         cached = self.result(group_id)
         count = len(entity.params["domains"])
+        unit = "domains"
+        if entity.params["blocks"]:
+            count = len(entity.params["blocks"])
+            unit = "blocks"
         if cached is None:
-            return f"{count} domains, smoothing pending (showing TFI)"
+            return f"{count} {unit}, smoothing pending (showing TFI)"
         nodes = cached.node_counts
         text = (
-            f"{count} domains, {sum(nodes.values())} nodes ({nodes['regular']} regular, "
+            f"{count} {unit}, {sum(nodes.values())} nodes ({nodes['regular']} regular, "
             f"{nodes['irregular']} irregular, {nodes['sliding']} sliding, {nodes['fixed']} fixed), "
             f"interface kink {cached.max_kink:.2g} deg"
         )

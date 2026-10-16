@@ -1,4 +1,4 @@
-// Phase 10a: multi-block elliptic smoothing (structured/multiblock_elliptic.hpp).
+// Phases 10a / 10b: multi-block elliptic smoothing (structured/multiblock_elliptic*.hpp).
 #include <gtest/gtest.h>
 
 #include <array>
@@ -6,12 +6,15 @@
 #include <cstdint>
 #include <memory>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 #include "opengrid/core/geom/arc.hpp"
 #include "opengrid/core/geom/curve_chain.hpp"
 #include "opengrid/core/structured/elliptic.hpp"
+#include "opengrid/core/structured/elliptic3d.hpp"
 #include "opengrid/core/structured/multiblock_elliptic.hpp"
+#include "opengrid/core/structured/multiblock_elliptic3d.hpp"
 #include "opengrid/core/structured/tfi.hpp"
 #include "opengrid/core/util/parallel.hpp"
 
@@ -266,3 +269,98 @@ TEST(Multiblock, RejectsNodesOutOfRange) {
 }
 
 }  // namespace
+
+// 3D: a curved block split into two blocks sharing a plane of nodes matches the single-block
+// smoother (Laplace, faces fixed), for any thread count.
+TEST(Multiblock3D, SplitBlockMatchesSingleBlock) {
+  const int ni = 13;
+  const int nj = 11;
+  const int nk = 9;
+  og::Grid3D g(ni, nj, nk);
+  for (int k = 0; k < nk; ++k) {
+    for (int j = 0; j < nj; ++j) {
+      for (int i = 0; i < ni; ++i) {
+        const double s = static_cast<double>(i) / (ni - 1);
+        const double t = static_cast<double>(j) / (nj - 1);
+        const double r = std::pow(static_cast<double>(k) / (nk - 1), 1.3);
+        double x = 2.0 * s;
+        double y = t + 0.2 * std::sin(std::numbers::pi * s) * (1.0 - r);
+        double z = r + 0.1 * std::sin(std::numbers::pi * t) * s;
+        if (i > 0 && i < ni - 1 && j > 0 && j < nj - 1 && k > 0 && k < nk - 1) {
+          x += 0.01 * std::sin(7.0 * i + 3.0 * j);
+          y += 0.01 * std::cos(5.0 * j + 2.0 * k);
+          z += 0.01 * std::sin(3.0 * k + i);
+        }
+        g.at(i, j, k) = {x, y, z};
+      }
+    }
+  }
+  og::Elliptic3DOptions single;
+  single.control = og::ControlType::Laplace;
+  single.max_iterations = 20000;
+  single.tolerance = 1e-12;
+  single.acceleration = 5;
+  const og::Elliptic3DResult ref = og::smooth_elliptic_3d(g, single);
+  ASSERT_TRUE(ref.converged);
+
+  og::Multiblock3DInput input;
+  auto id = [&](int i, int j, int k) {
+    const std::size_t index = (((ix(k) * ix(nj)) + ix(j)) * ix(ni)) + ix(i);
+    return static_cast<std::int64_t>(index);
+  };
+  for (const og::Vec3& p : g.x) {
+    input.xyz.insert(input.xyz.end(), {p.x, p.y, p.z});
+  }
+  input.fixed.assign(g.x.size(), 0);
+  for (int k = 0; k < nk; ++k) {
+    for (int j = 0; j < nj; ++j) {
+      for (int i = 0; i < ni; ++i) {
+        if (i == 0 || j == 0 || k == 0 || i == ni - 1 || j == nj - 1 || k == nk - 1) {
+          input.fixed[static_cast<std::size_t>(id(i, j, k))] = 1;
+        }
+      }
+    }
+  }
+  // Two blocks: i in [0, 5] and [5, ni - 1] (the plane i = 5 shared).
+  for (const auto& [i0, i1] : {std::pair{0, 5}, std::pair{5, ni - 1}}) {
+    for (int k = 0; k < nk - 1; ++k) {
+      for (int j = 0; j < nj - 1; ++j) {
+        for (int i = i0; i < i1; ++i) {
+          std::array<std::int64_t, 8> h{};
+          for (unsigned c = 0; c < 8; ++c) {
+            h[c] = id(i + static_cast<int>(c & 1U), j + static_cast<int>((c >> 1U) & 1U),
+                      k + static_cast<int>((c >> 2U) & 1U));
+          }
+          input.hexes.push_back(h);
+        }
+      }
+    }
+  }
+  og::MultiblockOptions options;
+  options.tolerance = 1e-12;
+  options.max_iterations = 20000;
+  const og::Multiblock3DResult r = og::smooth_multiblock_3d(input, options);
+  ASSERT_TRUE(r.converged);
+  double worst = 0.0;
+  for (std::size_t n = 0; n < g.x.size(); ++n) {
+    worst = std::max(worst,
+                     std::hypot(r.xyz[3 * n] - ref.grid.x[n].x, r.xyz[3 * n + 1] - ref.grid.x[n].y,
+                                r.xyz[3 * n + 2] - ref.grid.x[n].z));
+  }
+  EXPECT_LT(worst, 1e-9);
+  const int before = og::thread_count();
+  og::set_thread_count(1);
+  const og::Multiblock3DResult one = og::smooth_multiblock_3d(input, options);
+  og::set_thread_count(before);
+  EXPECT_EQ(one.xyz, r.xyz);
+}
+
+TEST(Multiblock3D, RejectsBadSlides) {
+  og::Multiblock3DInput input;
+  input.xyz.assign(24, 0.0);
+  input.fixed.assign(8, 1);
+  input.hexes.push_back({0, 1, 2, 3, 4, 5, 6, 7});
+  input.slides.push_back({0, og::SlideTarget::Surface, 3});
+  EXPECT_THROW((void)og::smooth_multiblock_3d(input, og::MultiblockOptions{}),
+               std::invalid_argument);
+}

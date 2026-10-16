@@ -56,6 +56,7 @@
   {"edges": [[{"connector": 39, "reversed": false}], [{"connector": 32, "reversed": false}], [{"connector": 44, "reversed": true}], [{"connector": 23, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 47, "name": "far_zmax", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 54,
  "patches": [

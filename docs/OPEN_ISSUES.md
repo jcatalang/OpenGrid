@@ -251,7 +251,25 @@ history). Phase tags show where each item came from.
   three nodes around them (up to 13° there on the circle O-grid).
 - **Group default wall spacing** [10a]: None keeps the initial first-cell height at each node
   (the single-domain smoother interpolates it from the side boundaries).
-- **Planar groups only** [10a]: domains in a z = const plane; 3D blocks come in 10b.
+- **Planar 2D groups** [10a]: 2D groups need domains in a z = const plane (blocks: 10b).
+- **3D speed target missed** [10b]: a 1M-cell group of blocks takes 27 s (target 10 s):
+  ~330 iterations at ~57 ms (memory-bound line sweeps along strided directions) plus the
+  sliding projections. A coarse-grid start or multigrid would be needed.
+- **3D wall grids are not smoothed** [10b]: wall faces stay fixed, and wall control copies
+  their grid into the first layers. On the sphere in a box the cubed sphere's own grid turns by
+  36° at its patch seams, so grid lines near the wall kink by up to 31° there (1.5° without
+  wall control). The 3D kink metric also leaves out three lines along each interface face's
+  edges.
+- **Box corners** [10b]: the sphere-in-a-box layout gives each box corner to three blocks;
+  their corner cells drop to a scaled Jacobian of 0.33 (0.58 per block). As in 2D, the layout
+  decides the worst cells (a box corner should belong to one block).
+- **Sliding in 3D is local too** [10b]: a node moves at most half its smallest initial
+  neighbour distance (in parameter space); sliding faces need a surface entity or a plane
+  (curved faces without a surface stay fixed). Seams between faces on different surface
+  entities of one smooth surface (the cubed sphere) slide along their connector, not across.
+- **Extruded blocks** [10b]: not allowed in groups (six-face blocks only).
+- **Groups and topology edits** [10a, 10b]: members follow splits, joins and O-grids; a 2D
+  group's member order changes when an O-grid replaces a member.
 - **Picture bug in 9b** [10a]: `09b_topology.png` coloured cells by the wrong quality values
   (structured cell order); fixed and regenerated in 10a.
 

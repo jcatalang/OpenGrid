@@ -65,6 +65,7 @@
   {"edges": [[{"connector": 37, "reversed": false}], [{"connector": 49, "reversed": false}], [{"connector": 41, "reversed": true}], [{"connector": 25, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 56, "name": "wall-outer-b", "surface": 52, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 63,
  "patches": [

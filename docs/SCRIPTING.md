@@ -146,6 +146,12 @@ slide along their curves::
     print(og.group_status(g))                             # nodes, irregular points, kink
     og.create_smoothing_group(["a", "b"], walls=[{"connector": "c-wall", "spacing": 1e-3}])
 
+Blocks work the same way (3D)::
+
+    g = og.create_smoothing_group(blocks=og.names("block"),
+                                  walls=[{"domain": "sphere-zmax", "spacing": 0.01}])
+    og.smooth_group(g)          # block grids, and their faces, follow the group
+
 `result.roles` tells what happened to each connector (interface, wall, sliding, fixed,
 outside: used by a domain outside the group). A member's own elliptic settings are ignored
 while it is in a group.

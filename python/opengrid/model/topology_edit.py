@@ -451,6 +451,54 @@ def _check_domain_users(store, entity, allowed_block=None):
                     _fail(dependent.name, "names block faces directly; cannot update it")
 
 
+def _group_domains(params: dict, old: int, new_ids: list[int]) -> dict:
+    """Smoothing-group parameters with domain ``old`` replaced by ``new_ids`` (member list of a
+    2D group; walls and sliding faces of a 3D group, keeping their settings)."""
+    params = dict(params)
+    if old in params["domains"]:
+        domains = []
+        for d in params["domains"]:
+            replacement = (d,)
+            if d == old:
+                replacement = tuple(new_ids)
+            for e in replacement:
+                if e not in domains:
+                    domains.append(e)
+        params["domains"] = tuple(domains)
+    walls = []
+    for wall in params["walls"]:
+        if wall.get("domain") == old:
+            walls.extend(dict(wall, domain=d) for d in new_ids)
+        else:
+            walls.append(wall)
+    unique = []
+    for wall in walls:
+        if all(wall.get("domain") != w.get("domain") or "domain" not in wall for w in unique):
+            unique.append(wall)
+    params["walls"] = tuple(unique)
+    if params["slide"] != "auto" and old in params["slide"]:
+        rest = [d for d in params["slide"] if d != old]
+        params["slide"] = tuple(dict.fromkeys(rest + list(new_ids)))
+    return params
+
+
+def _group_blocks(store, old: int, new_ids: list[int]) -> None:
+    """Smoothing groups holding block ``old`` hold ``new_ids`` instead (or as well, when old is
+    among them)."""
+    for dependent in list(store.dependents(old)):
+        if dependent.kind != "smoothing_group":
+            continue
+        blocks = []
+        for b in dependent.params["blocks"]:
+            replacement = (b,)
+            if b == old:
+                replacement = tuple(new_ids)
+            for e in replacement:
+                if e not in blocks and e in store:
+                    blocks.append(e)
+        _update(store, dependent.id, dict(dependent.params, blocks=tuple(blocks)))
+
+
 def _add_to_users(store, old: int, new: int, skip_block=None) -> None:
     """Every zone, patch and volume holding domain ``old`` also holds ``new``."""
     for dependent in list(store.dependents(old)):
@@ -460,7 +508,7 @@ def _add_to_users(store, old: int, new: int, skip_block=None) -> None:
         elif dependent.kind == "volume":
             params["faces"] = (*tuple(params["faces"]), new)
         elif dependent.kind == "smoothing_group":
-            params["domains"] = (*tuple(params["domains"]), new)
+            params = _group_domains(params, old, [old, new])
         else:
             continue
         _update(store, dependent.id, params)
@@ -660,13 +708,7 @@ def _replace_domain(store, old: int, new: int) -> None:
                     faces.append(f)
             params["faces"] = tuple(faces)
         elif dependent.kind == "smoothing_group":
-            domains = []
-            for d in params["domains"]:
-                if d == old:
-                    d = new
-                if d not in domains:
-                    domains.append(d)
-            params["domains"] = tuple(domains)
+            params = _group_domains(params, old, [new])
         else:
             continue
         _update(store, dependent.id, params)
@@ -684,6 +726,8 @@ def _six_face_block(store, name, where):
     if entity.params["faces"] is None:
         _fail(entity.name, "is an extruded block; only six-face blocks can be edited")
     for dependent in store.dependents(entity.id):
+        if dependent.kind == "smoothing_group":
+            continue  # updated by the edit
         _fail(entity.name, f"is used by {dependent.kind} {dependent.name!r}")
     return entity
 
@@ -768,6 +812,7 @@ def split_block(store, name, axis: str, index: int):
     _update(store, entity.id, _block_params(entity, low_faces, warnings))
     other_name = fresh_name(store, f"{entity.name}-b")
     other = _add(store, "block", _block_params(entity, high_faces, []), other_name)
+    _group_blocks(store, entity.id, [entity.id, other.id])
     return [entity.name, other.name, mid.name], warnings
 
 
@@ -841,6 +886,10 @@ def join_blocks(store, first, second):
         joined.append(store.get(names[0]).id)
     faces = [end_a[0], end_b[0], *joined]
     _update(store, a.id, _block_params(a, faces, warnings))
+    _group_blocks(store, b.id, [a.id])
+    for dependent in list(store.dependents(face)):
+        if dependent.kind == "smoothing_group":
+            _update(store, dependent.id, _group_domains(dependent.params, face, []))
     store.remove(b.id)
     store.remove(face)
     _drop_orphans(store, edge_connectors)
@@ -935,7 +984,7 @@ def ogrid_domain(store, name, fraction=0.5, radial_points=None, radial_spacing=N
         elif dependent.kind == "volume":
             params["faces"] = tuple(f for f in params["faces"] if f != entity.id)
         elif dependent.kind == "smoothing_group":
-            params["domains"] = tuple(d for d in params["domains"] if d != entity.id)
+            params = _group_domains(params, entity.id, [])
         _update(store, dependent.id, params)
     store.remove(entity.id)
     return [store.get(c).name for c in created], warnings
@@ -1062,5 +1111,6 @@ def ogrid_block(store, name, fraction=0.5, radial_points=None, radial_spacing=No
         params = _block_params(entity, [inner_face[k] for k in sorted(inner_face)], [])
         block = _add(store, "block", params, fresh_name(store, f"{base}-core"))
         created.append(block.id)
+    _group_blocks(store, entity.id, created)
     store.remove(entity.id)
     return [store.get(c).name for c in created], warnings

@@ -900,7 +900,7 @@ segment, so derivative jumps at knots never cost accuracy.
 - **Entity** `smoothing_group` (`model/groups.py`, section "domains" of the project): planar
   structured `domains`, `walls` (connector, spacing — None: the initial first-cell height —,
   decay, relaxation, max_source), `slide` ("auto" | connector tuple), `omega`,
-  `max_iterations`, `tolerance`, `acceleration` (default 10). A member's grid is its part of
+  `max_iterations`, `tolerance`, `acceleration` (default 20). A member's grid is its part of
   the group result (`DomainEvaluator` asks `GroupEvaluator`); its own `elliptic` setting is
   ignored. A domain in two groups is reported when evaluated. Topology edits keep groups up
   to date (split parts join the group, joined / O-gridded domains are replaced, split or
@@ -940,6 +940,47 @@ segment, so derivative jumps at knots never cost accuracy.
 - **GUI:** Create → Smoothing group (selected domains; selected connectors become walls),
   property panel (domains, walls "connector [spacing]", slide, settings), the smoother dock
   runs groups (live residual), connectors are drawn where the group moved them.
+
+### Multi-block smoothing groups of blocks (Phase 10b)
+- **Same entity, 3D mode:** `smoothing_group` with `blocks` (six-face blocks) instead of
+  `domains`; `walls` name faces (`{"domain", "spacing", ...}`), `slide` is "auto" or a tuple of
+  faces. Projects gained a section `groups` after `blocks` (groups of blocks reference
+  blocks); 10a files with groups in `domains` still load.
+- **Layout** (`model/groups3d.py`): the members' grids without their own smoothing
+  (`BlockEvaluator.evaluate(raw=True)`) merged by exact coordinates (faces are bitwise copies
+  of their domains, as the 3D topology already assumes); hexahedra with corner c = i + 2j + 4k,
+  mirrored when a block is left-handed. Face roles: interface / outside / wall / sliding /
+  fixed ("fixed (curved)" for a curved face without a surface entity). Sliding faces use their
+  surface or, when planar, a plane fitted through them (`PlaneSurface` patch three times their
+  size). Boundary edges: on the shared surface when their faces have the same one, else along
+  their connector between two sliding faces; fixed when a fixed / wall / outside face holds
+  them; connector ends fixed.
+- **Solver** (`structured/multiblock_elliptic3d.cpp`): node fans of hexahedra walked across
+  shared faces into octants of a local frame (structural check: one fan, no face in three
+  cells; frame check: the frames agree, otherwise the node is irregular); 27-point stencils
+  for regular nodes; lines along the three frame axes across blocks, greedily coloured (12
+  colours in one block); per iteration the metric coefficients and cross-derivative terms
+  are computed once per node (the line sweeps read the four off-line neighbours, stored in
+  line order); irregular nodes: mean of the edge-neighbour average and the trilinear
+  completions; sliding on surfaces (face nodes) and curve chains (edge nodes and smooth seams
+  between faces on different surface entities), halfway in parameter space, the step from
+  the initial parameters limited in parameter space to `slide_limit` (0.5) of the smallest
+  initial neighbour distance - an idempotent limit (a clamp in space followed by a projection,
+  or a smooth tanh limiter, stalled the accelerated iteration). Wall sources transported along
+  the lines leaving face nodes of walls (normal and two tangential). Checked against the
+  single-block smoother: equal to 1e-11 for one block, a split block, a split with a rotated
+  frame and with walls on min / max faces.
+- **Anderson** (`util/anderson.cpp`) now fuses its passes (one for the differences, one for
+  all dot products; same values bit for bit): about 2x faster for 3M unknowns.
+- **Routing:** `BlockEvaluator.evaluate` returns a member's part of the group result (the
+  block's own `smoothing` is ignored); `Session.domain_grid` shows a block face where the
+  group moved it; connectors of moved faces are drawn moved. Topology edits of member blocks
+  update the group (split adds the new block, join drops the second, O-grid replaces).
+- **Results:** a split sphere block as a group = the single block smoothed (1e-9); the ball
+  (core + 6 shells): min scaled Jacobian 0.58 -> 0.75, interface kink 0.5 deg, nodes on the
+  sphere to 2e-16, 196 iterations / 0.9 s; 1M cells (same layout): 328 iterations, 27 s on
+  10 threads (target 10 s missed: ~57 ms per iteration plus the sliding projections; a
+  coarse-grid start or multigrid would cut the iteration count).
 
 ## 7. 3D tet backend decision
 

@@ -84,7 +84,7 @@ class ModelTree(QTreeWidget):
                     parts.append(f"{len(mesh['quads'])} quads")
                 item = QTreeWidgetItem(domains, [entity.name, ", ".join(parts)])
             elif entity.kind == "smoothing_group":
-                info = f"group of {len(entity.params['domains'])}"
+                info = f"group of {len(entity.params['domains']) + len(entity.params['blocks'])}"
                 try:
                     status = session.group_status(entity.name)
                     if "pending" in status or "NOT" in status:

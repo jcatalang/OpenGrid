@@ -204,7 +204,7 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
 
-## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a done)*
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a, 10b done)*
 
 Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
 user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
@@ -259,8 +259,11 @@ the existing patches, exports and quality checks keep working on the result.
     < 3° and the min scaled Jacobian is ≥ the 9b value (0.58).
   - Sliding nodes stay on the sphere within 1e-9·R.
   - A 1M-cell group converges in < 10 s on the M1 (Release); results are identical for any
-    thread count.
+    thread count. *(Built: identical results met; 1M cells take 27 s - missed, see
+    OPEN_ISSUES.)*
 - **Demo:** sphere in a box and cylinder in a channel, all-hexahedral, CGNS multi-block.
+  *(Built: `examples/10b_multiblock_3d.py` - sphere in a box (exported to CGNS) and the solid
+  ball; the cylinder in a channel is the 2D case of 10a.)*
 
 ### 10c — Live mouse editing and freehand drawing
 - **Drag handles** (Select tool; a drag on empty space still pans) for:

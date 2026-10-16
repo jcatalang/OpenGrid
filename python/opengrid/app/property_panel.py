@@ -331,15 +331,19 @@ class ParseError(ValueError):
 def format_group_walls(walls, store) -> str:
     lines = []
     for wall in walls:
-        line = store.get(wall["connector"]).name
+        key = "connector"
+        if "domain" in wall:
+            key = "domain"
+        line = store.get(wall[key]).name
         if wall["spacing"] is not None:
             line += f" {format_number(wall['spacing'])}"
         lines.append(line)
     return "\n".join(lines)
 
 
-def parse_group_walls(text: str) -> tuple:
-    """'connector [spacing]' per line -> wall dicts (decay etc. at their defaults)."""
+def parse_group_walls(text: str, key: str = "connector") -> tuple:
+    """'name [spacing]' per line -> wall dicts (decay etc. at their defaults); ``key`` is
+    "connector" (2D groups) or "domain" (block faces, 3D groups)."""
     walls = []
     for raw in text.splitlines():
         parts = raw.split()
@@ -350,7 +354,7 @@ def parse_group_walls(text: str) -> tuple:
             spacing = parse_numbers(parts[1], f"walls: {parts[0]}")[0]
         elif len(parts) > 2:
             raise ParseError(f"walls: expected 'connector [spacing]', got {raw.strip()!r}")
-        walls.append({"connector": parts[0], "spacing": spacing})
+        walls.append({key: parts[0], "spacing": spacing})
     return tuple(walls)
 
 
@@ -1006,13 +1010,18 @@ class PropertyPanel(QWidget):
         status = QLabel(text)
         status.setWordWrap(True)
         self._form.addRow("status", status)
-        domains = QPlainTextEdit("\n".join(store.get(d).name for d in params["domains"]))
-        domains.setPlaceholderText("one structured domain per line")
-        domains.setMinimumHeight(60)
-        self._form.addRow("domains", domains)
-        self._editors["domains"] = ("names", domains)
+        members = "domains"
+        wall_kind = "connector"
+        if params["blocks"]:
+            members = "blocks"
+            wall_kind = "face (domain)"
+        names = QPlainTextEdit("\n".join(store.get(d).name for d in params[members]))
+        names.setPlaceholderText(f"one {members[:-1]} per line")
+        names.setMinimumHeight(60)
+        self._form.addRow(members, names)
+        self._editors[members] = ("names", names)
         walls = QPlainTextEdit(format_group_walls(params["walls"], store))
-        walls.setPlaceholderText("connector [spacing] per line (no spacing: keep the initial)")
+        walls.setPlaceholderText(f"{wall_kind} [spacing] per line (no spacing: keep the initial)")
         walls.setMinimumHeight(50)
         self._form.addRow("walls", walls)
         self._editors["walls"] = ("group_walls", walls)
@@ -1210,7 +1219,10 @@ class PropertyPanel(QWidget):
         if kind == "names":
             return tuple(line.strip() for line in editor.toPlainText().splitlines() if line.strip())
         if kind == "group_walls":
-            return parse_group_walls(editor.toPlainText())
+            key = "connector"
+            if self.session.store.get(self.entity_id).params["blocks"]:
+                key = "domain"
+            return parse_group_walls(editor.toPlainText(), key)
         if kind == "slide":
             return parse_slide(editor.text())
         if kind == "spin":

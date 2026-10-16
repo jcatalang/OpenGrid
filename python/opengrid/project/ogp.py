@@ -19,12 +19,16 @@ _FUTURE_SECTIONS = ()
 _SECTIONS = {
     "database": DATABASE_KINDS,
     "connectors": ("connector",),
-    "domains": ("domain", "unstructured_domain", "smoothing_group"),
+    "domains": ("domain", "unstructured_domain"),
     "blocks": ("block", "volume"),
+    "groups": ("smoothing_group",),
     "patches": ("patch",),
     "zones": ("zone",),
 }
 _RECORD_KEYS = ("id", "name", "type")
+# Kinds also accepted (when reading) in an earlier section: smoothing groups of domains were
+# written to "domains" before groups of blocks needed their own section after "blocks".
+_LEGACY = {"domains": ("smoothing_group",)}
 
 
 def _record(entity: Entity) -> dict:
@@ -116,7 +120,7 @@ def from_json(text: str, source: str = "<project>") -> Store:
             if name in seen_names:
                 issues.append(Issue(where, f"duplicate name {name!r}"))
                 continue
-            if kind not in kinds:
+            if kind not in kinds and kind not in _LEGACY.get(section, ()):
                 issues.append(Issue(where, f"unknown type {kind!r} in section {section!r}"))
                 continue
             seen_ids.add(entity_id)

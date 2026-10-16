@@ -29,7 +29,6 @@ class AndersonAccelerator {
   void reset();
 
  private:
-  [[nodiscard]] double dot(const double* a, const double* b) const;
   bool solve(std::vector<double>& gamma) const;
 
   std::size_t size_;

@@ -100,10 +100,13 @@ class SmootherDock(QWidget):
         entity = self.session.entity(name)
         if entity.kind == "smoothing_group":
             return name
-        if entity.kind != "domain":
+        if entity.kind not in ("domain", "block"):
             return None
         try:
-            group = self.session.groups.group_of(entity.id)
+            if entity.kind == "block":
+                group = self.session.groups.group_of_block(entity.id)
+            else:
+                group = self.session.groups.group_of(entity.id)
         except Exception:  # a domain in several groups: reported when it is evaluated
             return None
         if group is None:
@@ -168,7 +171,8 @@ class SmootherDock(QWidget):
         self._thread = threading.Thread(target=work, name="opengrid-group", daemon=True)
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self.status.setText(f"{name}: smoothing {len(params['domains'])} domains…")
+        count = len(params["domains"]) + len(params["blocks"])
+        self.status.setText(f"{name}: smoothing {count} members…")
         self._timer.start()
         self._thread.start()
         return True

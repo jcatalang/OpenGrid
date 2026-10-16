@@ -499,8 +499,11 @@ class MainWindow(QMainWindow):
         self.delete_action.setEnabled(bool(ids))
         domains = self._selected_domains()
         groups = self._selected_of_kind("smoothing_group")
+        blocks = self._selected_of_kind("block")
         if len(groups) == 1 and not domains:
             self.smoother_dock.set_domain(groups[0])
+        elif len(blocks) == 1 and not domains:
+            self.smoother_dock.set_domain(blocks[0])
         elif len(domains) == 1:
             self.smoother_dock.set_domain(domains[0])
         else:
@@ -679,9 +682,22 @@ class MainWindow(QMainWindow):
         return name
 
     def create_group_on_selection(self) -> str | None:
+        blocks = self._selected_of_kind("block")
         domains = self._selected_of_kind("domain")
+        if blocks:
+            # 3D: selected domains (block faces) become walls.
+            name = self._run(
+                lambda: self.session.create_smoothing_group(blocks=blocks, walls=domains)
+            )
+            if name:
+                log.info("created %s from %d blocks", name, len(blocks))
+                self.set_selection([self.session.store.get(name).id])
+                self.run_smoother(name)
+            return name
         if not domains:
-            self.statusBar().showMessage("Select the structured domains of the group", 5000)
+            self.statusBar().showMessage(
+                "Select the structured domains (2D) or blocks (3D) of the group", 5000
+            )
             return None
         walls = self._selected_of_kind("connector")
         name = self._run(lambda: self.session.create_smoothing_group(domains, walls=walls))
@@ -725,10 +741,14 @@ class MainWindow(QMainWindow):
             entity = self.session.store.get(name)
             ids = [entity.id]
             if entity.kind == "smoothing_group":
-                ids = list(entity.params["domains"])
+                ids = list(entity.params["domains"]) + list(entity.params["blocks"])
                 cached = self.session.groups.result(entity.id)
                 if cached is not None:
-                    ids += sorted(cached.roles)  # moved interfaces and sliding connectors
+                    ids += sorted(cached.roles)  # moved interfaces, sliding connectors / faces
+                    for d in getattr(cached, "faces", {}):
+                        for edge in self.session.store.get(d).params["edges"]:
+                            ids += [item["connector"] for item in edge]
+                ids = sorted(set(ids))
             self.scene.update_entities(ids)
         self.model_tree.populate(self.session)
         self.property_panel.refresh()

@@ -108,6 +108,7 @@
   {"edges": [[{"connector": 60, "reversed": false}], [{"connector": 74, "reversed": false}], [{"connector": 68, "reversed": true}], [{"connector": 62, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 94, "name": "ball-if-6", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 103,
  "patches": [

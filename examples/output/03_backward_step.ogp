@@ -30,6 +30,7 @@
   {"edges": [[{"connector": 17, "reversed": false}], [{"connector": 20, "reversed": false}], [{"connector": 18, "reversed": true}], [{"connector": 14, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 23, "name": "upper-block", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 24,
  "patches": [],

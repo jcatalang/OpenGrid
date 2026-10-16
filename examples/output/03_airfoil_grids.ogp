@@ -33,6 +33,7 @@
   {"edges": [[{"connector": 20, "reversed": true}, {"connector": 13, "reversed": true}, {"connector": 12, "reversed": false}, {"connector": 20, "reversed": false}], [{"connector": 21, "reversed": false}], [{"connector": 23, "reversed": true}, {"connector": 25, "reversed": false}, {"connector": 24, "reversed": false}], [{"connector": 22, "reversed": false}]], "generator": {"elliptic": {"acceleration": 5, "attractions": [], "control": "thomas_middlecoff", "max_iterations": 20000, "omega": 1.0, "solver": "line_sor", "tolerance": 1e-06, "walls": [{"decay": 0.1, "edge": 0, "max_source": 100.0, "relaxation": 0.1, "spacing": 0.0001}]}, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 26, "name": "c-grid", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 27,
  "patches": [],

@@ -87,6 +87,7 @@
   {"edges": [[{"connector": 48, "reversed": false}], [{"connector": 58, "reversed": false}], [{"connector": 26, "reversed": true}], [{"connector": 60, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 78, "name": "bracket-face-12", "surface": 77, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 81,
  "patches": [

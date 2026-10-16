@@ -14,6 +14,7 @@
   {"generator": {"algorithm": "advancing_front", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.15, "inflation": null, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 7, "loops": [[{"connector": 6, "reversed": false}], [{"connector": 3, "reversed": false}, {"connector": 4, "reversed": true}]], "name": "triangles", "surface": null, "type": "unstructured_domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 10,
  "patches": [

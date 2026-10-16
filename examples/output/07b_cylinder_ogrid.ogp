@@ -16,6 +16,7 @@
   {"edges": [[{"connector": 4, "reversed": false}], [{"connector": 6, "reversed": false}], [{"connector": 5, "reversed": true}], [{"connector": 6, "reversed": true}]], "generator": {"elliptic": null, "hermite_strength": 1.0, "hermite_walls": [0], "method": "tfi"}, "id": 7, "name": "wall", "surface": null, "type": "domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 12,
  "patches": [

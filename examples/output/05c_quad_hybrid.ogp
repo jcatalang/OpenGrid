@@ -19,6 +19,7 @@
   {"generator": {"algorithm": "advancing_front", "edge_swap": true, "element_type": "quads", "growth_rate": 1.15, "inflation": null, "max_points": 2000000, "max_size": null, "min_angle": 28.0, "refine": true, "smoothing": "angle_based", "smoothing_iterations": 5, "sources": []}, "id": 12, "loops": [[{"connector": 10, "reversed": false}], [{"connector": 8, "reversed": true}]], "name": "outside", "surface": null, "type": "unstructured_domain"}
  ],
  "format": "opengrid-project",
+ "groups": [],
  "name_counters": {},
  "next_id": 16,
  "patches": [

@@ -1,4 +1,8 @@
-# OpenGrid
+<p align="center">
+  <img src="docs/images/opengrid_icon.png" alt="OpenGrid icon" width="160">
+</p>
+
+<h1 align="center">OpenGrid</h1>
 
 **An interactive mesh generator for CFD: structured, unstructured and hybrid meshes in 2D and 3D,
 multi-block smoothing, CAD import, solver-ready export and high-order (curved)

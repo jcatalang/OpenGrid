@@ -269,6 +269,9 @@ history). Phase tags show where each item came from.
   can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
   moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
   the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
+- **Combinations not covered** [12b]: the CAD bracket, wing_in_box / wing stub (10 s+ each),
+  rotational periodicity through the exports, and 3D periodic patches are not among the
+  combination cases; nor is the GUI (12a covers its interactions on a small model).
 - **High-order overlay cost** [12a]: the overlay recomputes the whole high-order mesh on every
   model change (0.5 s for the C-grid template at order 4, 10 s for a 32k-hexahedron ball);
   switch it off while editing large models. It draws the patches' faces in 3D, or every cell

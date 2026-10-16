@@ -848,6 +848,24 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 12b — end-to-end tests of feature combinations (2026-10-17) — requested by the user, committed when its checks passed
+
+- `tests/python/test_combinations.py`: one checker for every model - the merged mesh is
+  consistent (every point used by a cell, every patch line / face a side of a cell, the
+  patches cover exactly the mesh boundary, no side shared by more than two cells), every
+  export read back by its reference reader with the right counts (VTKHDF through VTK, Gmsh
+  through meshio by element type and dimension, CGNS through `cgnscheck`), curved high-order
+  meshes at orders 2 (and 3 in 2D) valid with boundary elements matching the patches and
+  written to Gmsh / CGNS and read back, the journal replaying to the same model, the project
+  round-tripping to the same assembly.
+- Nine models: C-grid template + 12 wall layers + smoothing group + patches; the periodic
+  channel with zones; the hybrid ring; a cylinder with 2D inflation layers; the circle O-grid
+  smoothed as a group; a sketch; the pipe template (block faces without domains patched as
+  block faces); the extruded bump channel with 3D wall layers; the sphere in a box with
+  hexahedral layers. 20 s in all.
+- Found: nothing new in the code (the fixtures needed the 3D patch-member and face-table
+  forms). The connector-row export bug of 11g is now covered by the first and fifth cases.
+
 ## Phase 12a — GUI reliability (2026-10-17) — requested by the user, committed when its checks passed
 
 ### Built

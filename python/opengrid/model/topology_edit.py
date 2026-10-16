@@ -1114,3 +1114,99 @@ def ogrid_block(store, name, fraction=0.5, radial_points=None, radial_spacing=No
     _group_blocks(store, entity.id, created)
     store.remove(entity.id)
     return [store.get(c).name for c in created], warnings
+
+
+# ------------------------------------------------------------------------- live editing
+MOVABLE = {
+    "point": ("xyz",),
+    "line": ("p0", "p1"),
+    "polyline": ("points",),
+    "spline": ("points",),
+    "nurbs": ("control_points",),
+}
+
+
+def _segment_ends(store):
+    """(connector, segment index, "t0" | "t1", curve, t, point) of every connector segment."""
+    ends = []
+    for connector in store.entities("connector"):
+        for k, segment in enumerate(connector.params["segments"]):
+            curve = store.geometry(segment["curve"])
+            for key in ("t0", "t1"):
+                t = segment[key]
+                ends.append((connector.id, k, key, segment["curve"], t, np.asarray(curve.eval(t))))
+    return ends
+
+
+def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
+    """Move one defining point of a point or curve entity (``index`` -1 for a single point,
+    else the item of a point list) and keep curve networks connected: every place where a
+    connector piece of the moved curve meets a connector piece of another curve (a crossing,
+    or an end lying on the other curve) is solved again - Newton on both curves from the old
+    parameters, or a projection when one of them is a curve end - and the connectors meeting
+    there get the new parameters. ``check``: validate the dependents (previews skip it: an
+    invalid state fails when it is drawn). Returns ([name], warnings)."""
+    from opengrid.model.network import _refine
+
+    entity = _entity(store, name, tuple(MOVABLE), "move_handle")
+    if field not in MOVABLE[entity.kind]:
+        _fail(entity.name, f"has no movable field {field!r} ({', '.join(MOVABLE[entity.kind])})")
+    point = tuple(float(c) for c in xyz)
+    if len(point) == 2:
+        point = (*point, 0.0)
+    if index < 0:
+        changes = {field: point}
+    else:
+        values = list(entity.params[field])
+        if not 0 <= index < len(values):
+            _fail(entity.name, f"{field} has no item {index}")
+        values[index] = point
+        changes = {field: tuple(values)}
+    # Meeting places of the moved curve with other curves, before the move.
+    ends = _segment_ends(store)
+    scale = max(1.0, max((float(np.max(np.abs(e[5]))) for e in ends), default=1.0))
+    tolerance = 1e-9 * scale
+    groups = []
+    for end in ends:
+        if end[3] != entity.id:
+            continue
+        group = [other for other in ends if np.linalg.norm(other[5] - end[5]) <= tolerance]
+        partners = [other for other in group if other[3] != entity.id]
+        if partners and not any(group == g for g in groups):
+            groups.append(group)
+    _update(store, entity.id, dict(entity.params, **changes))
+    warnings = []
+    moved = store.geometry(entity.id)
+    updates: dict[int, dict] = {}
+    for group in groups:
+        own = next(e for e in group if e[3] == entity.id)
+        partner = next(e for e in group if e[3] != entity.id)
+        if len({e[3] for e in group}) > 2:
+            warnings.append("a meeting point of three or more curves follows the first two only")
+        other = store.geometry(partner[3])
+        t, tp = own[4], partner[4]
+        if t in (0.0, 1.0):
+            tp = float(other.project(tuple(moved.eval(t)))[0])
+        elif tp in (0.0, 1.0):
+            t = float(moved.project(tuple(other.eval(tp)))[0])
+        else:
+            t, tp = _refine(moved, other, t, tp)
+        for connector, k, key, curve, _t, _p in group:
+            value = t
+            if curve != entity.id:
+                if curve != partner[3]:
+                    continue
+                value = tp
+            segments = updates.setdefault(
+                connector, [dict(s) for s in store.get(connector).params["segments"]]
+            )
+            segments[k][key] = value
+    for connector, segments in sorted(updates.items()):
+        _update(store, connector, dict(store.get(connector).params, segments=tuple(segments)))
+    if check:
+        from opengrid.commands.geometry import _check_dependents_still_valid
+
+        _check_dependents_still_valid(store, entity.id)
+        for connector in sorted(updates):
+            _check_dependents_still_valid(store, connector)
+    return [entity.name], warnings

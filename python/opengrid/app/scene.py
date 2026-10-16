@@ -20,6 +20,7 @@ POINT_COLOR = "#f2f2f2"
 SELECTED_COLOR = "#ffd60a"
 PREVIEW_COLOR = "#ff9f43"
 SNAP_COLOR = "#2ee59d"
+HANDLE_COLOR = "#ffb000"
 ENDPOINT_COLOR = "#8a96a3"
 CONNECTOR_COLOR = "#ff9f43"
 NODE_COLOR = "#e8e8e8"
@@ -119,6 +120,22 @@ class Scene:
                 point_size=16,
                 render_points_as_spheres=True,
                 name="snap-marker",
+                pickable=False,
+                reset_camera=False,
+            )
+        self.plotter.render()
+
+    def show_handles(self, points) -> None:
+        """Drag handles (control points of the selected entities)."""
+        if len(points) == 0:
+            self.plotter.remove_actor("drag-handles", render=False)
+        else:
+            self.plotter.add_mesh(
+                pv.PolyData(np.asarray(points, dtype=float)),
+                color=HANDLE_COLOR,
+                point_size=11,
+                render_points_as_spheres=True,
+                name="drag-handles",
                 pickable=False,
                 reset_camera=False,
             )

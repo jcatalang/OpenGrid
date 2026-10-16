@@ -66,6 +66,14 @@ GROUPS = [
         ],
     ),
     (
+        "Freehand curves, curve networks, live editing",
+        [
+            "create_freehand",
+            "domains_from_curves",
+            "move_handle",
+        ],
+    ),
+    (
         "Multi-block smoothing groups",
         [
             "create_smoothing_group",

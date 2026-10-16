@@ -177,6 +177,53 @@ class SplineTool(Tool):
         return [tuple(p) for p in curve.tessellate_points(1e-3)]
 
 
+class NurbsTool(Tool):
+    """Click the control points of a cubic (or lower degree) clamped NURBS curve."""
+
+    name = "nurbs"
+    min_points = 2
+
+    def prompt(self) -> str:
+        return (
+            f"NURBS: click control points ({len(self.points)} so far); Enter to finish, Esc to "
+            "cancel"
+        )
+
+    def create(self, points) -> str:
+        degree = min(3, len(points) - 1)
+        spans = len(points) - degree
+        inner = [k / spans for k in range(spans + 1)]
+        knots = [0.0] * degree + inner + [1.0] * degree
+        return self.session.create_nurbs(degree, knots, points)
+
+    def preview(self, cursor) -> list[tuple]:
+        # The control polygon (the curve is drawn once created).
+        return super().preview(cursor)
+
+
+class FreehandTool(Tool):
+    """Press, draw and release: the stroke becomes NURBS curves (Session.create_freehand)."""
+
+    name = "freehand"
+    stroke = True
+    tolerance = 0.005
+    corner_angle = 60.0
+
+    def prompt(self) -> str:
+        return "Freehand: press and draw; release to fit NURBS curves (corners kept)"
+
+    def click(self, xyz) -> None:
+        return None
+
+    def create_stroke(self, points) -> list[str]:
+        if len(points) < 2:
+            return []
+        return self.session.create_freehand(points, self.tolerance, self.corner_angle)
+
+    def preview(self, cursor) -> list[tuple]:
+        return list(self.points)
+
+
 TOOLS = {
     "select": SelectTool,
     "point": PointTool,
@@ -184,4 +231,6 @@ TOOLS = {
     "arc": ArcTool,
     "polyline": PolylineTool,
     "spline": SplineTool,
+    "nurbs": NurbsTool,
+    "freehand": FreehandTool,
 }

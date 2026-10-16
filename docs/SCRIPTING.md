@@ -156,6 +156,11 @@ Blocks work the same way (3D)::
 outside: used by a domain outside the group). A member's own elliptic settings are ignored
 while it is in a group.
 
+### Freehand curves and curve networks
+    names = og.create_freehand(points)                # pointer samples -> NURBS curve(s)
+    domains = og.domains_from_curves(curves)          # crossing curves -> structured domains
+    og.move_handle("h1", "points", 6, (1.0, 0.9, 0))  # as a mouse drag: crossings follow
+
 ## Threads
 Hot loops run in parallel (OpenMP): `opengrid.threads()` reports the count (one per core by
 default, or `OMP_NUM_THREADS`), `opengrid.set_threads(n)` changes it. Results never depend on

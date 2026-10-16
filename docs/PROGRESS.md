@@ -848,6 +848,34 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 10c — live mouse editing, freehand curves, curve networks (2026-10-16) — approved (pre-authorised)
+
+### Built
+- `model/fitting.py` + `Session.create_freehand`: strokes -> NURBS curves (corners kept).
+- `model/network.py` + `Session.domains_from_curves`: crossing curves -> conforming structured
+  domains (or unstructured for faces without four corners), one undo step.
+- `Session.move_handle` (topology edit): move a point / curve defining point; crossings of the
+  moved curve with other curves are re-solved and the connectors follow.
+- GUI: drag handles of selected entities with live preview (`app/handles.py`), Freehand and
+  NURBS tools, Create -> Domains from curves; drags rerun the affected smoothing on release.
+- Demo `examples/10c_freehand_live.py`.
+
+### Results
+| Check | Result |
+|---|---|
+| Quarter-circle stroke, 0.5 % tolerance | 4 control points (<= 12 required) |
+| NACA / noisy S strokes | within 0.5 % of the stroke length |
+| 3 x 2 lattice of crossing strokes | 6 structured domains, 7 conforming interfaces |
+| Five-sided face | reported by name (or unstructured on request) |
+| Drag preview, spline with a 200 x 100 domain | ~12 ms (>= 10 frames/s required) |
+| Drag preview, six-domain freehand network | 83 ms (12 frames/s) |
+| Drag = one undo step, journal replays | yes (`og.move_handle(...)`) |
+
+### Verified
+- `pytest` +10 (`test_live_editing.py`) -> 320; ruff, ternary check, API docs; all demos run.
+- Not verified: real mouse and trackpad dragging (offscreen tests drive the world-space
+  handlers; the VTK observer path ran only in the screenshot session).
+
 ## Phase 10b — multi-block smoothing groups, 3D (2026-10-15) — approved (pre-authorised)
 
 ### Built

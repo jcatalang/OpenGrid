@@ -204,7 +204,7 @@ Phase 7 acceptance status: volume vs analytic, positive Jacobians, 1-to-1 consis
 - Packaging: conda package (rattler-build recipe, tested on osx-arm64; the Linux deliverable)
   and a macOS arm64 app bundle + DMG built from it (conda-pack).
 
-## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a, 10b done)*
+## Phase 10 — Multi-block meshing *(proposed 2026-10-15, beyond SPEC.md; approved 2026-10-15, in progress: 10a-10c done)*
 
 Goal: structured multi-block grids smoothed as one grid, edited live with the mouse. The
 user draws curves freehand or sketches a rough block topology; block interfaces, corners and boundary nodes move during a single smoothing of the
@@ -311,7 +311,9 @@ the existing patches, exports and quality checks keep working on the result.
     five-sided face reports it by name.
   - Trackpad and mouse dragging checked by hand *(manual)*.
 - **Demo:** an airfoil-like body and its block layout drawn freehand, turned into domains,
-  group-smoothed (10a), with the drag recorded as before/after screenshots.
+  group-smoothed (10a), with the drag recorded as before/after screenshots. *(Built:
+  `examples/10c_freehand_live.py` - a channel with a bump drawn freehand; "Block from curves"
+  in 3D was not built, see OPEN_ISSUES.)*
 
 ### 10d — Sketch topology (floating wireframe)
 - A `sketch` entity: a coarse block lattice defined by vertices (points) and blocks (4 vertex

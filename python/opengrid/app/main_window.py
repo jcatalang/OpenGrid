@@ -57,6 +57,8 @@ class MainWindow(QMainWindow):
         self.tool: Tool = TOOLS["select"](session)
         self._saved_journal_length = 0
         self._press_position: tuple[int, int] | None = None
+        self._drag = None  # handle drag in progress (app.handles.Drag)
+        self._stroke: list | None = None  # freehand stroke in progress
         self.resize(1400, 900)
 
         self.viewport = self._create_viewport(off_screen)
@@ -226,6 +228,12 @@ class MainWindow(QMainWindow):
             self.extrude_selection,
             tip="Block by extruding the selected structured domain (edit the extrusion afterwards)",
         )
+        self.network_action = self._action(
+            "Domains from curves",
+            self.domains_from_selected_curves,
+            tip="Structured domains from the selected curves drawn across each other (regions "
+            "with four corners); point counts from the 'dim' box",
+        )
         self.group_action = self._action(
             "Smoothing group",
             self.create_group_on_selection,
@@ -267,6 +275,8 @@ class MainWindow(QMainWindow):
             "arc": "Arc (3 points)",
             "polyline": "Polyline",
             "spline": "Spline",
+            "nurbs": "NURBS",
+            "freehand": "Freehand",
         }
         for name, label in labels.items():
             action = QAction(label, self)
@@ -308,6 +318,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.chain_action)
         create_menu.addAction(self.domain_action)
         create_menu.addAction(self.unstructured_action)
+        create_menu.addAction(self.network_action)
         create_menu.addAction(self.group_action)
         create_menu.addAction(self.block_action)
         create_menu.addAction(self.extrude_action)
@@ -378,6 +389,131 @@ class MainWindow(QMainWindow):
         iren.add_observer("LeftButtonPressEvent", self._on_vtk_press)
         iren.add_observer("LeftButtonReleaseEvent", self._on_vtk_release)
         iren.add_observer("MouseMoveEvent", self._on_vtk_move)
+        # Drags of handles and freehand strokes take the left button before the camera does:
+        # high-priority observers that stop the event when they use it.
+        interactor = iren.interactor
+        self._grab_tags = {}
+        for event, handler in (
+            ("LeftButtonPressEvent", self._grab_press),
+            ("MouseMoveEvent", self._grab_move),
+            ("LeftButtonReleaseEvent", self._grab_release),
+        ):
+            self._grab_tags[event] = interactor.AddObserver(event, handler, 10.0)
+
+    def _abort(self, interactor, event: str) -> None:
+        interactor.GetCommand(self._grab_tags[event]).SetAbortFlag(1)
+
+    def _grab_press(self, interactor, event) -> None:
+        x, y = interactor.GetEventPosition()
+        if self.handle_press(self.scene.display_to_world(x, y)):
+            self._abort(interactor, event)
+
+    def _grab_move(self, interactor, event) -> None:
+        if self._drag is None and self._stroke is None:
+            return
+        x, y = interactor.GetEventPosition()
+        self.handle_drag(self.scene.display_to_world(x, y))
+        self._abort(interactor, event)
+
+    def _grab_release(self, interactor, event) -> None:
+        if self._drag is None and self._stroke is None:
+            return
+        x, y = interactor.GetEventPosition()
+        self.handle_release(self.scene.display_to_world(x, y))
+        self._press_position = None
+        self._abort(interactor, event)
+
+    # ------------------------------------------------- drags and freehand strokes
+    def visible_handles(self):
+        from opengrid.app.handles import handles_for
+
+        if self.tool.name != "select":
+            return []
+        return handles_for(self.session, self.selected_names())
+
+    def _show_handles(self) -> None:
+        self.scene.show_handles([h.xyz for h in self.visible_handles()])
+
+    def handle_press(self, xyz) -> bool:
+        """Start a handle drag (Select tool, near a handle of a selected entity) or a freehand
+        stroke (Freehand tool). Returns True when the press is used."""
+        from opengrid.app.handles import Drag, pick_handle
+
+        if getattr(self.tool, "stroke", False):
+            self._stroke = [tuple(xyz)]
+            return True
+        if self.tool.name != "select":
+            return False
+        tolerance = PICK_PIXELS * self.scene.world_per_pixel()
+        handle = pick_handle(self.visible_handles(), xyz, tolerance)
+        if handle is None:
+            return False
+        self._drag = Drag(self.session, handle)
+        self.statusBar().showMessage(f"Dragging {handle.entity}.{handle.field}")
+        return True
+
+    def handle_drag(self, xyz) -> None:
+        if self._stroke is not None:
+            self._stroke.append(tuple(xyz))
+            self.scene.show_preview(self._stroke)
+            return
+        if self._drag is None:
+            return
+        self._drag.preview(xyz, self.scene.update_entities)
+
+    def handle_release(self, xyz) -> list[str]:
+        """Finish a stroke (returns the curves) or a drag (returns [entity])."""
+        if self._stroke is not None:
+            stroke = [*self._stroke, tuple(xyz)]
+            self._stroke = None
+            self.scene.show_preview([])
+            created = self._run(lambda: self.tool.create_stroke(stroke))
+            if created:
+                log.info("freehand: %s", ", ".join(created))
+            return created or []
+        if self._drag is None:
+            return []
+        drag = self._drag
+        self._drag = None
+        name = self._run(lambda: drag.finish(xyz))
+        self.scene.update_entities(drag.affected)
+        self._show_handles()
+        if not name:
+            return []
+        self._smooth_affected(drag.affected)
+        return [name]
+
+    def _smooth_affected(self, ids) -> None:
+        """After a drag: rerun the smoothing of an affected group or domain (the preview
+        showed TFI)."""
+        store = self.session.store
+        for entity_id in ids:
+            entity = store.get(entity_id)
+            if entity.kind == "smoothing_group":
+                self.run_smoother(entity.name)
+                return
+        for entity_id in ids:
+            entity = store.get(entity_id)
+            if entity.kind == "domain" and entity.params["generator"]["elliptic"] is not None:
+                self.run_smoother(entity.name)
+                return
+
+    def domains_from_selected_curves(self) -> list[str]:
+        from opengrid.model.connectors import CURVE_KINDS
+
+        curves = [n for n in self.selected_names() if self.session.store.get(n).kind in CURVE_KINDS]
+        if not curves:
+            self.statusBar().showMessage("Select the curves of the network first", 5000)
+            return []
+        total = sum(self.session.length(c) for c in curves)
+        spacing = total / len(curves) / max(self.dimension_box.value() - 1, 1)
+        created = self._run(lambda: self.session.domains_from_curves(curves, spacing=spacing))
+        if created:
+            log.info("created %s", ", ".join(created))
+            for warning in self.session.last_warnings:
+                log.warning(warning)
+            self.set_selection([self.session.store.get(n).id for n in created])
+        return created or []
 
     # ------------------------------------------------------- viewport events
     def _event_position(self) -> tuple[int, int]:
@@ -453,6 +589,9 @@ class MainWindow(QMainWindow):
     def set_tool(self, name: str) -> None:
         self.tool.cancel()
         self.tool = TOOLS[name](self.session)
+        self._stroke = None
+        self._drag = None
+        self._show_handles()
         self.tool_actions[name].setChecked(True)
         self.scene.show_preview([])
         self.scene.show_snap(None)
@@ -491,6 +630,7 @@ class MainWindow(QMainWindow):
         ids = [i for i in ids if i in self.session.store]
         self.selected_ids = list(ids)
         self.scene.set_selection(ids)
+        self._show_handles()
         self.model_tree.select_ids(ids)
         if len(ids) == 1:
             self.property_panel.show_entity(ids[0])

@@ -268,6 +268,19 @@ history). Phase tags show where each item came from.
   (curved faces without a surface stay fixed). Seams between faces on different surface
   entities of one smooth surface (the cubed sphere) slide along their connector, not across.
 - **Extruded blocks** [10b]: not allowed in groups (six-face blocks only).
+- **Real mouse dragging untested** [10c]: drags and strokes were driven through the
+  world-space handlers offscreen; the VTK observers that take the left button from the camera
+  ran only in the screenshot session (no manual check with a mouse or trackpad).
+- **Handles** [10c]: only for selected points, lines, polylines, splines, NURBS control
+  points and connector break points; arcs, surfaces and NURBS weights have none. Grid nodes
+  are never dragged (they are derived).
+- **Curve networks** [10c]: planar curves only; a structured face needs four corners
+  (turns > 30 degrees); opposite sides made of several network edges are not balanced (the
+  face is reported if the counts differ); a smooth closed curve (no corners) is not cut into
+  four sides; meeting points of three curves follow only the first two when a curve is
+  dragged. "Block from curves" (3D) was not built.
+- **Freehand** [10c]: fitted once (later drags move control points); pointer samples in the
+  z = 0 plane; corners below 60 degrees are smoothed over.
 - **Groups and topology edits** [10a, 10b]: members follow splits, joins and O-grids; a 2D
   group's member order changes when an O-grid replaces a member.
 - **Picture bug in 9b** [10a]: `09b_topology.png` coloured cells by the wrong quality values

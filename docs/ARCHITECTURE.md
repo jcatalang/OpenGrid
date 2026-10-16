@@ -982,6 +982,37 @@ segment, so derivative jumps at knots never cost accuracy.
   10 threads (target 10 s missed: ~57 ms per iteration plus the sliding projections; a
   coarse-grid start or multigrid would cut the iteration count).
 
+### Live editing, freehand curves, curve networks (Phase 10c)
+- **Freehand** (`model/fitting.py`, `Session.create_freehand`): a pointer stroke is split at
+  corners (direction over a window of 3 % of the stroke turning by >= 60 degrees) and each
+  piece is a clamped cubic B-spline: least squares with chord-length parameters, end points
+  interpolated, a small second-difference penalty, knot insertion in the span with the
+  largest error until the samples are within the tolerance (0.5 % of the stroke length),
+  two passes of parameter correction. The curves are ordinary `nurbs` entities.
+- **Curve networks** (`model/network.py`, `Session.domains_from_curves`): crossings found
+  on the tessellations and refined by Newton on both curves, ends lying on other curves and
+  sharp turns become vertices; the pieces between them are edges; the bounded faces of the
+  planar arrangement are traced with half-edges; a face with four corners (turns > 30
+  degrees) becomes a structured domain with connectors on the curve pieces (t0, t1 of the
+  original curves, so curves stay untouched); counts from a spacing, equal across opposite
+  single-edge sides (union-find), so domains conform. Other faces are reported or become
+  unstructured domains. One undo step (CreateEntities).
+- **Dragging** (`app/handles.py`): handles are the defining points of the selected points,
+  lines, polylines, splines, NURBS control points and connector break points. During a drag
+  the change is applied inside a store transaction, the affected entities are redrawn and the
+  transaction is rolled back (evaluator caches invalidated both ways); smoothed domains and
+  groups show TFI while dragging. On release one command: `Session.move_handle` (a topology
+  edit, journaled as `og.move_handle(...)`), which also re-solves every place where a
+  connector piece of the moved curve meets a piece of another curve (Newton on both curves,
+  or a projection at curve ends) and updates the connectors there, so network domains stay
+  closed; then the affected group or domain is smoothed again. The left button is taken from
+  the camera by high-priority VTK observers that abort the event while a drag or stroke runs.
+- **Tools:** NURBS (click control points; clamped uniform knots, degree <= 3) and Freehand
+  (press, draw, release); Create -> Domains from curves (counts from the 'dim' box).
+- **Results:** preview of a dragged spline point with a 200 x 100 dependent domain: ~12 ms
+  (85 frames/s, offscreen); a six-domain freehand network: 83 ms (12 frames/s). Quarter
+  circle stroke: 4 control points within 0.5 %.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

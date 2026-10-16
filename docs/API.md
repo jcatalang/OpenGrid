@@ -204,6 +204,34 @@ Per-cell quality metrics: arrays of shape (nj - 1, ni - 1) for structured domain
 
 One-line summary of a structured or unstructured domain.
 
+## Freehand curves, curve networks, live editing
+
+### `create_freehand(points, tolerance: float = 0.005, corner_angle: float | None = 60.0, name: str | None = None) -> list[str]`
+
+NURBS curves fitted to a freehand stroke (pointer samples): split at corners (turns
+of ``corner_angle`` degrees or more; None: never) and fitted by cubic B-splines within
+``tolerance`` times the stroke length (opengrid.model.fitting). One undo step; the
+journal records the fitted curves. ``name`` is used for a single piece, else
+``name-1``, ``name-2``...
+
+### `domains_from_curves(curves, spacing: float | None = None, corner_angle: float = 30.0, unstructured: bool = False) -> list[str]`
+
+Structured domains from planar curves drawn across each other (a closed loop of
+curves, or a network): the curves are cut where they cross or turn sharply, every
+region with four corners becomes a structured domain with connectors on the curve
+pieces (point counts from ``spacing``, default 1/20 of the median piece length;
+opposite sides made equal so neighbouring domains conform). Other regions are
+reported in ``last_warnings`` (or become unstructured domains with
+``unstructured``). One undo step; returns the domains created.
+
+### `move_handle(name: str, field: str, index: int, xyz) -> str`
+
+Move one defining point of a point or curve (``field``: "xyz", "p0"/"p1",
+"points" or "control_points"; ``index`` -1 for single points), as a drag in the GUI
+does: crossings of the curve with other curves are solved again and the connectors
+meeting there follow, so domains built from a curve network stay closed. One undo
+step.
+
 ## Multi-block smoothing groups
 
 ### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=()) -> str`

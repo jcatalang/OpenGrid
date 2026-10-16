@@ -30,7 +30,7 @@ from opengrid.commands.base import JOURNAL_HEADER
 from opengrid.io import read_airfoil_dat, read_points_csv, write_plot3d
 from opengrid.io.cad import CadImport, cad_entities, check_options, read_cad_model
 from opengrid.model.blocks import BlockEvaluator
-from opengrid.model.connectors import ConnectorEvaluator, ConnectorNodes, order_chain
+from opengrid.model.connectors import CURVE_KINDS, ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.groups import GroupEvaluator, GroupResult
 from opengrid.model.store import Entity, Store
@@ -141,6 +141,68 @@ class Session:
 
     # ----------------------------------------------------------- connectors
     # -------------------------------------------------------------- surfaces
+    def create_freehand(
+        self,
+        points,
+        tolerance: float = 0.005,
+        corner_angle: float | None = 60.0,
+        name: str | None = None,
+    ) -> list[str]:
+        """NURBS curves fitted to a freehand stroke (pointer samples): split at corners (turns
+        of ``corner_angle`` degrees or more; None: never) and fitted by cubic B-splines within
+        ``tolerance`` times the stroke length (opengrid.model.fitting). One undo step; the
+        journal records the fitted curves. ``name`` is used for a single piece, else
+        ``name-1``, ``name-2``..."""
+        from opengrid.model.fitting import fit_stroke
+
+        pieces = fit_stroke([_as3(p) for p in points], tolerance, corner_angle)
+        items = []
+        for k, piece in enumerate(pieces):
+            params = {key: piece[key] for key in ("degree", "knots", "control_points", "weights")}
+            piece_name = name
+            if name is not None and len(pieces) > 1:
+                piece_name = f"{name}-{k + 1}"
+            items.append(("nurbs", params, piece_name))
+        return self.commands.run(CreateEntities(items, label="Freehand curve"))
+
+    def domains_from_curves(
+        self,
+        curves,
+        spacing: float | None = None,
+        corner_angle: float = 30.0,
+        unstructured: bool = False,
+    ) -> list[str]:
+        """Structured domains from planar curves drawn across each other (a closed loop of
+        curves, or a network): the curves are cut where they cross or turn sharply, every
+        region with four corners becomes a structured domain with connectors on the curve
+        pieces (point counts from ``spacing``, default 1/20 of the median piece length;
+        opposite sides made equal so neighbouring domains conform). Other regions are
+        reported in ``last_warnings`` (or become unstructured domains with
+        ``unstructured``). One undo step; returns the domains created."""
+        from opengrid.model.network import build_network, plan_domains
+
+        ids = []
+        for curve in curves:
+            entity = self.store.get(curve)
+            if entity.kind not in CURVE_KINDS:
+                raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a curve")])
+            ids.append(entity.id)
+        if spacing is None:
+            net = build_network(self.store, ids, corner_angle)
+            lengths = sorted(edge.length for edge in net.edges)
+            if not lengths:
+                raise ValidationError([Issue("curves", "no curve pieces")])
+            spacing = lengths[len(lengths) // 2] / 20.0
+        items, issues, _net = plan_domains(self.store, ids, spacing, corner_angle, unstructured)
+        self.last_warnings = [f"{issue.where}: {issue.message}" for issue in issues]
+        for warning in self.last_warnings:
+            log.warning(warning)
+        domains = [name for kind, _params, name in items if kind != "connector"]
+        if not domains:
+            raise ValidationError(issues or [Issue("curves", "no domain could be formed")])
+        self.commands.run(CreateEntities(items, label=f"Domains from {len(ids)} curves"))
+        return domains
+
     def create_plane(self, origin, u_vector, v_vector, name: str | None = None) -> str:
         """Plane patch x = origin + u u_vector + v v_vector, (u, v) in [0, 1]^2."""
         return self._create(
@@ -961,6 +1023,14 @@ class Session:
         for warning in command.warnings:
             log.warning("%s: %s", method, warning)
         return names
+
+    def move_handle(self, name: str, field: str, index: int, xyz) -> str:
+        """Move one defining point of a point or curve (``field``: "xyz", "p0"/"p1",
+        "points" or "control_points"; ``index`` -1 for single points), as a drag in the GUI
+        does: crossings of the curve with other curves are solved again and the connectors
+        meeting there follow, so domains built from a curve network stay closed. One undo
+        step."""
+        return self._topology("move_handle", f"Move {name}", name, field, index, tuple(xyz))[0]
 
     def split_connector(self, name: str, index: int, new_name: str | None = None) -> list[str]:
         """Split a connector at node ``index``: it keeps nodes 0..index, a new connector takes

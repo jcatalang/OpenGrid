@@ -63,11 +63,16 @@ class AndersonAccelerator {
 
   std::size_t size_;
   std::size_t depth_;
-  std::size_t count_ = 0;     // columns in the history (<= depth)
-  std::size_t next_ = 0;      // ring position of the next column
-  bool primed_ = false;       // last_f_ / last_g_ hold the previous step
-  std::vector<double> df_;    // depth x size, ring of residual differences
-  std::vector<double> dg_;    // depth x size, ring of map differences
+  std::size_t count_ = 0;  // columns in the history (<= depth)
+  std::size_t next_ = 0;   // ring position of the next column
+  bool primed_ = false;    // last_f_ / last_g_ hold the previous step
+  // The history rings in single precision: they are differences between consecutive
+  // iterates and residuals (small, and only ever combined linearly into the next iterate), and
+  // reading them is what a step costs on a large grid - 2 x depth x size values per step,
+  // halved by the float (11b/12d: 34 % of the 1M-cell group iteration). Everything else is
+  // double; the chunked sums keep the result independent of the thread count.
+  std::vector<float> df_;     // depth x size, ring of residual differences
+  std::vector<float> dg_;     // depth x size, ring of map differences
   std::vector<double> gram_;  // depth x depth, by ring slot
   std::vector<double> last_f_;
   std::vector<double> last_g_;

@@ -848,6 +848,55 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 12d — 3D speed (2026-10-17) — requested by the user, committed when its checks passed
+
+### Measured first
+- `OG_PROFILE=1` (a `PhaseTimer`, `util/phase_timer.hpp`, in the 3D group smoother's loop;
+  the report goes with the result's warnings). The 1M-cell ball (10b: 7 blocks, 1.06 M nodes,
+  328 iterations), M1 Max: 10 threads 21.0 s = line sweeps 8.5 s (48 %), Anderson mixing
+  6.2 s (35 %), sliding projections 1.4 s (8 %), coefficient pass 1.3 s (8 %); one thread
+  110.6 s with the same split (sweeps 51 s, Anderson 37 s). (macOS `sample` attached but
+  recorded nothing for this process.)
+- The knobs are at their optimum: Anderson depth 10 -> 439 iterations, 24.5 s; depth 30 ->
+  274 iterations but 76 ms each, 20.9 s; over-relaxation omega 1.2 -> 354 iterations,
+  22.9 s; 1.4 -> 387.
+
+### Built
+- Line sweeps read a compact per-node record (`SweepCoefficients`: the six line
+  coefficients, the diagonal and the frozen cross term, 80 bytes instead of 104) and compact
+  line tables (32-bit node ids, byte directions: 22 bytes per line node instead of 80). Both
+  exact: the grids are bit-identical to before.
+- Anderson acceleration (`util/anderson.cpp`): the history rings in single precision (they
+  hold differences between consecutive iterates and residuals and only enter linearly);
+  the dot products as four fixed-order partial sums (one accumulator was a latency-bound
+  chain under strict floating point); the extrapolation column by column (each unknown
+  still subtracts the columns in the same order: the same values, but streaming and
+  vectorised). The chunked, index-ordered sums are unchanged: results stay independent of
+  the thread count (identical digests on 1, 4 and 10 threads). Smoothed grids differ from
+  before at the level of the float history (the 1M ball: same 328 iterations, same kink).
+
+### Results (1M-cell ball, 10 threads)
+| Step | Total | Sweeps | Anderson |
+|---|---|---|---|
+| Before | 21.0 s | 8.5 s | 6.2 s |
+| Compact coefficients (exact) | 20.5 s | 8.1 s | 6.1 s |
+| + float history | 20.0 s | 8.1 s | 5.7 s |
+| + Anderson loops | 19.4 s | 8.5 s | 4.6 s |
+| + compact line tables (exact) | 18.5 s | 7.6 s | 4.6 s |
+
+- 12 % in all; the 10 s target of Phase 9c stays missed. What remains is memory latency:
+  every j- or k-line node gathers its coefficient record, its four side neighbours and
+  itself from scattered addresses (about 1.5 KB of cache-line traffic per node per
+  iteration, 1.7 GB per iteration); the Thomas solves are a small part. A per-direction
+  layout of the coefficients and positions (ADI style) or a structured fast path for
+  interior nodes would attack that; the solver-level routes (coarse-to-fine, GPU) were
+  measured in 11c / 11d and do not pay to the same accuracy.
+
+### Verified
+- `ctest` 154; `pytest` (the smoothed grids changed at the 1e-7 level: no test needed a
+  change); thread independence on the ball; lint, clang-tidy on the changed C++, ternary
+  check, launcher check.
+
 ## Phase 12c — repair of curved elements and rigorous validity (2026-10-17) — requested by the user, committed when its checks passed
 
 ### Built

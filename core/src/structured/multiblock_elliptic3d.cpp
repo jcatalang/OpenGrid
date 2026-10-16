@@ -13,6 +13,7 @@
 #include "opengrid/core/structured/wall_layers.hpp"
 #include "opengrid/core/util/anderson.hpp"
 #include "opengrid/core/util/parallel.hpp"
+#include "opengrid/core/util/phase_timer.hpp"
 
 namespace og {
 namespace {
@@ -580,6 +581,25 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       }
     }
   }
+  // Compact copies for the sweeps (read three times per node per iteration): 32-bit node
+  // ids and byte directions, 22 bytes per line node instead of 80.
+  if (n > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+    throw std::invalid_argument("multiblock 3D: too many nodes");
+  }
+  std::vector<std::int32_t> sweep_node(line_nodes.size());
+  std::vector<std::uint8_t> sweep_prev(line_nodes.size());
+  std::vector<std::uint8_t> sweep_next(line_nodes.size());
+  std::vector<std::int32_t> sweep_side_node(line_side.size());
+  std::vector<std::uint8_t> sweep_side_dir(line_side.size());
+  for (std::size_t k = 0; k < line_nodes.size(); ++k) {
+    sweep_node[k] = static_cast<std::int32_t>(line_nodes[k]);
+    sweep_prev[k] = static_cast<std::uint8_t>(line_prev[k]);
+    sweep_next[k] = static_cast<std::uint8_t>(line_next[k]);
+  }
+  for (std::size_t q = 0; q < line_side.size(); ++q) {
+    sweep_side_dir[q] = static_cast<std::uint8_t>(line_side[q].first);
+    sweep_side_node[q] = static_cast<std::int32_t>(line_side[q].second);
+  }
   std::vector<int> colour(lines.size(), -1);
   int colours = 0;
   for (std::size_t l = 0; l < lines.size(); ++l) {
@@ -881,7 +901,14 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       regular.push_back(g);
     }
   }
-  std::vector<Coefficients> frozen(n);
+  // What the line sweeps read per node (three times per iteration, scattered for the j and k
+  // lines): the line coefficients only, 80 bytes instead of the 104 of Coefficients.
+  struct SweepCoefficients {
+    std::array<double, 6> a;
+    double diag;
+    Vec3 cross;
+  };
+  std::vector<SweepCoefficients> frozen(n);
 
   // Point updates.
   std::vector<std::size_t> irregular;
@@ -1080,19 +1107,18 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     const std::size_t o = line.offset + 2 * l;
     const std::size_t m = line.size;
     for (std::size_t k = 0; k < m; ++k) {
-      const auto g = static_cast<std::size_t>(line_nodes[line.offset + k]);
-      const Coefficients& c = frozen[g];
-      const int prev = line_prev[line.offset + k];
-      const int next = line_next[line.offset + k];
+      const auto g = static_cast<std::size_t>(sweep_node[line.offset + k]);
+      const SweepCoefficients& c = frozen[g];
+      const std::size_t prev = sweep_prev[line.offset + k];
+      const std::size_t next = sweep_next[line.offset + k];
       Vec3 b = c.cross;
       const std::size_t side = 4 * (line.offset + k);
       for (std::size_t q = side; q < side + 4; ++q) {
-        const auto& [d, node] = line_side[q];
-        b += c.a[static_cast<std::size_t>(d)] * x[static_cast<std::size_t>(node)];
+        b += c.a[sweep_side_dir[q]] * x[static_cast<std::size_t>(sweep_side_node[q])];
       }
-      la[o + k + 1] = -c.a[static_cast<std::size_t>(prev)];
+      la[o + k + 1] = -c.a[prev];
       lb[o + k + 1] = c.diag;
-      lc[o + k + 1] = -c.a[static_cast<std::size_t>(next)];
+      lc[o + k + 1] = -c.a[next];
       rhs[0][o + k + 1] = b.x;
       rhs[1][o + k + 1] = b.y;
       rhs[2][o + k + 1] = b.z;
@@ -1110,7 +1136,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     }
     double sum = 0.0;
     for (std::size_t k = 0; k < m; ++k) {
-      const auto g = static_cast<std::size_t>(line_nodes[line.offset + k]);
+      const auto g = static_cast<std::size_t>(sweep_node[line.offset + k]);
       const Vec3 delta = Vec3{rhs[0][o + k + 1], rhs[1][o + k + 1], rhs[2][o + k + 1]} - x[g];
       x[g] += options.omega * delta;
       sum += dot(delta, delta);
@@ -1212,15 +1238,20 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
     }
   }
   double first_residual = 0.0;
+  PhaseTimer timer({"pack", "walls", "coefficients", "sweeps", "irregular", "sliding", "update",
+                    "residual", "anderson"});
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
     if (progress != nullptr && progress->cancelled()) {
       result.cancelled = true;
       break;
     }
+    timer.start();
     if (options.acceleration > 0) {
       pack(before);
     }
+    timer.lap(0);
     update_walls();
+    timer.lap(1);
     if (device) {
       parallel_for(
           0, static_cast<std::int64_t>(regular.size()),
@@ -1236,10 +1267,11 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
           0, static_cast<std::int64_t>(regular.size()),
           [&](std::int64_t k) {
             const std::size_t g = regular[static_cast<std::size_t>(k)];
-            frozen[g] = coefficients(g);
-            frozen[g].cross = cross_term(g, frozen[g]);
+            const Coefficients c = coefficients(g);
+            frozen[g] = {c.a, c.diag, cross_term(g, c)};
           },
           1024);
+      timer.lap(2);
       for (const std::vector<std::size_t>& group : by_colour) {
         parallel_for(
             0, static_cast<std::int64_t>(group.size()),
@@ -1250,6 +1282,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
             4);
       }
     }
+    timer.lap(3);
     // Irregular nodes (Jacobi).
     parallel_for(
         0, static_cast<std::int64_t>(irregular.size()),
@@ -1275,6 +1308,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
               0.5 * ((1.0 / count_edges) * edges + (1.0 / hexes) * completions);
         },
         64);
+    timer.lap(4);
     // Sliding nodes (Jacobi): the projection of the inward neighbour (faces) or of the inward
     // diagonal neighbour (edges), halfway.
     parallel_for(
@@ -1400,6 +1434,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
           slide_param[us] = {u, v};
         },
         16);
+    timer.lap(5);
     parallel_for(
         0, static_cast<std::int64_t>(irregular.size()),
         [&](std::int64_t i) {
@@ -1422,6 +1457,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
           point_sum[irregular.size() + s] = dot(delta, delta);
         },
         4096);
+    timer.lap(6);
     double sum = 0.0;
     for (const double value : line_sum) {
       sum += value;
@@ -1430,6 +1466,7 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
       sum += value;
     }
     const double residual = std::sqrt(sum / updates);
+    timer.lap(7);
     if (!std::isfinite(residual) && options.acceleration > 0) {
       // An extrapolation blew up within one step: back to the best iterate.
       pack(after);
@@ -1460,12 +1497,16 @@ Multiblock3DResult smooth_multiblock_3d(const Multiblock3DInput& input,
         reproject();
       }
     }
+    timer.lap(8);
     result.iterations = iteration + 1;
     if (residual <= tolerance * first_residual || residual <= 1e-13 * size ||
         residual <= options.absolute_tolerance) {
       result.converged = true;
       break;
     }
+  }
+  if (timer.enabled()) {
+    result.warnings.push_back("multiblock 3D timings: " + timer.report());
   }
   int saturated = 0;
   for (std::size_t w = 0; w < walls.size(); ++w) {

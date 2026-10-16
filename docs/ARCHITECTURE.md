@@ -1238,6 +1238,12 @@ segment, so derivative jumps at knots never cost accuracy.
   connector nodes merged by coordinates, which failed for group-smoothed domains whose
   boundary nodes slide).
 
+### Profiling the 3D group smoother (Phase 12d)
+- `util/phase_timer.hpp`: wall-clock accumulators per loop phase, enabled by `OG_PROFILE`
+  (a branch on a flag otherwise), reported through the result's warnings. The Anderson
+  accelerator keeps its history in single precision and sums in fixed chunks and orders;
+  the sweeps read compact per-node and per-line records.
+
 ### Repair and rigorous validity of curved elements (Phase 12c)
 - `model/repair.py`: `validity` converts the Jacobian determinant, interpolated on a lattice
   of its own polynomial degree, to Bernstein coefficients (per-direction operators for tensor

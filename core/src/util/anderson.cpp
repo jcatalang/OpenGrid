@@ -1,6 +1,7 @@
 #include "opengrid/core/util/anderson.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -29,8 +30,8 @@ void chunked(std::size_t size, Body&& body) {
 
 AndersonAccelerator::AndersonAccelerator(std::size_t size, int depth)
     : size_(size), depth_(static_cast<std::size_t>(std::max(depth, 1))) {
-  df_.assign(depth_ * size_, 0.0);
-  dg_.assign(depth_ * size_, 0.0);
+  df_.assign(depth_ * size_, 0.0F);
+  dg_.assign(depth_ * size_, 0.0F);
   gram_.assign(depth_ * depth_, 0.0);
   last_f_.assign(size_, 0.0);
   last_g_.assign(size_, 0.0);
@@ -49,15 +50,15 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
   // chunks in order: the same values as separate dot products, for any thread count).
   const bool primed = primed_;
   const std::size_t slot = next_;
-  double* df = &df_[slot * size_];
-  double* dg = &dg_[slot * size_];
+  float* df = &df_[slot * size_];
+  float* dg = &dg_[slot * size_];
   chunked(size_, [&](std::size_t begin, std::size_t end) {
     for (std::size_t k = begin; k < end; ++k) {
       const double fk = g[k] - u[k];
       f_[k] = fk;
       if (primed) {
-        df[k] = fk - last_f_[k];
-        dg[k] = g[k] - last_g_[k];
+        df[k] = static_cast<float>(fk - last_f_[k]);
+        dg[k] = static_cast<float>(g[k] - last_g_[k]);
       }
       last_f_[k] = fk;
       last_g_[k] = g[k];
@@ -78,15 +79,26 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
   chunked(size_, [&](std::size_t begin, std::size_t end) {
     double* out = &partial[(begin / kChunk) * 2 * m];
     for (std::size_t s = 0; s < m; ++s) {
-      const double* column = &df_[s * size_];
-      double with_new = 0.0;
-      double with_f = 0.0;
-      for (std::size_t k = begin; k < end; ++k) {
-        with_new += column[k] * df[k];
-        with_f += column[k] * f_[k];
+      const float* column = &df_[s * size_];
+      // Four independent partial sums (a single accumulator is a latency-bound chain), added
+      // in a fixed order: the result is still the same for any thread count.
+      std::array<double, 4> with_new{};
+      std::array<double, 4> with_f{};
+      std::size_t k = begin;
+      for (; k + 4 <= end; k += 4) {
+        for (std::size_t j = 0; j < 4; ++j) {
+          const double value = column[k + j];
+          with_new[j] += value * static_cast<double>(df[k + j]);
+          with_f[j] += value * f_[k + j];
+        }
       }
-      out[2 * s] = with_new;
-      out[2 * s + 1] = with_f;
+      for (; k < end; ++k) {
+        const double value = column[k];
+        with_new[0] += value * static_cast<double>(df[k]);
+        with_f[0] += value * f_[k];
+      }
+      out[2 * s] = (with_new[0] + with_new[1]) + (with_new[2] + with_new[3]);
+      out[2 * s + 1] = (with_f[0] + with_f[1]) + (with_f[2] + with_f[3]);
     }
   });
   std::vector<double> gamma(m, 0.0);
@@ -107,13 +119,15 @@ bool AndersonAccelerator::step(const std::vector<double>& u, std::vector<double>
     reset();
     return false;
   }
+  // Column by column (each unknown still sees the columns in the same order, so the values
+  // are those of the unknown-by-unknown loop; this form streams and vectorises).
   chunked(size_, [&](std::size_t begin, std::size_t end) {
-    for (std::size_t k = begin; k < end; ++k) {
-      double value = g[k];
-      for (std::size_t s = 0; s < m; ++s) {
-        value -= gamma[s] * dg_[s * size_ + k];
+    for (std::size_t s = 0; s < m; ++s) {
+      const double factor = gamma[s];
+      const float* column = &dg_[s * size_];
+      for (std::size_t k = begin; k < end; ++k) {
+        g[k] -= factor * static_cast<double>(column[k]);
       }
-      g[k] = value;
     }
   });
   return true;

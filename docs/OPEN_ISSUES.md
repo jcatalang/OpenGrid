@@ -322,11 +322,15 @@ history). Phase tags show where each item came from.
   the CPU grid by up to 7 % of the local cell size. Short lines (the 10d wing stub: ~9 nodes)
   are latency-bound on the device (no gain). OpenCL is deprecated on macOS (Metal is the
   native API); only the 3D group smoother has a GPU path; tested on one device (M1 Max).
-- **3D speed target missed** [10b, 11b]: a 1M-cell group of blocks takes 22 s after 11b
-  (27 s before; target 10 s): ~330 iterations at ~63 ms, half of it in the line sweeps
-  (gathers along strided directions, 21 colours with a barrier each) and a quarter in the
-  Anderson mixing (memory-bound). Single-threaded speed is the limit now (the 10d wing stub:
-  43.7 s on one thread, 9.2 s on ten); coarse-to-fine smoothing is 11c.
+- **3D speed target missed** [10b, 11b, 12d]: a 1M-cell group of blocks takes 18.5 s after
+  12d (27 s before 11b; target 10 s): 328 iterations at 56 ms, half of it in the line sweeps
+  and a third in the Anderson mixing. The sweeps are bound by scattered memory access along
+  the j and k lines (about 1.5 KB of cache-line traffic per node per iteration), the mixing
+  by the traffic of its history (depth 20 over 3.2 M unknowns; single precision now).
+  Depth, over-relaxation, coarse-to-fine (11c) and the GPU (11d) were all measured and do
+  not pay; a per-direction data layout for the sweeps was not built. Single-threaded speed
+  is the limit (the 10d wing stub: 43.7 s on one thread, 9.2 s on ten). `OG_PROFILE=1`
+  prints the phase times of a 3D group run.
 - **3D wall grids are not smoothed** [10b]: wall faces stay fixed, and wall control copies
   their grid into the first layers. On the sphere in a box the cubed sphere's own grid turns by
   36° at its patch seams, so grid lines near the wall kink by up to 31° there (1.5° without

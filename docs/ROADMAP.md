@@ -494,5 +494,9 @@ end-to-end tests of feature combinations, repair of curved elements, 3D speed.
   high-order nodes with the regularised Jacobian of Escobar et al., Bezier validity with
   degree elevation through order 4; see PROGRESS.)*
 ### 12d — 3D speed
-- Profile the 1M-cell group and the Netgen path again; implement what pays.
+- Profile the 1M-cell group and the Netgen path again; implement what pays. *(Measured with
+  per-phase timers: sweeps 48 %, Anderson 35 %; built the exact data-layout reductions for
+  the sweeps and a faster Anderson step (float history, fixed-order partial sums, streaming
+  extrapolation): 21.0 -> 18.5 s on the 1M ball, bit-identical sweeps, thread-independent
+  results. The Netgen path was not revisited (Netgen's own time dominates it, 11b).)*
 

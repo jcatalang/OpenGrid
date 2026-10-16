@@ -1196,6 +1196,28 @@ segment, so derivative jumps at knots never cost accuracy.
   for meshing tools take equispaced nodes. Simplices would need different sets
   (warp-and-blend / Fekete) and curving with untangling: not built.
 
+### Straight-sided high-order elements (Phase 11f)
+- Every cell of the exported linear mesh (`io/assembly.py`, `io/assembly3d.py`) becomes one
+  order-p element with the linear cell's geometry; `Session.high_order` returns an
+  `ElementMesh` (`model/elements.py`), `Session.export_high_order` writes it by extension.
+- `io/lagrange.py`: the reference node lists of all seven kinds in one canonical reference
+  element per kind (VTK's parametric elements), as exact fractions, generated per format from
+  a small table (edges with directions, faces with vertex orders, and interior modes:
+  recursive, grid, ring, layers, columns) for Gmsh, VTK and CGNS; `weights` (the linear
+  map's shape functions, the pyramid's collapsed map) and the permutations between formats.
+  Connectivity is held in Gmsh's order. The tables are checked against Gmsh's element
+  properties (fixture), VTK's `vtkLagrange*` cells (live) and CGNS through Gmsh's CGNS
+  writer (fixture) and the SIDS node descriptions (PENTA_40 / PENTA_75).
+- Node merging without tolerances: a node on an edge is the key (low vertex, high vertex,
+  integer weight), on a face (sorted face vertices, integer weights x p^2); `np.unique` over
+  all keys numbers them, and a shared node's coordinates are computed once from its key.
+  NumPy rather than C++: it is index bookkeeping on arrays (35k cells at order 4 in 1.6 s),
+  like the assemblies it builds on.
+- Writers: `io/gmsh.py` (`write_gmsh_elements`; the linear and high-order exports share one
+  MSH 4.1 writer), `io/cgns_elements.py` on the C++ `write_cgns_elements` (the 3D CGNS
+  writer generalised: base of cell dimension 2 or 3, all SIDS types up to order 4, periodic
+  vertex connections), `io/highorder.py` (`write_vtkhdf_elements`, `write_elements_h5`).
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

@@ -119,7 +119,7 @@ struct CgnsConnection3D {
 // referenced by a BC_t (PointRange of its elements, GridLocation FaceCenter).
 struct CgnsSection {
   std::string name;
-  std::string type;                 // TETRA_4, PYRA_5, PENTA_6, HEXA_8, TRI_3, QUAD_4
+  std::string type;  // SIDS name: TETRA_4, ..., HEXA_125, TRI_3, QUAD_4, BAR_2, ... (up to order 4)
   std::vector<std::int64_t> nodes;  // 0-based vertex ids, element after element
   std::string bc_family;            // non-empty: boundary condition of this section
 };
@@ -158,6 +158,15 @@ void write_cgns_structured_3d(const std::string& path, const std::string& base_n
                               const std::vector<CgnsFamily>& families,
                               const std::vector<CgnsBoundary3D>& boundaries,
                               const std::vector<CgnsConnection3D>& connections);
+
+// Unstructured element zones of any order up to 4 (Phase 11f): one base of cell (and physical)
+// dimension `cell_dimension`; 2: coordinates X, Y and boundary sections (BAR_n) at EdgeCenter, 3:
+// X, Y, Z and boundary sections (TRI_n, QUAD_n) at FaceCenter. Vertex connections as in
+// write_cgns_2d.
+void write_cgns_elements(const std::string& path, const std::string& base_name, int cell_dimension,
+                         const std::vector<CgnsUnstructuredZone3D>& zones,
+                         const std::vector<CgnsFamily>& families,
+                         const std::vector<CgnsVertexConnection>& vertex_connections);
 
 // vertex_connections as in write_cgns_2d (1-based vertex numbers on both sides).
 void write_cgns_unstructured_3d(const std::string& path, const std::string& base_name,

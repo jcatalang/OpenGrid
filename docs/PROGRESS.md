@@ -848,6 +848,61 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 11f — straight-sided high-order elements of every cell type (2026-10-16) — requested by the user, committed when its checks passed
+
+### Built
+- `io/lagrange.py`: the equispaced node lists of order-p lines, triangles, quadrilaterals,
+  tetrahedra, pyramids, prisms and hexahedra as exact fractions in one canonical reference
+  element per kind, in the node orders of Gmsh, VTK and CGNS, each generated from a table
+  of edges (with directions), faces (with vertex orders) and interior modes; shape-function
+  weights of the linear element (the pyramid's collapsed map), permutations between formats,
+  Gmsh element type numbers (orders 1-6), SIDS names (orders 1-4), VTK Lagrange types.
+- `model/elements.py`: `build_elements(assembly, order)` turns every cell of the linear mesh
+  into an order-p element with the linear cell's geometry (straight edges, planar triangles,
+  bilinear quadrilateral faces); edge and face nodes merged exactly through integer keys,
+  coordinates of a shared node computed once from its key; boundary lines / triangles /
+  quadrilaterals per patch; periodic node correspondences extended to the high-order nodes.
+  `ElementMesh`: `points` (the linear vertices first), `cells` / `faces` per kind (Gmsh
+  order), `connectivity(kind, fmt)`, `element_nodes(kind, "gll" | "gauss")` for
+  quadrilaterals and hexahedra, `counts()`.
+- Writers: Gmsh MSH 4.1 high-order types with the physical groups, entities and `$Periodic`
+  links of the linear export (`write_gmsh_elements`; one writer for both); CGNS
+  (`io/cgns_elements.py` + C++ `write_cgns_elements`: one unstructured zone per zone, SIDS
+  sections up to order 4, boundary sections with BCs per patch (EdgeCenter / FaceCenter),
+  vertex connectivity between zones, translational periodic links, 2D bases with X, Y);
+  VTKHDF Lagrange cells (pyramids linear: VTK has no Lagrange pyramid); HDF5 element nodes
+  (equispaced, or GLL / Gauss for quadrilaterals and hexahedra).
+- `Session.high_order(order)` / `export_high_order(path, order, nodes)` (by extension:
+  `.msh`, `.cgns`, `.vtkhdf`, `.h5`); the 11e curved elements are now
+  `curved_high_order` / `export_curved_high_order`. GUI: File -> Export high-order elements
+  (Gmsh, CGNS, VTKHDF, HDF5 node sets) and Export curved high-order elements (structured).
+- Demo `examples/11f_high_order_elements.py`; tests `tests/python/test_high_order_elements.py`
+  with reference data in `tests/python/data/` (generated with Gmsh outside the repository).
+
+### Results
+- Node orders: Gmsh 42 of 42 (7 kinds x orders 1-6), VTK 36 of 36 (no Lagrange pyramid in
+  VTK 9.7), CGNS 26 of 26 written by Gmsh's CGNS writer, and all 46 SIDS node descriptions
+  (TETRA_35, PYRA_55, PENTA_40, PENTA_75). Findings on the way: CGNS quadrilateral faces of
+  order 4 list their interior ring by ring (not as a nested QUAD_9), HEXA_125 and PENTA_75
+  interiors are layer by layer, Gmsh's prism interior is column by column with the two ends
+  first, VTK's wedge orders its triangle faces by rows (its triangles recursively); VTK's CGNS
+  reader puts TETRA_35's interior node at vertex 0 (its table is wrong).
+- Read-back: Gmsh 4.15 interpolates every element of our files (all kinds, orders 2-4, prisms
+  order 2: Gmsh cannot evaluate higher-order prisms) to within 1e-14 of the straight-sided
+  map; `cgnscheck` accepts the CGNS files; VTK evaluates the Lagrange cells to 1e-12.
+- 2D hybrid cylinder (1600 quadrilaterals + 1484 triangles): order 4 in 24 ms, 37752 nodes.
+  The straight-sided wall is the linear polygon at every order (edges off the cylinder by the
+  sagitta 7.7e-4 of an 80-edge circle); the curved order-4 elements of the structured ring
+  follow it to 1e-8.
+- 3D body in a box (27090 tetrahedra, 1010 pyramids, 820 prisms, 5650 hexahedra): order 4,
+  706630 nodes in 1.6 s; order 3 written as Gmsh 1.4 s, CGNS 0.9 s, VTKHDF 0.8 s.
+
+### Verified
+- `pytest` +28 -> 392 passed + 1 xfailed (node orders against the three references, meshes
+  of every kind, every export read back element by element, periodic and multi-zone CGNS,
+  GUI); `ctest` 151 (strict CI build); clang-tidy on the changed C++, ruff, clang-format,
+  ternary check, API docs; demos 01-11f run.
+
 ## Phase 11e — high-order elements (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

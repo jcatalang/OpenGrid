@@ -596,6 +596,52 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "triples on blocks and vertex numbers on unstructured zones. All indices 1-based except "
       "section nodes.");
   m.def(
+      "write_cgns_elements",
+      [](const std::string& path, const std::string& base_name, int cell_dimension,
+         const std::vector<
+             std::tuple<std::string, std::vector<double>, std::vector<double>, std::vector<double>,
+                        std::vector<std::tuple<std::string, std::string, std::vector<std::int64_t>,
+                                               std::string>>,
+                        std::string>>& zones,
+         const std::vector<std::tuple<std::string, std::string>>& families,
+         const std::vector<
+             std::tuple<int, std::string, int, std::vector<std::int64_t>, std::vector<std::int64_t>,
+                        std::optional<std::array<double, 2>>>>& vertex_connections) {
+        std::vector<og::CgnsUnstructuredZone3D> z;
+        z.reserve(zones.size());
+        for (const auto& [name, x, y, zz, sections, family] : zones) {
+          og::CgnsUnstructuredZone3D zone{name, x, y, zz, {}, family};
+          for (const auto& [sname, type, nodes, bc] : sections) {
+            zone.sections.push_back({sname, type, nodes, bc});
+          }
+          z.push_back(std::move(zone));
+        }
+        std::vector<og::CgnsFamily> f;
+        f.reserve(families.size());
+        for (const auto& [name, bc_type] : families) {
+          f.push_back({name, bc_type});
+        }
+        std::vector<og::CgnsVertexConnection> vc;
+        vc.reserve(vertex_connections.size());
+        for (const auto& [zone, name, donor, points, donor_points, shift] : vertex_connections) {
+          og::CgnsVertexConnection c{zone, name, donor, points, donor_points};
+          if (shift) {
+            c.periodic = true;
+            c.translation = *shift;
+          }
+          vc.push_back(std::move(c));
+        }
+        const nb::gil_scoped_release release;
+        og::write_cgns_elements(path, base_name, cell_dimension, z, f, vc);
+      },
+      nb::arg("path"), nb::arg("base_name"), nb::arg("cell_dimension"), nb::arg("zones"),
+      nb::arg("families"), nb::arg("vertex_connections"),
+      "Write unstructured element zones of any order up to 4 (SIDS types BAR_2 .. HEXA_125) "
+      "in one base of cell dimension 2 (coordinates X, Y; boundary sections at EdgeCenter) or 3 "
+      "(X, Y, Z; FaceCenter). zones and families as in write_cgns_3d; vertex_connections: "
+      "(zone, name, donor zone, points, donor points, translation (x, y) of a periodic link or "
+      "None), 1-based vertex numbers.");
+  m.def(
       "inflate_3d",
       [](const nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>& points,
          const std::vector<std::vector<std::int64_t>>& faces, const std::vector<bool>& wall,

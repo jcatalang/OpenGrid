@@ -32,6 +32,12 @@ void write_cgns_3d(const std::string&, const std::string&, const std::vector<Cgn
   throw std::runtime_error("cgns: OpenGrid was built without the CGNS library");
 }
 
+void write_cgns_elements(const std::string&, const std::string&, int,
+                         const std::vector<CgnsUnstructuredZone3D>&, const std::vector<CgnsFamily>&,
+                         const std::vector<CgnsVertexConnection>&) {
+  throw std::runtime_error("cgns: OpenGrid was built without the CGNS library");
+}
+
 #else
 
 namespace {
@@ -69,6 +75,33 @@ CGNS_ENUMT(BCType_t) bc_type(const std::string& name) {
     return CGNS_ENUMV(BCTypeUserDefined);
   }
   throw std::invalid_argument("cgns: unknown BC type '" + name + "'");
+}
+
+// Element types by SIDS name: linear and the complete Lagrange elements up to order 4.
+CGNS_ENUMT(ElementType_t) element_type(const std::string& name, int& nodes) {
+  static const std::array<std::pair<const char*, CGNS_ENUMT(ElementType_t)>, 28> types = {{
+      {"BAR_2", CGNS_ENUMV(BAR_2)},       {"BAR_3", CGNS_ENUMV(BAR_3)},
+      {"BAR_4", CGNS_ENUMV(BAR_4)},       {"BAR_5", CGNS_ENUMV(BAR_5)},
+      {"TRI_3", CGNS_ENUMV(TRI_3)},       {"TRI_6", CGNS_ENUMV(TRI_6)},
+      {"TRI_10", CGNS_ENUMV(TRI_10)},     {"TRI_15", CGNS_ENUMV(TRI_15)},
+      {"QUAD_4", CGNS_ENUMV(QUAD_4)},     {"QUAD_9", CGNS_ENUMV(QUAD_9)},
+      {"QUAD_16", CGNS_ENUMV(QUAD_16)},   {"QUAD_25", CGNS_ENUMV(QUAD_25)},
+      {"TETRA_4", CGNS_ENUMV(TETRA_4)},   {"TETRA_10", CGNS_ENUMV(TETRA_10)},
+      {"TETRA_20", CGNS_ENUMV(TETRA_20)}, {"TETRA_35", CGNS_ENUMV(TETRA_35)},
+      {"PYRA_5", CGNS_ENUMV(PYRA_5)},     {"PYRA_14", CGNS_ENUMV(PYRA_14)},
+      {"PYRA_30", CGNS_ENUMV(PYRA_30)},   {"PYRA_55", CGNS_ENUMV(PYRA_55)},
+      {"PENTA_6", CGNS_ENUMV(PENTA_6)},   {"PENTA_18", CGNS_ENUMV(PENTA_18)},
+      {"PENTA_40", CGNS_ENUMV(PENTA_40)}, {"PENTA_75", CGNS_ENUMV(PENTA_75)},
+      {"HEXA_8", CGNS_ENUMV(HEXA_8)},     {"HEXA_27", CGNS_ENUMV(HEXA_27)},
+      {"HEXA_64", CGNS_ENUMV(HEXA_64)},   {"HEXA_125", CGNS_ENUMV(HEXA_125)},
+  }};
+  for (const auto& [label, type] : types) {
+    if (name == label) {
+      check(cg_npe(type, &nodes), "nodes per element");
+      return type;
+    }
+  }
+  throw std::invalid_argument("cgns: unknown element type '" + name + "'");
 }
 
 // RAII guard closing the file on every path.
@@ -372,41 +405,22 @@ void write_cgns_2d(const std::string& path, const std::string& base_name,
   check(cg_close(handle), "close");
 }
 
-void write_cgns_3d(const std::string& path, const std::string& base_name,
-                   const std::vector<CgnsBlock>& blocks,
-                   const std::vector<CgnsUnstructuredZone3D>& unstructured_zones,
-                   const std::vector<CgnsFamily>& families,
-                   const std::vector<CgnsBoundary3D>& boundaries,
-                   const std::vector<CgnsConnection3D>& connections,
-                   const std::vector<CgnsVertexConnection>& vertex_connections) {
+namespace {
+
+void write_cgns_impl(const std::string& path, const std::string& base_name, int cell_dimension,
+                     const std::vector<CgnsBlock>& blocks,
+                     const std::vector<CgnsUnstructuredZone3D>& unstructured_zones,
+                     const std::vector<CgnsFamily>& families,
+                     const std::vector<CgnsBoundary3D>& boundaries,
+                     const std::vector<CgnsConnection3D>& connections,
+                     const std::vector<CgnsVertexConnection>& vertex_connections) {
   check_name(base_name, "base");
-  auto element_type = [](const std::string& t, int& nodes) {
-    if (t == "TETRA_4") {
-      nodes = 4;
-      return CGNS_ENUMV(TETRA_4);
-    }
-    if (t == "PYRA_5") {
-      nodes = 5;
-      return CGNS_ENUMV(PYRA_5);
-    }
-    if (t == "PENTA_6") {
-      nodes = 6;
-      return CGNS_ENUMV(PENTA_6);
-    }
-    if (t == "HEXA_8") {
-      nodes = 8;
-      return CGNS_ENUMV(HEXA_8);
-    }
-    if (t == "TRI_3") {
-      nodes = 3;
-      return CGNS_ENUMV(TRI_3);
-    }
-    if (t == "QUAD_4") {
-      nodes = 4;
-      return CGNS_ENUMV(QUAD_4);
-    }
-    throw std::invalid_argument("cgns: unknown element type '" + t + "'");
-  };
+  if (cell_dimension != 2 && cell_dimension != 3) {
+    throw std::invalid_argument("cgns: the cell dimension must be 2 or 3");
+  }
+  if (cell_dimension == 2 && !blocks.empty()) {
+    throw std::invalid_argument("cgns: structured blocks need a 3D base");
+  }
   std::vector<std::string> zone_names;
   std::vector<std::size_t> zone_vertices;
   for (const CgnsBlock& b : blocks) {
@@ -449,7 +463,8 @@ void write_cgns_3d(const std::string& path, const std::string& base_name,
   File file;
   check(cg_open(path.c_str(), CG_MODE_WRITE, &file.handle), "open");
   int base = 0;
-  check(cg_base_write(file.handle, base_name.c_str(), 3, 3, &base), "base");
+  check(cg_base_write(file.handle, base_name.c_str(), cell_dimension, cell_dimension, &base),
+        "base");
   check(cg_goto(file.handle, base, "end"), "goto base");
   check(cg_dataclass_write(CGNS_ENUMV(Dimensional)), "data class");
   check(cg_units_write(CGNS_ENUMV(Kilogram), CGNS_ENUMV(Meter), CGNS_ENUMV(Second),
@@ -467,8 +482,10 @@ void write_cgns_3d(const std::string& path, const std::string& base_name,
   std::vector<int> zone_ids;
   auto write_coordinates = [&](int z, const std::vector<double>& x, const std::vector<double>& y,
                                const std::vector<double>& zc, const std::string& family) {
-    for (const auto& [label, values] : {std::pair{"CoordinateX", &x}, std::pair{"CoordinateY", &y},
-                                        std::pair{"CoordinateZ", &zc}}) {
+    const std::array<std::pair<const char*, const std::vector<double>*>, 3> axes = {
+        {{"CoordinateX", &x}, {"CoordinateY", &y}, {"CoordinateZ", &zc}}};
+    for (int axis = 0; axis < cell_dimension; ++axis) {
+      const auto& [label, values] = axes.at(static_cast<std::size_t>(axis));
       int coord = 0;
       check(cg_coord_write(file.handle, base, z, CGNS_ENUMV(RealDouble), label, values->data(),
                            &coord),
@@ -537,8 +554,11 @@ void write_cgns_3d(const std::string& path, const std::string& base_name,
           check(cg_boco_write(file.handle, base, z, s.name.c_str(), CGNS_ENUMV(FamilySpecified),
                               CGNS_ENUMV(PointRange), 2, range.data(), &b),
                 "BC");
-          check(cg_boco_gridlocation_write(file.handle, base, z, b, CGNS_ENUMV(FaceCenter)),
-                "BC location");
+          CGNS_ENUMT(GridLocation_t) location = CGNS_ENUMV(FaceCenter);
+          if (cell_dimension == 2) {
+            location = CGNS_ENUMV(EdgeCenter);
+          }
+          check(cg_boco_gridlocation_write(file.handle, base, z, b, location), "BC location");
           check(cg_goto(file.handle, base, "Zone_t", z, "ZoneBC_t", 1, "BC_t", b, "end"),
                 "goto BC");
           check(cg_famname_write(s.bc_family.c_str()), "BC family");
@@ -632,10 +652,53 @@ void write_cgns_3d(const std::string& path, const std::string& base_name,
                         donor_data_type, static_cast<cgsize_t>(donor.size() / donor_dim),
                         donor.data(), &index),
           "connectivity");
+    if (c.periodic) {
+      // Translational periodicity (in the base's physical dimension).
+      const auto n = static_cast<std::size_t>(cell_dimension);
+      const std::vector<float> center(n, 0.0F);
+      const std::vector<float> angle(n, 0.0F);
+      std::vector<float> translation(n, 0.0F);
+      translation[0] = static_cast<float>(c.translation[0]);
+      translation[1] = static_cast<float>(c.translation[1]);
+      check(cg_conn_periodic_write(file.handle, base, zone_ids[zi], index, center.data(),
+                                   angle.data(), translation.data()),
+            "periodic connectivity");
+      const std::array<double, 5> length = {0.0, 1.0, 0.0, 0.0, 0.0};
+      const std::array<double, 5> radian = {0.0, 0.0, 0.0, 0.0, 1.0};
+      const std::string periodic_path = "/" + base_name + "/" + zone_names.at(zi) +
+                                        "/ZoneGridConnectivity/" + c.name +
+                                        "/GridConnectivityProperty/Periodic/";
+      for (const auto& [array, exponents] :
+           {std::pair{"RotationCenter", &length}, std::pair{"RotationAngle", &radian},
+            std::pair{"Translation", &length}}) {
+        check(cg_gopath(file.handle, (periodic_path + array).c_str()), "goto periodic data");
+        check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents->data()), "periodic exponents");
+      }
+    }
   }
   const int handle = file.handle;
   file.handle = -1;
   check(cg_close(handle), "close");
+}
+
+}  // namespace
+
+void write_cgns_3d(const std::string& path, const std::string& base_name,
+                   const std::vector<CgnsBlock>& blocks,
+                   const std::vector<CgnsUnstructuredZone3D>& unstructured_zones,
+                   const std::vector<CgnsFamily>& families,
+                   const std::vector<CgnsBoundary3D>& boundaries,
+                   const std::vector<CgnsConnection3D>& connections,
+                   const std::vector<CgnsVertexConnection>& vertex_connections) {
+  write_cgns_impl(path, base_name, 3, blocks, unstructured_zones, families, boundaries, connections,
+                  vertex_connections);
+}
+
+void write_cgns_elements(const std::string& path, const std::string& base_name, int cell_dimension,
+                         const std::vector<CgnsUnstructuredZone3D>& zones,
+                         const std::vector<CgnsFamily>& families,
+                         const std::vector<CgnsVertexConnection>& vertex_connections) {
+  write_cgns_impl(path, base_name, cell_dimension, {}, zones, families, {}, {}, vertex_connections);
 }
 
 #endif

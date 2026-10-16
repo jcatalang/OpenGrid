@@ -260,15 +260,33 @@ history). Phase tags show where each item came from.
   the 33-point ball runs to the 2000-iteration limit) that no coarse start removes; likely
   sliding nodes clamped at their slide limits. Neither a stagnation criterion nor multigrid
   was built.
-- **High-order elements: structured grids only** [11e]: quadrilaterals and hexahedra from
-  structured domains and blocks; no triangles, tetrahedra, prisms or pyramids (curving
-  boundary-layer prisms needs the inner layers curved too, and untangling); no Gmsh or CGNS
-  high-order element types (VTKHDF Lagrange cells and HDF5 node sets only). Interval counts
-  must be multiples of the order (`interval_multiple` on sketches and templates); elements
-  inherit the grid's quality, and the curved elements' scaled Jacobian can be low at a sharp
-  trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D moves face interiors
-  onto their surfaces but leaves nodes on block edges as interpolated; the equispaced
-  geometry between grid nodes is the degree-p interpolant, not the CAD itself.
+- **Curved high-order elements: structured grids only** [11e]: `curved_high_order` makes
+  quadrilaterals and hexahedra from structured domains and blocks; no curved triangles,
+  tetrahedra, prisms or pyramids (curving boundary-layer prisms needs the inner layers curved
+  too, and untangling), and the curved elements go to VTKHDF and HDF5 only (not Gmsh / CGNS).
+  Interval counts must be multiples of the order (`interval_multiple` on sketches and
+  templates); elements inherit the grid's quality, and the curved elements' scaled Jacobian
+  can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
+  moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
+  the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
+- **Straight-sided elements at curved walls** [11f]: `high_order` keeps every cell's linear
+  geometry, so a curved wall is the polygon of the linear mesh at every order (the cylinder
+  of the demo: edges off by the sagitta 7.7e-4, against 1e-8 for curved order-4 elements).
+  High-order DG / CG solvers lose their accuracy at such walls (Bassi and Rebay, J. Comput.
+  Phys. 138 (1997): spurious entropy at a polygonal airfoil); curved boundary elements are
+  available for structured grids only (11e).
+- **Straight-sided element details** [11f]: quadrilateral faces are bilinear, planar only
+  when their four vertices are coplanar (hexahedra of smooth grids have slightly warped
+  faces). Orders 1-6 (CGNS defines up to 4). GLL / Gauss node sets for quadrilaterals and
+  hexahedra only (HDF5); no simplex node sets (warp-and-blend, Fekete, Witherden-Vincent):
+  solvers make those from the vertices. VTKHDF writes pyramids as linear pyramids (VTK 9.7 has
+  no Lagrange pyramid; exact geometry, their interior nodes left out). CGNS: translational
+  periodicity only (as the linear 2D export); PENTA_40 / PENTA_75 node orders follow the SIDS
+  descriptions (Gmsh does not write them; checked against all its statements, not against a
+  second implementation). Gmsh 4.15 cannot evaluate prisms of order >= 3 itself, and its
+  multithreaded Jacobian evaluation crashed on the 35k-cell order-4 file (single-threaded it
+  reads and evaluates it); a solver's reader is the real check. The element mesh covers the
+  whole model (no subset), and the boundary must validate.
 - **GPU smoothing does not pay yet** [11d]: the experimental OpenCL path (`opengrid.set_gpu`,
   off by default) runs the 3D group smoother's line sweeps 2.2x faster than the CPU on the 1M-
   cell ball, but the whole iteration only 1.2x (Anderson mixing and sliding projections stay

@@ -57,8 +57,8 @@ def main() -> int:
     report = ["curved high-order elements from structured grids (OpenGrid 11e)", ""]
     report.append("quarter annulus: distance of the element edges from the inner circle (r = 1)")
     for p in (1, 2, 3, 4, 6):
-        ec = annulus_case.arc_error(annulus_case.annulus(4, p).high_order("d", order=p))
-        ef = annulus_case.arc_error(annulus_case.annulus(8, p).high_order("d", order=p))
+        ec = annulus_case.arc_error(annulus_case.annulus(4, p).curved_high_order("d", order=p))
+        ef = annulus_case.arc_error(annulus_case.annulus(8, p).curved_high_order("d", order=p))
         report.append(
             f"  p = {p}: 4 x 4 elements {ec:.2e}, 8 x 8 elements {ef:.2e} "
             f"(rate {math.log2(ec / ef):.1f}; h^(p+1) would be {p + 1})"
@@ -78,7 +78,7 @@ def main() -> int:
     og.smooth_group("c-group")
     built = time.perf_counter() - t
     t = time.perf_counter()
-    mesh = og.high_order(order=4, nodes="gll")
+    mesh = og.curved_high_order(order=4, nodes="gll")
     report.append(
         f"NACA 0012 C-grid, 1e-5 wall, 24 wall layers: grid {built:.1f} s; order 4: "
         f"{mesh.elements} quadrilaterals ({time.perf_counter() - t:.2f} s), scaled Jacobian of "
@@ -86,7 +86,7 @@ def main() -> int:
     )
     worst = int(np.argmin(mesh.scaled_jacobian))
     centre = mesh.xyz[worst].mean(axis=0)
-    unsnapped = og.high_order(order=4, nodes="gll", snap=False)
+    unsnapped = og.curved_high_order(order=4, nodes="gll", snap=False)
     move = np.linalg.norm(mesh.xyz - unsnapped.xyz, axis=-1)
     body = (np.abs(mesh.xyz[..., 1]) < 0.2) & (mesh.xyz[..., 0] > -0.05) & (mesh.xyz[..., 0] < 1.05)
     report.append(
@@ -95,9 +95,9 @@ def main() -> int:
         f"on the airfoil and {move.max():.1e} on the far-field arc (the degree-4 mappings' own "
         "distance from the curves)"
     )
-    info = og.export_high_order(OUTPUT / "11e_naca_p4.vtkhdf", order=4)
-    og.export_high_order(OUTPUT / "11e_naca_p4_gll.h5", order=4, nodes="gll")
-    og.export_high_order(OUTPUT / "11e_naca_p4_gauss.h5", order=4, nodes="gauss")
+    info = og.export_curved_high_order(OUTPUT / "11e_naca_p4.vtkhdf", order=4)
+    og.export_curved_high_order(OUTPUT / "11e_naca_p4_gll.h5", order=4, nodes="gll")
+    og.export_curved_high_order(OUTPUT / "11e_naca_p4_gauss.h5", order=4, nodes="gauss")
     report.append(
         f"  VTKHDF: {info['cells']} Lagrange quadrilaterals, {info['points']} points; HDF5: "
         "GLL and Gauss node sets"
@@ -112,8 +112,8 @@ def main() -> int:
         interval_multiple=2,
     )
     pipe.smooth_group(pipe.names("smoothing_group")[0])
-    hexes = pipe.high_order(order=2)
-    info = pipe.export_high_order(OUTPUT / "11e_pipe_p2.vtkhdf", order=2)
+    hexes = pipe.curved_high_order(order=2)
+    info = pipe.export_curved_high_order(OUTPUT / "11e_pipe_p2.vtkhdf", order=2)
     report.append(
         f"pipe (3D, extruded): order 2: {hexes.elements} hexahedra, scaled Jacobian "
         f"{hexes.scaled_jacobian.min():.3f} .. {hexes.scaled_jacobian.max():.3f}; VTKHDF "

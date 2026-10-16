@@ -1,4 +1,6 @@
-"""Writers for high-order meshes (Phase 11e): VTKHDF Lagrange cells and HDF5 node sets.
+"""Writers for high-order meshes: VTKHDF Lagrange cells and HDF5 node sets, of the curved
+structured elements (Phase 11e) and of the straight-sided elements (Phase 11f,
+``write_vtkhdf_elements`` / ``write_elements_h5``).
 
 * VTKHDF: an UnstructuredGrid of VTK_LAGRANGE_QUADRILATERAL (70) or VTK_LAGRANGE_HEXAHEDRON
   (72) cells; VTK's Lagrange cells interpolate equispaced nodes, so only the equispaced node
@@ -182,3 +184,78 @@ def write_high_order_h5(path, mesh) -> dict:
             "elements_per_direction", data=np.array([ne for *_rest, ne in mesh.owners])
         )
     return {"points": len(points), "elements": mesh.elements, "order": mesh.order}
+
+
+def write_vtkhdf_elements(path, mesh) -> dict:
+    """VTKHDF UnstructuredGrid of straight-sided elements (``model/elements.py``): VTK
+    Lagrange cells (68 .. 73) in VTK's node order; pyramids as linear pyramids (14, VTK has no
+    Lagrange pyramid; exact for straight-sided ones; nodes used by no other cell, such as their
+    interiors, are not written). Cell data zone_id; FieldData zone_names."""
+    from opengrid.io import lagrange
+
+    blocks = []
+    zone = []
+    types = []
+    for kind, conn in mesh.cells.items():
+        if kind == "pyramid":
+            rows = conn[:, :5]
+            vtk_type = 14
+        else:
+            rows = mesh.connectivity(kind, "vtk")
+            vtk_type = lagrange.VTK_LAGRANGE[kind]
+        blocks.append(rows)
+        zone.append(mesh.cell_zone[kind])
+        types.append(np.full(len(rows), vtk_type, dtype=np.uint8))
+    sizes = np.concatenate([np.full(len(b), b.shape[1], dtype=np.int64) for b in blocks])
+    offsets = np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64)
+    connectivity = np.concatenate([b.reshape(-1) for b in blocks])
+    with h5py.File(Path(path), "w") as f:
+        root = _group(f, "VTKHDF")
+        _write_unstructured(
+            root,
+            mesh.points,
+            offsets,
+            connectivity,
+            np.concatenate(types),
+            {"zone_id": np.concatenate(zone).astype(np.int64)},
+            VERSION,
+        )
+        names = [name.encode("ascii") for name in mesh.zone_names]
+        root["FieldData"].create_dataset(
+            "zone_names", data=np.array(names, dtype=object), dtype=h5py.string_dtype("ascii")
+        )
+    points = len(np.unique(connectivity))
+    return {"points": points, "cells": mesh.elements, "order": mesh.order}
+
+
+def write_elements_h5(path, mesh, nodes: str = "equispaced") -> dict:
+    """HDF5 of straight-sided elements: per kind ``<kind>/nodes`` (count, n, 3) in the node
+    set ``nodes`` (equispaced: Gmsh order; gll / gauss: tensor order, i fastest, quadrilaterals
+    and hexahedra only), ``<kind>/zone_id``; with equispaced nodes also the shared ``points``,
+    ``<kind>/connectivity`` into them (Gmsh order) and the boundary elements
+    ``boundary/<kind>/connectivity`` and ``patch_id``; attributes order, dim, node_set; the
+    zone and patch names."""
+    with h5py.File(Path(path), "w") as f:
+        f.attrs["order"] = mesh.order
+        f.attrs["dim"] = mesh.dim
+        f.attrs["node_set"] = nodes
+        for key, values in (("zone_names", mesh.zone_names), ("patch_names", mesh.patch_names)):
+            f.create_dataset(
+                key,
+                data=np.array([v.encode("ascii") for v in values], dtype=object),
+                dtype=h5py.string_dtype("ascii"),
+            )
+        if nodes == "equispaced":
+            f.create_dataset("points", data=mesh.points)
+        for kind in mesh.cells:
+            g = f.create_group(kind)
+            g.create_dataset("nodes", data=mesh.element_nodes(kind, nodes))
+            g.create_dataset("zone_id", data=mesh.cell_zone[kind].astype(np.int64))
+            if nodes == "equispaced":
+                g.create_dataset("connectivity", data=mesh.cells[kind])
+        if nodes == "equispaced":
+            for kind, conn in mesh.faces.items():
+                g = f.create_group(f"boundary/{kind}")
+                g.create_dataset("connectivity", data=conn)
+                g.create_dataset("patch_id", data=mesh.face_patch[kind].astype(np.int64))
+    return {"elements": mesh.elements, "order": mesh.order, "node_set": nodes}

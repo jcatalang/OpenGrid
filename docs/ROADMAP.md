@@ -449,3 +449,14 @@ continuous and discontinuous Galerkin solvers. Same rules as before: Commands, d
   Lagrange cells (point order checked against VTK) and HDF5 node sets; `interval_multiple`
   on sketches and templates. Boundary error on a circle at the rate h^(p+1) (h^(p+2) for even
   p). Not built: triangles, tetrahedra and prisms, Gmsh and CGNS high-order types.)*
+
+### 11f — Straight-sided high-order elements of every cell type
+- Requested by the user (2026-10-16): high-order elements as the cells of the mesh with nodes
+  inside (straight edges, planar faces), for triangles, quadrilaterals, tetrahedra, pyramids,
+  prisms and hexahedra, with Gmsh and CGNS export. Acceptance: node orders equal to each
+  format's own reference (Gmsh, VTK, CGNS) for every kind and order; shared nodes merged
+  exactly; exports read back with every element's nodes on its linear map; Gmsh and
+  `cgnscheck` accept the files. *(Built (`io/lagrange.py`, `model/elements.py`,
+  `io/cgns_elements.py`, `examples/11f_high_order_elements.py`): orders 1-6 (CGNS 1-4),
+  Gmsh / CGNS / VTKHDF / HDF5, boundary elements per patch, zones, periodic links. The curved
+  structured elements of 11e became `curved_high_order`.)*

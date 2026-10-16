@@ -610,21 +610,39 @@ blocks, the blocks (3D).
 
 ## High-order elements
 
-### `high_order(names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True)`
+### `high_order(order: int = 2)`
+
+Straight-sided order-``order`` elements (1 .. 6) of every mesh cell: triangles and
+quadrilaterals (2D), tetrahedra, pyramids, prisms and hexahedra (3D), with the
+equispaced Lagrange nodes on straight edges, planar triangles and bilinear
+quadrilateral faces, shared nodes merged exactly, and boundary elements (lines /
+triangles / quadrilaterals) per patch; the boundary must validate. Returns an
+ElementMesh (``points``, ``cells`` / ``faces`` per kind in Gmsh node order,
+``connectivity(kind, fmt)``, ``element_nodes(kind, nodes)``).
+
+### `export_high_order(path, order: int = 2, nodes: str = 'equispaced', base_name: str = 'OpenGrid') -> dict`
+
+Write ``high_order(order)`` by extension: ``.msh`` (Gmsh 4.1 high-order element
+types, physical groups, periodic links), ``.cgns`` (SIDS types up to order 4, one
+unstructured zone per zone, BCs per patch), ``.vtkhdf`` (VTK Lagrange cells) or ``.h5``
+(element node coordinates in the node set ``nodes``: "equispaced", or "gll" / "gauss"
+for quadrilaterals and hexahedra).
+
+### `curved_high_order(names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True)`
 
 Curved order-``order`` elements of structured domains (2D) or blocks (3D): p x p
 (x p) grid cells per element (interval counts must be multiples of p), the grid's
-nodes are the equispaced node set. ``nodes``: "equispaced" (file formats), "gll"
-(Gauss-Lobatto-Legendre: continuous Galerkin / spectral elements, DGSEM with boundary
-points) or "gauss" (Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on
-boundary sides onto their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz``
-(elements, (p + 1)^d, 3) in tensor order, ``scaled_jacobian``, ``merged()``,
-``owners``).
+nodes are the equispaced node set, so element edges follow the grid lines and curved
+walls. ``nodes``: "equispaced" (file formats), "gll" (Gauss-Lobatto-Legendre:
+continuous Galerkin / spectral elements, DGSEM with boundary points) or "gauss"
+(Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on boundary sides onto
+their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz`` (elements, (p + 1)^d,
+3) in tensor order, ``scaled_jacobian``, ``merged()``, ``owners``).
 
-### `export_high_order(path, names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True) -> dict`
+### `export_curved_high_order(path, names=None, order: int = 2, nodes: str = 'equispaced', snap: bool = True) -> dict`
 
-Write ``high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes) or
-``.h5`` (any node set: element node coordinates, Jacobians, merged numbering).
+Write ``curved_high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes)
+or ``.h5`` (any node set: element node coordinates, Jacobians, merged numbering).
 
 ## Editing, undo and the model
 

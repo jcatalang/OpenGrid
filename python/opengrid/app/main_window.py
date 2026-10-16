@@ -278,6 +278,9 @@ class MainWindow(QMainWindow):
         self.export_gmsh_action = self._action("Export Gmsh…", self.export_gmsh)
         self.export_vtkhdf_action = self._action("Export VTKHDF…", self.export_vtkhdf)
         self.export_plot3d_action = self._action("Export Plot3D…", self.export_plot3d)
+        self.export_curved_high_order_action = self._action(
+            "Export curved high-order elements (structured)…", self.export_curved_high_order
+        )
         self.export_high_order_action = self._action(
             "Export high-order elements…", self.export_high_order
         )
@@ -321,6 +324,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.export_gmsh_action)
         file_menu.addAction(self.export_plot3d_action)
         file_menu.addAction(self.export_high_order_action)
+        file_menu.addAction(self.export_curved_high_order_action)
         file_menu.addSeparator()
         file_menu.addAction(self.save_journal_action)
         file_menu.addSeparator()
@@ -1052,13 +1056,13 @@ class MainWindow(QMainWindow):
     def export_high_order(
         self, path: str | None = None, order: int | None = None, nodes: str = "equispaced"
     ) -> dict | None:
-        """Curved order-p elements of the structured domains (blocks in 3D): VTKHDF Lagrange
+        """Straight-sided order-p elements of every mesh cell: Gmsh, CGNS, VTKHDF Lagrange
         cells, or .h5 with the chosen node set."""
         if order is None:
             from PySide6.QtWidgets import QInputDialog
 
             order, ok = QInputDialog.getInt(
-                self, "High-order elements", "Order (interval counts must be multiples):", 2, 1, 10
+                self, "High-order elements", "Order (CGNS: up to 4):", 2, 1, 6
             )
             if not ok:
                 return None
@@ -1066,6 +1070,44 @@ class MainWindow(QMainWindow):
             path, chosen = QFileDialog.getSaveFileName(
                 self,
                 "Export high-order elements",
+                "",
+                "Gmsh (*.msh);;CGNS (*.cgns);;VTKHDF Lagrange cells (*.vtkhdf);;"
+                "HDF5, equispaced nodes (*.h5);;HDF5, Gauss-Lobatto nodes (*.h5);;"
+                "HDF5, Gauss nodes (*.h5)",
+            )
+            if not path:
+                return None
+            if "Lobatto" in chosen:
+                nodes = "gll"
+            elif "Gauss nodes" in chosen:
+                nodes = "gauss"
+        summary = self._run(lambda: self.session.export_high_order(path, order=order, nodes=nodes))
+        if summary:
+            log.info("exported %s: %s", path, summary)
+        return summary
+
+    def export_curved_high_order(
+        self, path: str | None = None, order: int | None = None, nodes: str = "equispaced"
+    ) -> dict | None:
+        """Curved order-p elements of the structured domains (blocks in 3D): VTKHDF Lagrange
+        cells, or .h5 with the chosen node set."""
+        if order is None:
+            from PySide6.QtWidgets import QInputDialog
+
+            order, ok = QInputDialog.getInt(
+                self,
+                "Curved high-order elements",
+                "Order (interval counts must be multiples):",
+                2,
+                1,
+                10,
+            )
+            if not ok:
+                return None
+        if path is None:
+            path, chosen = QFileDialog.getSaveFileName(
+                self,
+                "Export curved high-order elements",
                 "",
                 "VTKHDF Lagrange cells (*.vtkhdf);;HDF5, Gauss-Lobatto nodes (*.h5);;"
                 "HDF5, Gauss nodes (*.h5)",
@@ -1076,7 +1118,9 @@ class MainWindow(QMainWindow):
                 nodes = "gll"
             elif "Gauss nodes" in chosen:
                 nodes = "gauss"
-        summary = self._run(lambda: self.session.export_high_order(path, order=order, nodes=nodes))
+        summary = self._run(
+            lambda: self.session.export_curved_high_order(path, order=order, nodes=nodes)
+        )
         if summary:
             log.info("exported %s: %s", path, summary)
         return summary

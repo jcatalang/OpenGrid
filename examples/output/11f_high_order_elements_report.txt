@@ -1,0 +1,20 @@
+straight-sided high-order elements (OpenGrid 11f)
+
+node orders against the formats' own references
+  Gmsh: 42 of 42 elements (7 kinds x orders 1-6) match
+  VTK: 36 of 36 Lagrange cells (orders 1-6) match; VTK has no Lagrange pyramid (pyramids are written as linear pyramids, exact for straight-sided ones)
+  CGNS: 26 of 26 element types written by Gmsh's CGNS writer match; PENTA_40 / PENTA_75 (not written by Gmsh) and TETRA_35 / PYRA_55 agree with all 46 SIDS node descriptions
+
+2D hybrid: structured O-ring (r 1 .. 2, quadrilaterals) + unstructured triangles (r 2 .. 6); patches p-wall, p-farfield
+  order 1: 1600 quadrilaterals, 1484 triangles, 140 boundary lines, 2412 nodes (12 ms); wall nodes off the cylinder by up to 1.11e-16
+  order 2: 1600 quadrilaterals, 1484 triangles, 140 boundary lines, 9508 nodes (7 ms); wall nodes off the cylinder by up to 7.71e-04
+  order 3: 1600 quadrilaterals, 1484 triangles, 140 boundary lines, 21288 nodes (14 ms); wall nodes off the cylinder by up to 6.85e-04
+  order 4: 1600 quadrilaterals, 1484 triangles, 140 boundary lines, 37752 nodes (22 ms); wall nodes off the cylinder by up to 7.71e-04
+  order 4 written: Gmsh 3224 elements / 37752 nodes, CGNS 4 sections in 1 zone, VTKHDF 3084 Lagrange cells
+  the straight-sided wall is the polygon of the linear mesh at every order: its edges are chords, off the cylinder by up to the sagitta 1 - cos(pi / 80) = 7.71e-04; the curved order-4 elements of the structured ring (opt-in, Phase 11e: 4 x 4 grid cells per element) follow it to 9.9e-09
+
+3D: body in a box, hexahedral layers on the structured walls
+  order 2: 27090 tetrahedra, 1010 pyramids, 820 prisms, 5650 hexahedra, 1368 boundary faces; 89468 nodes (1.07 s, with the linear volume mesh)
+  order 3: 27090 tetrahedra, 1010 pyramids, 820 prisms, 5650 hexahedra, 1368 boundary faces; 299352 nodes (0.62 s)
+  order 4: 27090 tetrahedra, 1010 pyramids, 820 prisms, 5650 hexahedra, 1368 boundary faces; 706630 nodes (1.41 s)
+  order 3 written: msh 1.4 s, cgns 0.8 s, vtkhdf 0.8 s (CGNS: TETRA_20, PYRA_30, PENTA_40, HEXA_64 sections; TRI_10 / QUAD_16 boundaries)

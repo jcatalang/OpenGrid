@@ -1213,27 +1213,80 @@ class Session:
             return write_cgns_3d(path, self, base_name)
         return write_cgns(path, self, self.topology(), base_name, periodic=report.periodic)
 
-    def high_order(self, names=None, order: int = 2, nodes: str = "equispaced", snap: bool = True):
+    def _linear_assembly(self):
+        """The linear mesh of the whole model as exported (boundary validated)."""
+        from opengrid.io.assembly import assemble
+
+        report = self._require_valid_boundary()
+        if self.is_3d():
+            from opengrid.io.assembly3d import assemble_blocks
+            from opengrid.model.volumes import analyze_3d
+
+            return assemble_blocks(self, analyze_3d(self), quality=False)
+        return assemble(self, self.topology(), quality=False, periodic=report.periodic)
+
+    def high_order(self, order: int = 2):
+        """Straight-sided order-``order`` elements (1 .. 6) of every mesh cell: triangles and
+        quadrilaterals (2D), tetrahedra, pyramids, prisms and hexahedra (3D), with the
+        equispaced Lagrange nodes on straight edges, planar triangles and bilinear
+        quadrilateral faces, shared nodes merged exactly, and boundary elements (lines /
+        triangles / quadrilaterals) per patch; the boundary must validate. Returns an
+        ElementMesh (``points``, ``cells`` / ``faces`` per kind in Gmsh node order,
+        ``connectivity(kind, fmt)``, ``element_nodes(kind, nodes)``)."""
+        from opengrid.model.elements import build_elements
+
+        return build_elements(self._linear_assembly(), order)
+
+    def export_high_order(
+        self, path, order: int = 2, nodes: str = "equispaced", base_name: str = "OpenGrid"
+    ) -> dict:
+        """Write ``high_order(order)`` by extension: ``.msh`` (Gmsh 4.1 high-order element
+        types, physical groups, periodic links), ``.cgns`` (SIDS types up to order 4, one
+        unstructured zone per zone, BCs per patch), ``.vtkhdf`` (VTK Lagrange cells) or ``.h5``
+        (element node coordinates in the node set ``nodes``: "equispaced", or "gll" / "gauss"
+        for quadrilaterals and hexahedra)."""
+        from opengrid.io.cgns_elements import write_cgns_elements
+        from opengrid.io.gmsh import write_gmsh_elements
+        from opengrid.io.highorder import write_elements_h5, write_vtkhdf_elements
+
+        suffix = Path(path).suffix.lower()
+        writers = {".msh": write_gmsh_elements, ".vtkhdf": write_vtkhdf_elements}
+        if suffix not in (".msh", ".cgns", ".vtkhdf", ".h5"):
+            raise ValueError(f"unknown high-order format {suffix!r}: .msh, .cgns, .vtkhdf, .h5")
+        if nodes != "equispaced" and suffix != ".h5":
+            raise ValueError(
+                f"{suffix} elements carry equispaced nodes: write the {nodes!r} node set to .h5"
+            )
+        mesh = self.high_order(order)
+        if suffix == ".h5":
+            return write_elements_h5(path, mesh, nodes)
+        if suffix == ".cgns":
+            return write_cgns_elements(path, mesh, base_name)
+        return writers[suffix](path, mesh)
+
+    def curved_high_order(
+        self, names=None, order: int = 2, nodes: str = "equispaced", snap: bool = True
+    ):
         """Curved order-``order`` elements of structured domains (2D) or blocks (3D): p x p
         (x p) grid cells per element (interval counts must be multiples of p), the grid's
-        nodes are the equispaced node set. ``nodes``: "equispaced" (file formats), "gll"
-        (Gauss-Lobatto-Legendre: continuous Galerkin / spectral elements, DGSEM with boundary
-        points) or "gauss" (Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on
-        boundary sides onto their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz``
-        (elements, (p + 1)^d, 3) in tensor order, ``scaled_jacobian``, ``merged()``,
-        ``owners``)."""
+        nodes are the equispaced node set, so element edges follow the grid lines and curved
+        walls. ``nodes``: "equispaced" (file formats), "gll" (Gauss-Lobatto-Legendre:
+        continuous Galerkin / spectral elements, DGSEM with boundary points) or "gauss"
+        (Gauss-Legendre: DG solution points); ``snap``: project GLL nodes on boundary sides onto
+        their curves (surfaces in 3D). Returns a HighOrderMesh (``xyz`` (elements, (p + 1)^d,
+        3) in tensor order, ``scaled_jacobian``, ``merged()``, ``owners``)."""
         from opengrid.model.highorder import high_order
 
         return high_order(self, names, order, nodes, snap)
 
-    def export_high_order(
+    def export_curved_high_order(
         self, path, names=None, order: int = 2, nodes: str = "equispaced", snap: bool = True
     ) -> dict:
-        """Write ``high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes) or
-        ``.h5`` (any node set: element node coordinates, Jacobians, merged numbering)."""
+        """Write ``curved_high_order(...)``: ``.vtkhdf`` (VTK Lagrange cells, equispaced nodes)
+        or ``.h5`` (any node set: element node coordinates, Jacobians, merged numbering)."""
         from opengrid.io.highorder import write_high_order_h5, write_vtkhdf_high_order
 
-        mesh = self.high_order(names, order, nodes, snap)
+        mesh = self.curved_high_order(names, order, nodes, snap)
         if str(path).endswith(".h5"):
             return write_high_order_h5(path, mesh)
         return write_vtkhdf_high_order(path, mesh)

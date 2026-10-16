@@ -65,12 +65,12 @@ def test_node_sets_and_quadrature():
 def test_curved_boundary_converges_with_order_and_gll_nodes_lie_on_the_arc():
     errors = {}
     for p in (1, 2, 3, 4):
-        coarse = arc_error(annulus(4, p).high_order("d", order=p))
-        fine = arc_error(annulus(8, p).high_order("d", order=p))
+        coarse = arc_error(annulus(4, p).curved_high_order("d", order=p))
+        fine = arc_error(annulus(8, p).curved_high_order("d", order=p))
         errors[p] = coarse
         assert coarse / fine > 2 ** (p + 1) * 0.9  # at least the order h^(p + 1)
     assert errors[1] > 100 * errors[3] > 100 * 100 * errors[4] / 10
-    mesh = annulus(4, 3).high_order("d", order=3, nodes="gll")
+    mesh = annulus(4, 3).curved_high_order("d", order=3, nodes="gll")
     assert mesh.snapped > 0
     inner = []
     for e in mesh.xyz:
@@ -86,17 +86,17 @@ def test_curved_boundary_converges_with_order_and_gll_nodes_lie_on_the_arc():
 def test_order_must_divide_the_intervals():
     og = annulus(4, 3)  # 12 intervals
     with pytest.raises(ValidationError, match="not a multiple of the order 5"):
-        og.high_order("d", order=5)
+        og.curved_high_order("d", order=5)
     with pytest.raises(ValidationError, match="nodes must be one of"):
-        og.high_order("d", order=3, nodes="chebyshev")
+        og.curved_high_order("d", order=3, nodes="chebyshev")
 
 
 def test_vtkhdf_lagrange_cells_match_the_element_mapping(tmp_path):
     vtk = pytest.importorskip("vtk")
     og = annulus(4, 3)
-    mesh = og.high_order("d", order=3)
+    mesh = og.curved_high_order("d", order=3)
     path = tmp_path / "ho.vtkhdf"
-    info = og.export_high_order(path, "d", order=3)
+    info = og.export_curved_high_order(path, "d", order=3)
     assert info["cells"] == 16
     reader = vtk.vtkHDFReader()
     reader.SetFileName(str(path))
@@ -122,23 +122,23 @@ def test_vtkhdf_lagrange_cells_match_the_element_mapping(tmp_path):
 def test_h5_export_with_gauss_points_and_3d_blocks(tmp_path):
     og = annulus(4, 2)  # 8 intervals
     og.create_extruded_block("d", "translate", vector=(0, 0, 1), dimension=5, name="b")
-    mesh = og.high_order("b", order=2, nodes="gauss")
+    mesh = og.curved_high_order("b", order=2, nodes="gauss")
     assert mesh.dim == 3 and mesh.xyz.shape == (4 * 4 * 2, 27, 3)
     assert mesh.scaled_jacobian.min() > 0.5
     # Gauss points lie inside their elements: none on the inner arc or the end planes.
     radius = np.linalg.norm(mesh.xyz[..., :2], axis=-1)
     assert radius.min() > 1.0 and 0.0 < mesh.xyz[..., 2].min() < mesh.xyz[..., 2].max() < 1.0
     path = tmp_path / "ho.h5"
-    og.export_high_order(path, "b", order=2, nodes="gauss")
+    og.export_curved_high_order(path, "b", order=2, nodes="gauss")
     with h5py.File(path) as f:
         assert f.attrs["node_set"] == "gauss"
         assert f["nodes"].shape == mesh.xyz.shape
         assert list(f["block_names"].asstr()) == ["b"]
     with pytest.raises(ValueError, match="equispaced"):
-        og.export_high_order(tmp_path / "ho.vtkhdf", "b", order=2, nodes="gauss")
+        og.export_curved_high_order(tmp_path / "ho.vtkhdf", "b", order=2, nodes="gauss")
     # Equispaced hexahedra read back by VTK as Lagrange hexahedra.
     vtk = pytest.importorskip("vtk")
-    og.export_high_order(tmp_path / "hex.vtkhdf", "b", order=2)
+    og.export_curved_high_order(tmp_path / "hex.vtkhdf", "b", order=2)
     reader = vtk.vtkHDFReader()
     reader.SetFileName(str(tmp_path / "hex.vtkhdf"))
     reader.Update()
@@ -153,7 +153,7 @@ def test_gui_exports_high_order_elements(qtbot, tmp_path):
 
     window = MainWindow(off_screen=True, session=annulus(4, 2))
     qtbot.addWidget(window)
-    summary = window.export_high_order(str(tmp_path / "ho.vtkhdf"), order=2)
+    summary = window.export_curved_high_order(str(tmp_path / "ho.vtkhdf"), order=2)
     assert summary["cells"] == 16
-    assert window.export_high_order(str(tmp_path / "ho.h5"), order=3) is None  # 8 intervals
+    assert window.export_curved_high_order(str(tmp_path / "ho.h5"), order=3) is None  # 8 intervals
     window.close()

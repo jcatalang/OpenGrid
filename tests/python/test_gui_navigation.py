@@ -74,3 +74,64 @@ def test_forms_scroll_so_docks_resize(qtbot):
     assert isinstance(dock, QScrollArea)
     assert window.property_panel.minimumSizeHint().height() > 300  # a long form...
     assert dock.minimumSizeHint().height() < 150  # ...in a dock that can shrink
+
+
+def _live_interactor(window):
+    """A VTK interactor on the off-screen view with the window's navigation and observers, so
+    events run through the real chain (camera style, focus, priorities)."""
+    from unittest import mock
+
+    from pyvista.plotting.render_window_interactor import RenderWindowInteractor
+
+    from opengrid.app import main_window
+
+    iren = RenderWindowInteractor(window.viewport)
+    iren.interactor.SetRenderWindow(window.viewport.ren_win)
+    window.viewport.iren = iren
+    main_window.set_navigation_style(iren)
+    window._connect_viewport_events()
+    held = mock.patch.object(main_window, "_left_button_down", return_value=True)
+    return iren.interactor, held
+
+
+def test_zoom_window_through_the_event_chain(qtbot):
+    """The box must finish on release: the camera style grabs the interactor's focus when it
+    sees the press, after which nothing else got the moves and the release (the box stayed)."""
+    window = _window(qtbot)
+    interactor, held = _live_interactor(window)
+    box = window.zoom_box
+    camera = window.viewport.renderer.GetActiveCamera()
+    clicks = []
+    window.handle_click = lambda xyz, additive=False: clicks.append(xyz)
+
+    def event(name, x, y, shift=0):
+        interactor.SetEventInformation(x, y, 0, shift, "\0", 0, None)
+        interactor.InvokeEvent(name)
+
+    scale = camera.GetParallelScale()
+    with held:
+        event("LeftButtonPressEvent", 100, 100)
+        event("MouseMoveEvent", 300, 260)
+        assert box.active and box.actor.GetVisibility()
+        event("LeftButtonReleaseEvent", 300, 260)
+    assert not box.active and not box.actor.GetVisibility()
+    assert camera.GetParallelScale() < scale and clicks == []
+    event("LeftButtonPressEvent", 400, 400)
+    event("LeftButtonReleaseEvent", 401, 400)
+    assert len(clicks) == 1 and not box.active  # a click selects
+    with held:
+        event("LeftButtonPressEvent", 100, 100)
+        event("MouseMoveEvent", 250, 220)
+    window.cancel_tool()  # Esc
+    assert not box.active and not box.actor.GetVisibility()
+    with held:
+        event("LeftButtonPressEvent", 100, 100)
+        event("MouseMoveEvent", 250, 220)
+    event("MouseMoveEvent", 260, 230)  # the release was missed: no button any more
+    assert not box.active and not box.actor.GetVisibility()
+    position = camera.GetPosition()
+    with held:
+        event("LeftButtonPressEvent", 300, 300, shift=1)
+        event("MouseMoveEvent", 350, 330, shift=1)
+        event("LeftButtonReleaseEvent", 350, 330, shift=1)
+    assert camera.GetPosition() != position and not box.active  # Shift + drag pans

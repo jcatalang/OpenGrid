@@ -66,6 +66,30 @@ DEFAULT_DIMENSION = 21
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
 
 
+def set_navigation_style(iren) -> None:
+    """2D navigation: left-drag zooms to a window (app/zoom_box.py; View menu: or pans), Shift
+    + left-drag and middle-drag pan, wheel / two-finger scroll and right-drag zoom, Ctrl + left
+    / middle-drag spin, Ctrl + right-drag rotates in 3D."""
+    iren.enable_custom_trackball_style(
+        left="pan",
+        shift_left="pan",
+        control_left="spin",
+        middle="pan",
+        shift_middle="dolly",
+        control_middle="spin",
+        right="dolly",
+        shift_right="dolly",
+        control_right="rotate",
+    )
+
+
+def _left_button_down() -> bool:
+    """Whether the left mouse button is held now (Qt's view of the pointer)."""
+    from PySide6.QtWidgets import QApplication
+
+    return bool(QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
+
+
 def code_stamp() -> float:
     """Latest modification time of OpenGrid's code: its Python files and its extension modules
     (an editable install keeps those in site-packages)."""
@@ -190,20 +214,7 @@ class MainWindow(QMainWindow):
         viewport.enable_parallel_projection()
         viewport.view_xy()
         if viewport.iren is not None:
-            # 2D navigation: left-drag zooms to a window (app/zoom_box.py; View menu: or pans),
-            # Shift + left-drag and middle-drag pan, wheel / two-finger scroll and right-drag
-            # zoom, Ctrl + left / middle-drag spin, Ctrl + right-drag rotates in 3D.
-            viewport.enable_custom_trackball_style(
-                left="pan",
-                shift_left="pan",
-                control_left="spin",
-                middle="pan",
-                shift_middle="dolly",
-                control_middle="spin",
-                right="dolly",
-                shift_right="dolly",
-                control_right="rotate",
-            )
+            set_navigation_style(viewport.iren)
         return viewport
 
     def _add_dock(
@@ -533,22 +544,41 @@ class MainWindow(QMainWindow):
             return  # Shift: pan, Ctrl: spin (the camera style)
         x, y = interactor.GetEventPosition()
         self.zoom_box.start(x, y)
+        # The press is used here: the camera style must not see it, or it starts a pan and
+        # grabs the interactor's focus, after which only it gets the moves and the release
+        # (the box would never finish). The click logic still gets the press position.
+        self._press_position = self._event_position()
+        interactor.GetCommand(self._zoom_tags[event]).SetAbortFlag(1)
 
     def _zoom_move(self, interactor, event) -> None:
         if not self.zoom_box.active:
             return
         x, y = interactor.GetEventPosition()
+        if not _left_button_down():
+            # The release never came (e.g. outside the window): end the box as a release.
+            self._end_zoom(x, y)
+            return
         self.zoom_box.update(x, y)
         self.viewport.render()
-        interactor.GetCommand(self._zoom_tags[event]).SetAbortFlag(1)  # no pan meanwhile
+        interactor.GetCommand(self._zoom_tags[event]).SetAbortFlag(1)  # no hover meanwhile
 
     def _zoom_release(self, interactor, event) -> None:
         if not self.zoom_box.active:
             return
         x, y = interactor.GetEventPosition()
-        if self.zoom_box.finish(x, y):
-            self.viewport.render()
+        self._end_zoom(x, y)
         # Not aborted: a short drag is still a click (_on_vtk_release decides).
+
+    def _end_zoom(self, x: float, y: float) -> None:
+        self.zoom_box.finish(x, y)
+        self.viewport.render()  # zoomed, or the outline removed
+
+    def cancel_zoom_box(self) -> None:
+        """Drop a zoom window in progress (Esc, tool change)."""
+        if self.zoom_box.active or self.zoom_box.actor.GetVisibility():
+            self.zoom_box.cancel()
+            self._press_position = None
+            self.viewport.render()
 
     def _abort(self, interactor, event: str) -> None:
         interactor.GetCommand(self._grab_tags[event]).SetAbortFlag(1)
@@ -740,6 +770,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ tools
     def set_tool(self, name: str) -> None:
+        self.cancel_zoom_box()
         self.tool.cancel()
         self.tool = TOOLS[name](self.session)
         if name == "sketch":
@@ -762,6 +793,9 @@ class MainWindow(QMainWindow):
         self._update_tool_feedback(None)
 
     def cancel_tool(self) -> None:
+        if self.zoom_box.active or self.zoom_box.actor.GetVisibility():
+            self.cancel_zoom_box()  # Esc drops a zoom window first
+            return
         if self.tool.points:
             self.tool.cancel()
             self.scene.show_preview([])

@@ -862,6 +862,13 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
   with the O-grid icon; installed.
 - Tests `tests/python/test_gui_navigation.py` (zoom maths against the view's world corners, the
   rectangle and the click threshold, docks).
+- Fixed (reported by the user: the zoom window stayed and could not be cancelled): the camera
+  style saw the press, started a pan and grabbed the interactor's focus (VTK's trackball
+  style does in OnLeftButtonDown), after which only it got the moves and the release, so the
+  box never finished and then followed the pointer. The zoom observer now takes the press
+  (as handle drags do); Esc and tool changes cancel a box; a move without the button ends it
+  (a missed release). `test_zoom_window_through_the_event_chain` drives a real interactor on
+  the off-screen view (it fails without the fix; the earlier tests did not reach the chain).
 - .ogp projects open from the Finder (double-click; also while OpenGrid runs): the launcher
   declares the type `org.opengrid.project` and is made its default handler
   (`packaging/macos/set_default_handler.py`; the stale self-contained bundle in packaging/dist

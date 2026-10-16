@@ -9,10 +9,12 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
+    QFrame,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QSpinBox,
     QToolBar,
     QWidget,
@@ -34,6 +36,7 @@ from opengrid.app.quality_dock import METRICS, QualityDock, worst_cell
 from opengrid.app.scene import Scene, pick_entity
 from opengrid.app.smoother_dock import SmootherDock
 from opengrid.app.tools import TOOLS, Tool, snap, snap_targets
+from opengrid.app.zoom_box import ZoomBox
 from opengrid.validation import ValidationError
 
 log = logging.getLogger("opengrid")
@@ -79,6 +82,7 @@ class MainWindow(QMainWindow):
 
         self.viewport = self._create_viewport(off_screen)
         self.setCentralWidget(self.viewport)
+        self.zoom_box = ZoomBox(self.viewport.renderer, min_pixels=int(CLICK_MOVE_PIXELS) + 1)
         self.scene = Scene(self.viewport, session)
 
         self.model_tree = ModelTree()
@@ -89,8 +93,9 @@ class MainWindow(QMainWindow):
         )
 
         model_dock = self._add_dock("Model", self.model_tree, Qt.DockWidgetArea.LeftDockWidgetArea)
+        # Forms scroll inside their docks, so the docks' dividers can be moved freely.
         properties_dock = self._add_dock(
-            "Properties", self.property_panel, Qt.DockWidgetArea.LeftDockWidgetArea
+            "Properties", self.property_panel, Qt.DockWidgetArea.LeftDockWidgetArea, scroll=True
         )
         console_dock = self._add_dock(
             "Console", self.console, Qt.DockWidgetArea.BottomDockWidgetArea
@@ -102,11 +107,11 @@ class MainWindow(QMainWindow):
             "Quality", self.quality_dock, Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.smoother_dock_widget = self._add_dock(
-            "Smoother", self.smoother_dock, Qt.DockWidgetArea.RightDockWidgetArea
+            "Smoother", self.smoother_dock, Qt.DockWidgetArea.RightDockWidgetArea, scroll=True
         )
         self.boundary_dock = BoundaryDock()
         self.boundary_dock_widget = self._add_dock(
-            "Boundary", self.boundary_dock, Qt.DockWidgetArea.RightDockWidgetArea
+            "Boundary", self.boundary_dock, Qt.DockWidgetArea.RightDockWidgetArea, scroll=True
         )
         self.tabifyDockWidget(quality_dock, self.smoother_dock_widget)
         self.tabifyDockWidget(quality_dock, self.boundary_dock_widget)
@@ -150,13 +155,33 @@ class MainWindow(QMainWindow):
         viewport.enable_parallel_projection()
         viewport.view_xy()
         if viewport.iren is not None:
-            # 2D navigation: left-drag pans, wheel / two-finger scroll zooms, right-drag zooms.
-            viewport.enable_2d_style()
+            # 2D navigation: left-drag zooms to a window (app/zoom_box.py; View menu: or pans),
+            # Shift + left-drag and middle-drag pan, wheel / two-finger scroll and right-drag
+            # zoom, Ctrl + left / middle-drag spin, Ctrl + right-drag rotates in 3D.
+            viewport.enable_custom_trackball_style(
+                left="pan",
+                shift_left="pan",
+                control_left="spin",
+                middle="pan",
+                shift_middle="dolly",
+                control_middle="spin",
+                right="dolly",
+                shift_right="dolly",
+                control_right="rotate",
+            )
         return viewport
 
-    def _add_dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea) -> QDockWidget:
+    def _add_dock(
+        self, title: str, widget: QWidget, area: Qt.DockWidgetArea, scroll: bool = False
+    ) -> QDockWidget:
         dock = QDockWidget(title, self)
         dock.setObjectName(f"dock_{title.lower()}")
+        if scroll:
+            area_widget = QScrollArea(dock)
+            area_widget.setWidgetResizable(True)
+            area_widget.setFrameShape(QFrame.Shape.NoFrame)
+            area_widget.setWidget(widget)
+            widget = area_widget
         dock.setWidget(widget)
         self.addDockWidget(area, dock)
         return dock
@@ -288,6 +313,13 @@ class MainWindow(QMainWindow):
         self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
         self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.viewport.addAction(self.fit_action)
+        self.zoom_window_action = QAction("Left-drag zooms to a window", self)
+        self.zoom_window_action.setCheckable(True)
+        self.zoom_window_action.setChecked(True)
+        self.zoom_window_action.setStatusTip(
+            "Left-drag (three-finger drag) draws a window and zooms onto it; off: it pans. "
+            "Shift + drag always pans."
+        )
 
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[str, QAction] = {}
@@ -394,6 +426,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
+        view_menu.addAction(self.zoom_window_action)
         view_menu.addSeparator()
         view_menu.addAction(self.color_action)
         view_menu.addAction(self.nodes_action)
@@ -449,6 +482,38 @@ class MainWindow(QMainWindow):
             ("LeftButtonReleaseEvent", self._grab_release),
         ):
             self._grab_tags[event] = interactor.AddObserver(event, handler, 10.0)
+        # Zoom window: after handle drags and strokes (10), before the camera style (0).
+        self._zoom_tags = {}
+        for event, handler in (
+            ("LeftButtonPressEvent", self._zoom_press),
+            ("MouseMoveEvent", self._zoom_move),
+            ("LeftButtonReleaseEvent", self._zoom_release),
+        ):
+            self._zoom_tags[event] = interactor.AddObserver(event, handler, 5.0)
+
+    def _zoom_press(self, interactor, event) -> None:
+        if not self.zoom_window_action.isChecked():
+            return
+        if interactor.GetShiftKey() or interactor.GetControlKey():
+            return  # Shift: pan, Ctrl: spin (the camera style)
+        x, y = interactor.GetEventPosition()
+        self.zoom_box.start(x, y)
+
+    def _zoom_move(self, interactor, event) -> None:
+        if not self.zoom_box.active:
+            return
+        x, y = interactor.GetEventPosition()
+        self.zoom_box.update(x, y)
+        self.viewport.render()
+        interactor.GetCommand(self._zoom_tags[event]).SetAbortFlag(1)  # no pan meanwhile
+
+    def _zoom_release(self, interactor, event) -> None:
+        if not self.zoom_box.active:
+            return
+        x, y = interactor.GetEventPosition()
+        if self.zoom_box.finish(x, y):
+            self.viewport.render()
+        # Not aborted: a short drag is still a click (_on_vtk_release decides).
 
     def _abort(self, interactor, event: str) -> None:
         interactor.GetCommand(self._grab_tags[event]).SetAbortFlag(1)

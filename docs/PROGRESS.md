@@ -848,6 +848,21 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## GUI navigation, docks and a launcher app (2026-10-16) — requested by the user
+
+- Zoom to a window (`app/zoom_box.py`): a left-drag (a three-finger drag on a trackpad) draws a
+  rectangle that follows the pointer and zooms onto it on release (box centre to the view
+  centre, zoom by the box's size); a click still selects, handle drags and freehand strokes
+  keep the button first. Panning moved to Shift + left-drag and middle-drag; View -> "Left-drag
+  zooms to a window" (on by default) gives left-drag back to panning.
+- The Properties, Smoother and Boundary forms scroll inside their docks: a connector's form
+  needed 484 px, which kept the Model tree above it at 107 px.
+- `packaging/macos/install_launcher.sh`: OpenGrid.app in /Applications that starts the
+  development environment (current code, no rebuild; log in ~/Library/Logs/OpenGrid.log),
+  with the O-grid icon; installed.
+- Tests `tests/python/test_gui_navigation.py` (zoom maths against the view's world corners, the
+  rectangle and the click threshold, docks).
+
 ## Phase 11g — curved boundary elements (2026-10-16) — requested by the user, committed when its checks passed
 
 ### Built

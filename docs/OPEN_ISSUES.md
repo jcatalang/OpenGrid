@@ -269,6 +269,11 @@ history). Phase tags show where each item came from.
   can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
   moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
   the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
+- **Trackpad gestures** [GUI]: the zoom window is a left-drag; a three-finger drag is one only
+  with macOS's "Three Finger Drag" (System Settings -> Accessibility -> Pointer Control ->
+  Trackpad Options). Two-finger scroll zooms (as a wheel); pinch gestures are not mapped by
+  OpenGrid. The launcher app depends on the `opengrid` conda environment (moving or removing
+  it breaks the app; rerun the installer), and does not open .ogp files from the Finder.
 - **Curved boundary elements** [11g]: `high_order` curves the boundary by default. Folded
   elements are reported, not repaired: there is no untangling or high-order mesh optimisation
   (a single block wrapped onto a sphere folds at its corners; the O-grid does not). Quality

@@ -610,7 +610,7 @@ blocks, the blocks (3D).
 
 ## High-order elements
 
-### `high_order(order: int = 2, curved: bool = True)`
+### `high_order(order: int = 2, curved: bool = True, repair: bool = True)`
 
 Order-``order`` elements (1 .. 6) of every mesh cell: triangles and quadrilaterals
 (2D), tetrahedra, pyramids, prisms and hexahedra (3D), the same cells as the linear
@@ -618,16 +618,19 @@ mesh with equispaced Lagrange nodes, shared nodes merged exactly, and boundary
 elements (lines / triangles / quadrilaterals) per patch (with patches the boundary
 must validate). ``curved``: boundary nodes moved onto the geometry (curves,
 surfaces) and the displacement extended into the neighbouring elements, which are
-checked for validity (ValidationError for folded elements); False: straight-sided
-elements (straight edges, planar triangles, bilinear quadrilateral faces). Returns an
+checked for validity (ValidationError for folded elements; ``repair``: the elements
+that fold or lose most of their quality are first optimised, see ``curving``
+["repair"]); False: straight-sided elements (straight edges, planar triangles,
+bilinear quadrilateral faces). Returns an
 ElementMesh (``points``, ``cells`` / ``faces`` per kind in Gmsh node order,
 ``connectivity(kind, fmt)``, ``element_nodes(kind, nodes)``, ``curving`` report).
 
-### `export_high_order(path, order: int = 2, nodes: str = 'equispaced', base_name: str = 'OpenGrid', curved: bool = True) -> dict`
+### `export_high_order(path, order: int = 2, nodes: str = 'equispaced', base_name: str = 'OpenGrid', curved: bool = True, repair: bool = True) -> dict`
 
-Write ``high_order(order, curved)`` by extension: ``.msh`` (Gmsh 4.1 high-order element
-types, physical groups, periodic links), ``.cgns`` (SIDS types up to order 4, one
-unstructured zone per zone, BCs per patch), ``.vtkhdf`` (VTK Lagrange cells) or ``.h5``
+Write ``high_order(order, curved, repair)`` by extension: ``.msh`` (Gmsh 4.1
+high-order element types, physical groups, periodic links), ``.cgns`` (SIDS types up
+to order 4, one unstructured zone per zone, BCs per patch), ``.vtkhdf`` (VTK Lagrange
+cells) or ``.h5``
 (element node coordinates in the node set ``nodes``: "equispaced", or "gll" / "gauss"
 for quadrilaterals and hexahedra).
 

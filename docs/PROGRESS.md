@@ -848,6 +848,52 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Phase 12c — repair of curved elements and rigorous validity (2026-10-17) — requested by the user, committed when its checks passed
+
+### Built
+- `model/repair.py`:
+  - Validity by Bernstein-Bezier bounds (Johnen, Remacle, Geuzaine 2013): the Jacobian
+    determinant of an order-p element is a polynomial (degree 2(p-1) on triangles, 3(p-1) on
+    tetrahedra, 2p-1 per direction on quadrilaterals, 3p-1 on hexahedra, (3p-2) x (3p-1) on
+    prisms), interpolated exactly on the lattice of that degree and converted to Bernstein
+    coefficients, whose minimum bounds J from below; inconclusive bounds are tightened by
+    degree elevation (three rounds). Lattices: Gauss-Lobatto points per tensor direction and a
+    GLL-warped simplex lattice (the equispaced Bernstein Vandermonde is too ill-conditioned:
+    an exact rational inverse of the 220 x 220 tetrahedral matrix took minutes, the
+    equispaced degree-11 tensor conversion lost 1e-4). Accurate to 1e-6 through order 4 for
+    every kind; hexahedra above order 4 (degree 17: 0.1 error) and pyramids (rational
+    Jacobian) are sampled instead (`rigorous`).
+  - Repair: elements that fold, fall below a scaled Jacobian of 0.25 or lose 30 % of their
+    straight-sided quality are optimised with their neighbours as guards - the free
+    high-order nodes (not on the geometry or the boundary, never the linear vertices)
+    minimise sum_q (r-1)^2 + alpha / h(r), r = J / J_straight, h the regularised Jacobian
+    of Escobar et al. (rounds of decreasing delta only while something is folded), with
+    L-BFGS, analytic gradients (cofactors) and BLAS-shaped evaluations; capped at 400
+    evaluations; kept when the worst element improved.
+- `curve_boundary(..., repair=True)` (default; `Session.high_order(order, curved, repair)`,
+  the exports): assess, repair the flagged elements, assess again, then check every
+  element whose sampled scaled Jacobian is below 0.3 rigorously; folded and undetermined
+  elements are reported with their Bezier bound. Report: `curving["repair"]` (flagged
+  elements, free nodes, iterations, patch, before / after, kept) and `curving["validity"]`.
+
+### Results
+| Case | Without repair | With repair | Time |
+|---|---|---|---|
+| Triangulated sphere, prism layers, order 3 | 0.638 (straight 0.966) | 0.705 (patch 0.638 -> 0.744) | 1.4 s |
+| Structured sphere faces, hexahedral layers, order 3 | 0.623 (0.712) | 0.663 (0.623 -> 0.687) | 2.2 s |
+| Coarse ring over 1e-5 layers, order 4 | 0.823 (0.915) | not flagged | - |
+| One block on a sphere, order 4 | folds | still folds (reported, 10 s) | - |
+
+- Bounds on real meshes are tight: ring 0.826 against a sampled 0.823, sphere tetrahedra
+  0.617 against 0.638; 6000 tetrahedra checked in 0.08 s.
+- The block on the sphere cannot be untangled by moving free nodes: its curved face nodes
+  are pinned to the sphere and the straight corner cells are nearly flat.
+
+### Verified
+- `pytest` +9 (`tests/python/test_repair.py`: coefficients of affine elements, pushed /
+  folded quads, curved rings, sampled kinds, the repair, the hopeless case); lint, ternary
+  check, API docs, launcher check.
+
 ## Phase 12b — end-to-end tests of feature combinations (2026-10-17) — requested by the user, committed when its checks passed
 
 - `tests/python/test_combinations.py`: one checker for every model - the merged mesh is

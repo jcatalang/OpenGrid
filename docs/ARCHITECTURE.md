@@ -1238,6 +1238,14 @@ segment, so derivative jumps at knots never cost accuracy.
   connector nodes merged by coordinates, which failed for group-smoothed domains whose
   boundary nodes slide).
 
+### Repair and rigorous validity of curved elements (Phase 12c)
+- `model/repair.py`: `validity` converts the Jacobian determinant, interpolated on a lattice
+  of its own polynomial degree, to Bernstein coefficients (per-direction operators for tensor
+  kinds, a simplex operator, triangle x line for prisms) and uses their minimum as a lower
+  bound, elevating the degree when inconclusive; `repair` runs L-BFGS on a patch (flagged
+  elements plus neighbours) with the straight-sided Jacobian field as the target. Both stay in
+  NumPy: the patches are small and the heavy products are BLAS matmuls.
+
 ## 7. 3D tet backend decision
 
 `TetBackend` is a C++ interface: input = closed, watertight, consistently oriented surface

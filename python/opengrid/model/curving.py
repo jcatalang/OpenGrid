@@ -35,6 +35,7 @@ from opengrid.validation import Issue, ValidationError
 
 RADIUS_FACTOR = 3.0
 MAX_REPORTED = 10
+BEZIER_RATIO = 0.3  # rigorous validity for elements whose sampled scaled Jacobian is below
 
 
 # ------------------------------------------------------------------ mesh topology helpers
@@ -408,9 +409,32 @@ def _grid_index(grid, points, verts, source, rows) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ curving
-def curve_boundary(session, assembly, mesh) -> dict:
+def _assess(mesh, straight, changed) -> dict:
+    """Per kind: (rows of the elements with a changed node, their scaled Jacobian curved and
+    straight-sided), sampled at the order-(p + 2) lattice."""
+    out = {}
+    for kind, conn in mesh.cells.items():
+        rows = np.flatnonzero(changed[conn].any(axis=1))
+        if len(rows) == 0:
+            continue
+        det = shape.jacobians(kind, mesh.order, mesh.points[conn[rows]], mesh.dim)
+        before = shape.jacobians(kind, mesh.order, straight[conn[rows]], mesh.dim)
+        sign = np.sign(shape.jacobians_at_centre(kind, mesh.order, straight[conn[rows]], mesh.dim))
+        signed = det * sign[:, None]
+        signed_before = before * sign[:, None]
+        ratio = signed.min(axis=1) / np.maximum(signed.max(axis=1), 1e-300)
+        ratio_straight = signed_before.min(axis=1) / np.maximum(signed_before.max(axis=1), 1e-300)
+        out[kind] = (rows, ratio, ratio_straight)
+    return out
+
+
+def curve_boundary(session, assembly, mesh, repair: bool = True) -> dict:
     """Move the boundary nodes of ``mesh`` (in place) onto the geometry and extend the
-    displacement; returns the report also stored in ``mesh.curving``."""
+    displacement; ``repair``: optimise the elements that fold or lose most of their quality
+    (``model/repair.py``). Returns the report also stored in ``mesh.curving``."""
+    """Move the boundary nodes of ``mesh`` (in place) onto the geometry and extend the
+    displacement; ``repair``: optimise the elements that fold or lose most of their quality
+    (``model/repair.py``). Returns the report also stored in ``mesh.curving``."""
     report = {
         "moved": 0,
         "max_displacement": 0.0,
@@ -456,35 +480,64 @@ def curve_boundary(session, assembly, mesh) -> dict:
     straight = mesh.points.copy()
     changed = np.linalg.norm(result, axis=1) > 0
     mesh.points = mesh.points + result
-    worst, worst_straight, issues, count = 1.0, 1.0, [], 0
-    for kind, conn in mesh.cells.items():
-        rows = np.flatnonzero(changed[conn].any(axis=1))
-        if len(rows) == 0:
-            continue
-        count += len(rows)
-        det = shape.jacobians(kind, mesh.order, mesh.points[conn[rows]], mesh.dim)
-        before = shape.jacobians(kind, mesh.order, straight[conn[rows]], mesh.dim)
-        sign = np.sign(shape.jacobians_at_centre(kind, mesh.order, straight[conn[rows]], mesh.dim))
-        signed = det * sign[:, None]
-        ratio = signed.min(axis=1) / signed.max(axis=1)
-        signed_before = before * sign[:, None]
+    assessment = _assess(mesh, straight, changed)
+    report["curved_elements"] = int(sum(len(a[0]) for a in assessment.values()))
+    if repair and assessment:
+        from opengrid.model import repair as repair_module
+
+        flagged = {}
+        for kind, (rows, ratio, ratio_straight) in assessment.items():
+            mask = repair_module.flagged_elements(ratio, ratio_straight)
+            if mask.any():
+                flagged[kind] = rows[mask]
+        if flagged:
+            report["repair"] = repair_module.repair(mesh, straight, flagged, fixed)
+            changed |= np.linalg.norm(mesh.points - straight, axis=1) > 0
+            assessment = _assess(mesh, straight, changed)
+    worst, worst_straight, issues = 1.0, 1.0, []
+    checked = undetermined = 0
+    for kind, (rows, ratio, ratio_straight) in assessment.items():
         worst = min(worst, float(ratio.min()))
-        worst_straight = min(
-            worst_straight, float((signed_before.min(1) / signed_before.max(1)).min())
+        worst_straight = min(worst_straight, float(ratio_straight.min()))
+        conn = mesh.cells[kind]
+        low = np.flatnonzero(ratio < BEZIER_RATIO)
+        if len(low) == 0:
+            continue
+        from opengrid.model import repair as repair_module
+
+        sign = np.sign(
+            shape.jacobians_at_centre(kind, mesh.order, straight[conn[rows[low]]], mesh.dim)
         )
-        for r in np.flatnonzero(ratio <= 0.0):
-            if len(issues) < MAX_REPORTED:
-                c = mesh.points[conn[rows[r]]].mean(axis=0)
+        status, bound = repair_module.validity(
+            kind, mesh.order, mesh.points[conn[rows[low]]], mesh.dim, sign
+        )
+        checked += len(low)
+        undetermined += int((status == 0).sum())
+        for k in np.flatnonzero(status <= 0):
+            if len(issues) >= MAX_REPORTED:
+                break
+            element = int(rows[low[k]])
+            c = mesh.points[conn[element]].mean(axis=0)
+            where = f"({c[0]:.4g}, {c[1]:.4g}, {c[2]:.4g})"
+            if status[k] < 0:
                 issues.append(
                     Issue(
-                        f"{kind} {int(rows[r])}",
-                        f"folds after curving (scaled Jacobian {ratio[r]:.3f}) near "
-                        f"({c[0]:.4g}, {c[1]:.4g}, {c[2]:.4g})",
+                        f"{kind} {element}",
+                        f"folds after curving (scaled Jacobian {ratio[low[k]]:.3f}, Bezier "
+                        f"bound {bound[k]:.3f}) near {where}",
                     )
                 )
-    report["curved_elements"] = count
+            else:
+                issues.append(
+                    Issue(
+                        f"{kind} {element}",
+                        f"validity undetermined after curving (sampled scaled Jacobian "
+                        f"{ratio[low[k]]:.3f}, Bezier bound {bound[k]:.3f}) near {where}",
+                    )
+                )
     report["min_scaled_jacobian"] = worst
     report["min_scaled_jacobian_straight"] = worst_straight  # the same elements, straight-sided
+    report["validity"] = {"checked": checked, "undetermined": undetermined}
     mesh.curving = report
     if issues:
         raise ValidationError(issues)

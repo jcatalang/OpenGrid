@@ -285,19 +285,23 @@ history). Phase tags show where each item came from.
   it breaks the app; rerun the installer). A running OpenGrid keeps the code it started with
   (the status bar says when it changed: restart); the self-contained bundle in packaging/dist
   is not rebuilt with the code (build_app.sh, on request).
-- **Curved boundary elements** [11g]: `high_order` curves the boundary by default. Folded
-  elements are reported, not repaired: there is no untangling or high-order mesh optimisation
-  (a single block wrapped onto a sphere folds at its corners; the O-grid does not). Quality
-  drops where a coarse element sits on top of a curved layer stack (0.97 -> 0.64 on the
-  triangulated sphere). The extension is a stiffened graph Laplacian (weights 1 / length^3,
-  chosen on four cases), not elasticity, over a region of 3 boundary-element lengths; CG
-  (tolerance 1e-10) above 20k unknowns, 92 - 900 iterations seen. Faces without a surface are
-  curved from their own grid (degree-p interpolation: the pipe wall 2.6e-7 off its cylinder
-  at order 4, against 1e-11 for projected surfaces); give curved faces a surface for exact
-  nodes. Periodic patches and internal walls stay straight; VTKHDF draws pyramids linear
-  (curved ones too). Projection is the closest point on the connector's curves or the face's
-  surface (no parameter-interval check); validity is sampled at the order-(p + 2) lattice, not
-  bounded (Bezier bounds would be rigorous).
+- **Curved boundary elements** [11g, 12c]: `high_order` curves the boundary by default, repairs
+  the elements that fold or lose most of their quality by moving their free high-order nodes,
+  and checks the low ones with Bezier bounds. Repair moves no linear vertex and no node on the
+  geometry, so elements whose straight cells are nearly flat under a curved face (one block
+  wrapped onto a sphere) stay folded and are reported; the O-grid version does not fold. A
+  coarse tetrahedron on a curved layer stack keeps a loss (0.97 -> 0.70 after repair). The
+  extension is a stiffened graph Laplacian (weights 1 / length^3, chosen on four cases), not
+  elasticity, over a region of 3 boundary-element lengths; CG (tolerance 1e-10) above 20k
+  unknowns, 92 - 900 iterations seen. Faces without a surface are curved from their own grid
+  (degree-p interpolation: the pipe wall 2.6e-7 off its cylinder at order 4, against 1e-11 for
+  projected surfaces); give curved faces a surface for exact nodes. Periodic patches and
+  internal walls stay straight; VTKHDF draws pyramids linear (curved ones too). Projection is
+  the closest point on the connector's curves or the face's surface (no parameter-interval
+  check). Validity is rigorous (Bezier bounds, degree elevation) for elements whose sampled
+  scaled Jacobian is below 0.3 and through order 4; hexahedra of orders 5-6 and pyramids are
+  sampled only, and elements sampled above 0.3 are not bound-checked (a fold between samples
+  there is not excluded).
 - **Straight-sided element details** [11f]: quadrilateral faces are bilinear, planar only
   when their four vertices are coplanar (hexahedra of smooth grids have slightly warped
   faces). Orders 1-6 (CGNS defines up to 4). GLL / Gauss node sets for quadrilaterals and

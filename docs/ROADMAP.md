@@ -490,7 +490,9 @@ end-to-end tests of feature combinations, repair of curved elements, 3D speed.
   every export, read back by the reference readers.
 ### 12c — Repair of curved elements
 - Local optimisation of the elements that fold or lose quality after curving (Jacobian-based,
-  Toulorge et al. 2013), validity by Bezier bounds.
+  Toulorge et al. 2013), validity by Bezier bounds. *(Built (`model/repair.py`): repair by L-BFGS on the free
+  high-order nodes with the regularised Jacobian of Escobar et al., Bezier validity with
+  degree elevation through order 4; see PROGRESS.)*
 ### 12d — 3D speed
 - Profile the 1M-cell group and the Netgen path again; implement what pays.
 

@@ -210,7 +210,8 @@ The elements of every mesh cell, with the boundary nodes on the geometry (curved
 the elements next to them following:
 ```python
 mesh = og.high_order(order=3)  # triangles, quads, tets, pyramids, prisms, hexes + boundary
-print(mesh.curving)  # moved nodes, scaled Jacobian of the curved elements (straight-sided)
+print(mesh.curving)  # moved nodes, scaled Jacobian of the curved elements (straight-sided),
+# the repair of elements that folded or lost quality, and the rigorous validity check
 flat = og.high_order(order=3, curved=False)  # straight-sided elements
 print(mesh.counts(), len(mesh.points))  # shared edge / face nodes merged exactly
 conn = mesh.connectivity("tetra", "cgns")  # (elements, 20) in CGNS's node order

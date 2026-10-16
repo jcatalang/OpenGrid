@@ -183,10 +183,13 @@ def sample_points(kind: str, p: int) -> np.ndarray:
     return x
 
 
-def jacobians(kind: str, p: int, xyz: np.ndarray, dim: int) -> np.ndarray:
+def jacobians(kind: str, p: int, xyz: np.ndarray, dim: int, points=None) -> np.ndarray:
     """Jacobian determinants (elements, samples) of elements with node coordinates ``xyz``
-    (elements, n, 3); 2D: the in-plane (x, y) determinant."""
-    _values, grads = basis(kind, p, sample_points(kind, p))
+    (elements, n, 3) at the validity sample points (or the given reference ``points``); 2D:
+    the in-plane (x, y) determinant."""
+    if points is None:
+        points = sample_points(kind, p)
+    _values, grads = basis(kind, p, points)
     q, n, d = grads.shape
     flat = grads.transpose(1, 0, 2).reshape(n, q * d)  # (n, q d)
     out = []
@@ -198,7 +201,7 @@ def jacobians(kind: str, p: int, xyz: np.ndarray, dim: int) -> np.ndarray:
         else:
             out.append(np.linalg.det(jac))
     if not out:
-        return np.zeros((0, len(sample_points(kind, p))))
+        return np.zeros((0, len(points)))
     return np.concatenate(out)
 
 

@@ -862,6 +862,18 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
   with the O-grid icon; installed.
 - Tests `tests/python/test_gui_navigation.py` (zoom maths against the view's world corners, the
   rectangle and the click threshold, docks).
+- .ogp projects open from the Finder (double-click; also while OpenGrid runs): the launcher
+  declares the type `org.opengrid.project` and is made its default handler
+  (`packaging/macos/set_default_handler.py`; the stale self-contained bundle in packaging/dist
+  is unregistered); `python -m opengrid project.ogp` opens it too (`__main__.py`: file-open
+  events and arguments, unsaved changes confirmed). Round icon (transparent outside the disk).
+- Staying current: the window title shows the commit it runs ("+": uncommitted changes); a
+  status-bar notice appears when OpenGrid's code changes on disk while it runs (checked every
+  30 s, Python files and extension modules); the bundle records what it was made from
+  (`Contents/Resources/source.txt`), and `tools/check_launcher.py` / `tests/python/
+  test_launcher.py` fail when the installer or icon script changed since. The app's log goes
+  to ~/Library/Logs/OpenGrid.log. (Found on the way: an app started by the Finder can sit in a
+  folder it may not read, and git then fails even with -C: git now runs in the checkout.)
 
 ## Phase 11g — curved boundary elements (2026-10-16) — requested by the user, committed when its checks passed
 

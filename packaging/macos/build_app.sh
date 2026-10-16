@@ -89,8 +89,21 @@ cat >"$APP/Contents/Info.plist" <<PLIST
   <array>
     <dict>
       <key>CFBundleTypeName</key><string>OpenGrid project</string>
-      <key>CFBundleTypeExtensions</key><array><string>ogp</string></array>
       <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>org.opengrid.project</string></array>
+      <key>CFBundleTypeIconFile</key><string>OpenGrid</string>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>org.opengrid.project</string>
+      <key>UTTypeDescription</key><string>OpenGrid project</string>
+      <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+      <key>UTTypeIconFile</key><string>OpenGrid</string>
+      <key>UTTypeTagSpecification</key>
+      <dict><key>public.filename-extension</key><array><string>ogp</string></array></dict>
     </dict>
   </array>
 </dict>

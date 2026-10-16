@@ -4,7 +4,9 @@
 # Unlike build_app.sh (a self-contained bundle with a packed copy of the environment), this app
 # holds no Python: it starts `python -m opengrid` from the `opengrid` conda environment, so it
 # always runs the current code of the editable install (no rebuild after changes). Output goes
-# to ~/Library/Logs/OpenGrid.log.
+# to ~/Library/Logs/OpenGrid.log. .ogp projects open from the Finder (double-click). The
+# bundle itself (launcher, Info.plist, icon) changes only with this script and make_icon.py:
+# tools/check_launcher.py says whether the installed one is current.
 #
 #   packaging/macos/install_launcher.sh               # into /Applications
 #   packaging/macos/install_launcher.sh ~/Applications
@@ -69,11 +71,46 @@ cat >"$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSRequiresAquaSystemAppearance</key><false/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>OpenGrid project</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>org.opengrid.project</string></array>
+      <key>CFBundleTypeIconFile</key><string>OpenGrid</string>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>org.opengrid.project</string>
+      <key>UTTypeDescription</key><string>OpenGrid project</string>
+      <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+      <key>UTTypeIconFile</key><string>OpenGrid</string>
+      <key>UTTypeTagSpecification</key>
+      <dict><key>public.filename-extension</key><array><string>ogp</string></array></dict>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
 
+# What the bundle was made from: checked by tools/check_launcher.py (and shown in the log).
+{
+  echo "source: $ROOT"
+  echo "commit: $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "installer: $(shasum -a 256 "$HERE/install_launcher.sh" | cut -d' ' -f1)"
+  echo "icon: $(shasum -a 256 "$HERE/make_icon.py" | cut -d' ' -f1)"
+  echo "installed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} >"$APP/Contents/Resources/source.txt"
+
 # Refresh the Finder's view of the bundle (icon) and register it with Launch Services.
 touch "$APP"
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+# A built self-contained bundle (build_app.sh, packaging/dist) is a frozen copy: keep the
+# Finder from choosing it for .ogp files.
+"$LSREGISTER" -u "$ROOT/packaging/dist/OpenGrid.app" >/dev/null 2>&1 || true
+"$PYTHON" "$HERE/set_default_handler.py" org.opengrid.project org.opengrid.OpenGrid.dev
 echo "installed $APP (runs $PYTHON -m opengrid; log: ~/Library/Logs/OpenGrid.log)"

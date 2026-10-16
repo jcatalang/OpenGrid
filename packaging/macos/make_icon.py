@@ -1,5 +1,6 @@
-"""Draw the OpenGrid icon (a stretched O-grid around a circle) into an .iconset folder:
-python make_icon.py out.iconset, then iconutil -c icns out.iconset."""
+"""Draw the OpenGrid icon (a stretched O-grid around a circle, on a round disk; transparent
+outside it) into an .iconset folder: python make_icon.py out.iconset, then iconutil -c icns
+out.iconset."""
 
 import math
 import sys
@@ -14,12 +15,14 @@ import numpy as np
 
 def draw(path: Path, pixels: int) -> None:
     fig = plt.figure(figsize=(1, 1), dpi=pixels)
+    fig.patch.set_alpha(0.0)
     ax = fig.add_axes((0, 0, 1, 1))
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.add_patch(plt.Rectangle((-1, -1), 2, 2, color="#1d3557", zorder=0))
+    ax.patch.set_alpha(0.0)
+    ax.add_patch(plt.Circle((0, 0), 0.97, color="#1d3557", zorder=0))
     theta = np.linspace(0, 2 * math.pi, 25)
     radii = 0.22 + 0.68 * (np.linspace(0, 1, 9) ** 1.6)
     width = max(0.4, pixels / 256)
@@ -33,7 +36,7 @@ def draw(path: Path, pixels: int) -> None:
             lw=width,
         )
     ax.add_patch(plt.Circle((0, 0), radii[0], color="#e63946", zorder=3))
-    fig.savefig(path, dpi=pixels)
+    fig.savefig(path, dpi=pixels, transparent=True)
     plt.close(fig)
 
 

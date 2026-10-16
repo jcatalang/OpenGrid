@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -60,9 +60,40 @@ def compute_summary() -> str:
 SNAP_PIXELS = 10.0
 PICK_PIXELS = 8.0
 CLICK_MOVE_PIXELS = 4.0
+UPDATE_CHECK_MS = 30000  # how often to look for updated code
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
+
+
+def code_stamp() -> float:
+    """Latest modification time of OpenGrid's code: its Python files and its extension modules
+    (an editable install keeps those in site-packages)."""
+    import sys
+
+    package = Path(opengrid.__file__).resolve().parent
+    paths = list(package.rglob("*.py"))
+    for name in ("opengrid._core", "opengrid._occt"):
+        module = sys.modules.get(name)
+        if module is not None and getattr(module, "__file__", None):
+            paths.append(Path(module.__file__))
+    latest = 0.0
+    for path in paths:
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue  # removed meanwhile
+    return latest
+
+
+def version_label() -> str:
+    """The version, and the source commit when running from a checkout ("+": with changes)."""
+    from opengrid.revision import source_revision
+
+    revision = source_revision()
+    if revision is None:
+        return opengrid.__version__
+    return f"{opengrid.__version__} ({revision})"
 
 
 class MainWindow(QMainWindow):
@@ -142,7 +173,11 @@ class MainWindow(QMainWindow):
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
         logging.getLogger("opengrid").setLevel(logging.INFO)
         self._refresh_all()
-        log.info("OpenGrid %s (core %s) started", opengrid.__version__, opengrid.core_version())
+        log.info("OpenGrid %s (core %s) started", version_label(), opengrid.core_version())
+        self._code_stamp = code_stamp()
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._check_for_update)
+        self._update_timer.start(UPDATE_CHECK_MS)
         log.info("%s", compute_summary())
 
     # ------------------------------------------------------------------ setup
@@ -838,7 +873,7 @@ class MainWindow(QMainWindow):
         dirty = ""
         if self.is_modified():
             dirty = " *"
-        self.setWindowTitle(f"{name}{dirty} — OpenGrid {opengrid.__version__}")
+        self.setWindowTitle(f"{name}{dirty} — OpenGrid {version_label()}")
 
     def is_modified(self) -> bool:
         return len(self.session.commands.journal.lines) != self._saved_journal_length
@@ -1625,6 +1660,27 @@ class MainWindow(QMainWindow):
         self.session.new()
         self._saved_journal_length = len(self.session.commands.journal.lines)
         self._refresh_all()
+
+    def _check_for_update(self) -> None:
+        """Say once, in the status bar, when OpenGrid's code changed on disk since it started:
+        this window still runs the code it started with."""
+        if self._code_stamp is None or code_stamp() <= self._code_stamp:
+            return
+        self._code_stamp = None
+        notice = QLabel("OpenGrid was updated: restart it to use the new version")
+        notice.setStyleSheet("color: #ffd166;")
+        self.statusBar().addPermanentWidget(notice)
+        log.info("OpenGrid's code changed on disk: restart OpenGrid to use the new version")
+
+    def open_document(self, path: str) -> bool:
+        """Open a project handed over by the system (Finder double-click, command line):
+        unsaved changes are confirmed first."""
+        if not self._confirm_discard():
+            return False
+        opened = self.open_project(path)
+        self.raise_()
+        self.activateWindow()
+        return opened
 
     def open_project(self, path: str | None = None) -> bool:
         if path is None:

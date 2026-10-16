@@ -273,7 +273,9 @@ history). Phase tags show where each item came from.
   with macOS's "Three Finger Drag" (System Settings -> Accessibility -> Pointer Control ->
   Trackpad Options). Two-finger scroll zooms (as a wheel); pinch gestures are not mapped by
   OpenGrid. The launcher app depends on the `opengrid` conda environment (moving or removing
-  it breaks the app; rerun the installer), and does not open .ogp files from the Finder.
+  it breaks the app; rerun the installer). A running OpenGrid keeps the code it started with
+  (the status bar says when it changed: restart); the self-contained bundle in packaging/dist
+  is not rebuilt with the code (build_app.sh, on request).
 - **Curved boundary elements** [11g]: `high_order` curves the boundary by default. Folded
   elements are reported, not repaired: there is no untangling or high-order mesh optimisation
   (a single block wrapped onto a sphere folds at its corners; the O-grid does not). Quality

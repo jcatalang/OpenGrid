@@ -1161,7 +1161,18 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
         values = list(entity.params[field])
         if not 0 <= index < len(values):
             _fail(entity.name, f"{field} has no item {index}")
+        seam = (
+            entity.kind != "sketch"
+            and len(values) > 2
+            and index in (0, len(values) - 1)
+            and tuple(values[0]) == tuple(values[-1])
+        )
         values[index] = point
+        if seam:
+            # A closed curve (its first and last defining points coincide): the seam moves as
+            # one point, so the loop stays closed.
+            values[0] = point
+            values[-1] = point
         changes = {field: tuple(values)}
     if entity.kind == "sketch":
         from opengrid.model.sketch import edit_sketch

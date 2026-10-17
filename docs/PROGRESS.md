@@ -848,6 +848,24 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Closed loops stay closed; the region between two loops (2026-10-17) — the user
+
+The user could not mesh a freehand loop after moving its control points: dragging the
+handle at the seam (the first or last control point of a closed curve) moved one end only
+and opened the loop. They also asked how to mesh between an inner and an outer curve.
+
+### Built / fixed
+- `topology_edit.move_handle`: a closed curve's seam (first and last defining points
+  coincide) moves as one point, so the loop stays closed; open curves unchanged.
+- The loop-assembly message for a curve whose two loose ends are close (within a tenth of
+  its length) now says "its two ends are 0.06 apart: close the loop (drag one end onto the
+  other, or release a freehand stroke at its start)".
+- Meshing between two loops already worked (select both, "Unstructured domain": the largest
+  loop is the outer boundary, the others holes); a test locks it in.
+
+### Verified
+- pytest +3 (`tests/python/test_closed_loops.py`).
+
 ## The camera stays put while dragging (2026-10-17) — bug reported by the user
 
 Every control-point drag reset the camera, too far out, and mirrored the view. Cause: the

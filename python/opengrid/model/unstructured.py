@@ -388,7 +388,21 @@ def assemble_polylines(polylines: dict, labels: dict, surface_geometry=None) -> 
         degree[b] = degree.get(b, 0) + 1
     issues = []
     for i in nodes:
-        for which, end in (("start", ends[i][0]), ("end", ends[i][1])):
+        a, b = ends[i]
+        if degree[a] == 1 and degree[b] == 1 and a != b:
+            # Both ends loose and close together: a loop that does not quite close.
+            gap = float(np.linalg.norm(keys[a] - keys[b]))
+            length = float(np.sum(np.linalg.norm(np.diff(nodes[i], axis=0), axis=1)))
+            if gap <= 0.1 * length:
+                issues.append(
+                    Issue(
+                        str(labels[i]),
+                        f"its two ends are {gap:.3g} apart: close the loop (drag one end onto "
+                        "the other, or release a freehand stroke at its start)",
+                    )
+                )
+                continue
+        for which, end in (("start", a), ("end", b)):
             if degree[end] == 2:
                 continue
             x, y, z = keys[end]

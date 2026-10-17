@@ -245,9 +245,12 @@ it, otherwise the log says how far the curve moved; the end control points stay)
 
 In the GUI a freehand stroke released within the pick tolerance of its start is a closed
 loop, the new curves are selected, and **Unstructured domain** meshes selected curves
-directly (one connector per curve with the "points" box's points, one undo step). A stroke that
-crosses its own beginning encloses a region for "Domains from curves"; the tails beyond the
-crossing are dropped.
+directly (one connector per curve with the "points" box's points, one undo step). Select an
+outer curve (or several forming a loop) together with the inner loops and the domain is the
+region between them: the largest loop is the outer boundary, the others are holes (a body in
+a far field). A stroke that crosses its own beginning encloses a region for "Domains from
+curves"; the tails beyond the crossing are dropped. Dragging a closed curve's seam handle
+moves both ends together, so the loop stays closed.
 
 ### Sketch topology
 ```python

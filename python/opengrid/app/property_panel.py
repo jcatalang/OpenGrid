@@ -1727,7 +1727,22 @@ class PropertyPanel(QWidget):
             chosen = self._editors["boundary"][1].currentText()
             if chosen != self._boundary_before:
                 boundary = chosen
+        dimension = None
+        if self.session.store.get(self.entity_id).kind == "connector" and "dimension" in changes:
+            dimension = changes.pop("dimension")  # propagates through structured domains
         try:
+            if dimension is not None:
+                # The connector's other edits go in the same step.
+                followed = self.session.set_dimension(name, dimension, **changes)
+                changes = {}
+                for warning in self.session.last_warnings:
+                    self.message.emit(warning, False)
+                if len(followed) > 1:
+                    self.message.emit(
+                        f"{len(followed) - 1} opposite connector(s) followed: "
+                        + ", ".join(n for n in followed if n != name),
+                        False,
+                    )
             if changes or new_name is not None:
                 self.session.modify(name, new_name=new_name, **changes)  # one undo step
                 if new_name is not None:
@@ -1737,7 +1752,7 @@ class PropertyPanel(QWidget):
         except ValidationError as error:
             self._show_error(str(error))
             return False
-        if not changes and new_name is None and boundary is None:
+        if not changes and new_name is None and boundary is None and dimension is None:
             self.message.emit("No changes", False)
             return False
         self.message.emit(f"Updated {self.session.store.get(self.entity_id).name}", False)

@@ -848,6 +848,29 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## A connector's points follow through structured domains (2026-10-17) — requested by the user
+
+The user could not change the number of points of a connector once a structured domain stood
+on it: the edit was refused because the opposite edge kept its count.
+
+### Built
+- `model/dimension.py` (`propagate_dimension`): breadth-first through every structured domain
+  using a changed connector, the opposite edge brought to the same count by its only free
+  connector, else the longest (warning); contradictions (every opposite connector fixed and
+  still unequal), counts below 2 and sketch-generated connectors refused with the reason.
+- `topology_edit.set_dimension` / `Session.set_dimension(name, dimension)` (replacing the old
+  one-connector version): applies the propagation, validates the dependents, and for a
+  sketch's connector sets the edge family in the sketch (`edit_sketch(dimensions=...)`);
+  returns the connectors changed. The property panel's "dimension" of a connector goes
+  through it (the log says which connectors followed); `modify(dimension=...)` is unchanged.
+
+### Verified
+- pytest +4 (`tests/python/test_dimension.py`): stacked domains (the shared connector and the
+  far edge follow, undo / redo, replay), a split edge (the longest connector, the warning,
+  the reverse direction, the "at least 2" refusal), sketch families and the refusal for a
+  plain domain on a sketch connector, the panel; `test_domains.py` updated (the propagation
+  instead of the refusal).
+
 ## Deleting with dependents, membership never blocking, sketch blocks removable (2026-10-17) — requested by the user
 
 The user could not delete connectors, sketches or domains: every deletion was refused

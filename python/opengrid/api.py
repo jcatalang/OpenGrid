@@ -316,10 +316,6 @@ class Session:
         segments = order_chain(self.store, list(curves))
         return self.create_connector(segments, dimension, distribution, name=name)
 
-    def set_dimension(self, name: str, dimension: int) -> str:
-        """Set a connector's number of points."""
-        return self.modify(name, dimension=dimension)
-
     def set_distribution(
         self,
         name: str,
@@ -1285,6 +1281,17 @@ class Session:
         return self._topology(
             "set_boundary_type", f"Boundary type {patch_type}", members, patch_type, name=name
         )[0]
+
+    def set_dimension(self, name: str, dimension: int, **changes) -> list[str]:
+        """A connector's number of points, with the connectors opposite to it in structured
+        domains (and so across the faces of blocks) following, so the domains stay valid
+        (opengrid.model.dimension); of several connectors on an opposite edge the longest
+        takes the change (a warning says so). A sketch's connector sets its edge family in
+        the sketch. ``changes``: other parameters of the connector (distribution,
+        breakpoints, ...) set in the same step. The property panel's connector edits go
+        through this; ``modify`` changes one connector only and is refused when a domain
+        would become invalid. One undo step; returns the connectors changed."""
+        return self._topology("set_dimension", f"Dimension of {name}", name, dimension, **changes)
 
     def clear_boundary_type(self, members) -> list[str]:
         """Take boundary members out of every patch: they are unassigned again (the GUI's

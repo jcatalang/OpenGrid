@@ -428,6 +428,12 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Re-dimensioning** [2026-10-17]: when the opposite edge of a structured domain is a
+  chain of connectors, the longest one takes the change (a warning names it); a connector
+  with explicit breakpoints past the new count is refused by its own validation; a change
+  that reaches a sketch's connector is refused (set it in the sketch); an over-constrained
+  loop (every opposite connector already fixed and still unequal) is refused naming the
+  domain.
 - **Deleting** [2026-10-17]: removing a block from a sketch renumbers the remaining blocks,
   so a domain's name can shift (``s-d1`` becomes ``s-d0``); 3D patches naming such a domain
   by id keep the entity, which now stands for another block. A sketch's connector or curve

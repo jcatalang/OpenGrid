@@ -352,8 +352,10 @@ def test_property_panel_edit_by_keyboard(live):
     spin.lineEdit().selectAll()
     live.qtbot.keyClicks(spin, "31")
     live.qtbot.mouseClick(panel.apply_button, Qt.MouseButton.LeftButton)
-    assert live.og.entity("cr").params["dimension"] == 21  # refused, with the reason shown
-    assert "cl" in panel._error.text() or "opposite" in panel._error.text().lower()
+    assert live.og.entity("cr").params["dimension"] == 31
+    assert live.og.entity("cl").params["dimension"] == 31  # the opposite side followed
+    assert panel._error.text() == ""
+    live.og.undo()
     live.og.create_line((3, 0), (4, 0), name="free")
     live.og.create_connector("free", 11, name="cf")
     live.click((3.5, 0.0, 0.0))

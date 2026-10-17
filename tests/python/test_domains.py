@@ -117,7 +117,10 @@ def test_dependencies_and_rotation():
     with pytest.raises(opengrid.ValidationError, match="used by domain"):
         og.delete("c0")
     with pytest.raises(opengrid.ValidationError, match="would become invalid"):
-        og.set_dimension("c0", 21)  # breaks the opposite counts
+        og.modify("c0", dimension=21)  # one connector alone breaks the opposite counts
+    assert og.set_dimension("c0", 21) == ["c0", "c2"]  # the opposite connector follows
+    assert og.entity("c2").params["dimension"] == 21
+    og.undo()
     with pytest.raises(opengrid.ValidationError, match="would become invalid"):
         og.modify("l1", p1=(2.5, 1.0))  # breaks the loop through connector c1
     og.modify("l1", p0=(2.0, 0.0))  # unchanged geometry is fine

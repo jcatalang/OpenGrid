@@ -184,6 +184,15 @@ Modes: "translate" (``vector``), "rotate" (axis ``vector`` through ``axis_point`
 in radians) and "normal" (``distance``, planar domains); ``distribution`` as for connectors.
 A structured domain extrudes to a block (``create_extruded_block``).
 
+### Changing a connector's points once domains stand on it
+    og.set_dimension("c-bottom", 41)   # the connectors opposite to it in structured domains follow
+
+A structured domain needs equal counts on opposite edges, so `set_dimension` spreads the
+change through every structured domain using the connector (and so across the faces of
+blocks); of several connectors on an opposite edge the longest takes it (`og.last_warnings`
+says which). A sketch's connector sets its edge family in the sketch. `og.modify("c",
+dimension=41)` changes that connector alone and is refused when a domain would become invalid.
+
 ### Boundary types in one step, and changing a domain's kind
     og.set_boundary_type(["c-bottom", "c-top"], "wall")   # they join the "wall" patch (made if absent)
     og.set_boundary_type(["c-left"], "inlet", name="in")   # a named patch of that type

@@ -53,12 +53,24 @@ history). Phase tags show where each item came from.
 - **Extruded volumes** [2026-10-17]: translate, rotate and normal sweeps only (no hyperbolic
   marching, no smoothing, no inflation layers: the layers are the distribution's); "normal"
   needs a planar domain; a rotation axis through the domain folds it (reported, cells flat or
-  inverted); the ends of a periodic pair (front / back) are not paired as periodic faces in
-  3D (3D periodic pairing is not supported, see Periodicity).
+  inverted); the curved high-order export leaves the side walls straight-sided (a swept
+  connector curve is not a surface of the model). The ends pair as periodic faces (back = the
+  domain, front = the volume's top, see Periodicity).
 - **Plot3D** [5c, 8a]: structured only; it refuses unstructured domains and volumes.
-- **Periodicity** [4, 7a]:
-  - 2D periodic pairs support translation only in CGNS.
-  - Periodic pairing of 3D faces is not supported.
+- **Periodicity** [4, 7a, 2026-10-17]:
+  - 2D periodic pairs support translation only in CGNS (a 2D base has no component for a
+    rotation about z). 3D pairs write rotations as RotationAngle = axis x angle, which readers
+    take as a rotation vector (the SIDS wording is "angles about the axes": the same thing for
+    an axis-aligned rotation axis; for a general axis it is the rotation-vector reading).
+  - 3D periodic faces must match node by node and face by face: the two patches need the same
+    mesh (the ends of an extruded volume do; two blocks need matching face dimensions and
+    distributions). Mismatches are reported (how many nodes have no image, how far the first
+    one lands), never repaired. Block faces pair as CGNS 1-to-1 periodic connections only when
+    they map corner to corner; otherwise, and for volume faces, the nodes go into point-list
+    connections with the periodic property.
+  - Periodic boundaries (2D connectors, 3D faces) are not curved by the curved high-order
+    export, so the paired nodes stay images of each other; a periodic boundary on a curved
+    surface stays straight-sided.
 
 ## Unstructured 2D
 - **Delaunay quality near abrupt boundary-spacing jumps** [5a]: not guaranteed (boundary nodes
@@ -276,9 +288,10 @@ history). Phase tags show where each item came from.
   can be low at a sharp trailing edge (0.064 on the C-grid at order 4). GLL snapping in 3D
   moves face interiors onto their surfaces but leaves nodes on block edges as interpolated;
   the equispaced geometry between grid nodes is the degree-p interpolant, not the CAD itself.
-- **Combinations not covered** [12b]: the CAD bracket, wing_in_box / wing stub (10 s+ each),
-  rotational periodicity through the exports, and 3D periodic patches are not among the
-  combination cases; nor is the GUI (12a covers its interactions on a small model).
+- **Combinations not covered** [12b]: the CAD bracket, wing_in_box / wing stub (10 s+ each)
+  and rotational periodicity through the exports are not among the combination cases (3D
+  periodic patches have their own tests, `tests/python/test_periodic_3d.py`); nor is the GUI
+  (12a covers its interactions on a small model).
 - **High-order overlay cost** [12a]: the overlay recomputes the whole high-order mesh on every
   model change (0.5 s for the C-grid template at order 4, 10 s for a 32k-hexahedron ball);
   switch it off while editing large models. It draws the patches' faces in 3D, or every cell
@@ -314,8 +327,9 @@ history). Phase tags show where each item came from.
   faces). Orders 1-6 (CGNS defines up to 4). GLL / Gauss node sets for quadrilaterals and
   hexahedra only (HDF5); no simplex node sets (warp-and-blend, Fekete, Witherden-Vincent):
   solvers make those from the vertices. VTKHDF writes pyramids as linear pyramids (VTK 9.7 has
-  no Lagrange pyramid; exact geometry, their interior nodes left out). CGNS: translational
-  periodicity only (as the linear 2D export); PENTA_40 / PENTA_75 node orders follow the SIDS
+  no Lagrange pyramid; exact geometry, their interior nodes left out). CGNS: a 2D base takes
+  translational periodicity only (as the linear 2D export), a 3D base the rotations too;
+  PENTA_40 / PENTA_75 node orders follow the SIDS
   descriptions (Gmsh does not write them; checked against all its statements, not against a
   second implementation). Gmsh 4.15 cannot evaluate prisms of order >= 3 itself, and its
   multithreaded Jacobian evaluation crashed on the 35k-cell order-4 file (single-threaded it

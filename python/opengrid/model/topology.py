@@ -161,11 +161,15 @@ class BoundaryReport:
         return not self.issues
 
 
-def _check_periodic(store, session, issues: list[Issue]) -> list:
-    """Every periodic patch is paired exactly once (from one side) and its connectors map onto
-    the partner's node by node."""
+def check_periodic(store, session, issues: list[Issue], matcher=None) -> list:
+    """Every periodic patch is paired exactly once (from one side) and its boundary maps onto
+    the partner's node by node: ``matcher(session, source, target)`` returns (the match, its
+    issues); by default the 2D connector match (opengrid.model.periodic.match), in 3D the face
+    match (opengrid.model.periodic_faces.match_faces). Returns [(source, target, match)]."""
     from opengrid.model.periodic import match
 
+    if matcher is None:
+        matcher = match
     periodic = [p for p in store.entities("patch") if p.params["patch_type"] == "periodic"]
     targeted: dict[int, list[str]] = {}
     for patch in store.entities("patch"):
@@ -209,10 +213,10 @@ def _check_periodic(store, session, issues: list[Issue]) -> list:
             continue
         if session is None:
             continue
-        connector_pairs, match_issues = match(session, patch, partner)
+        matched, match_issues = matcher(session, patch, partner)
         issues.extend(match_issues)
         if not match_issues:
-            pairs.append((patch, partner, connector_pairs))
+            pairs.append((patch, partner, matched))
     return pairs
 
 
@@ -287,5 +291,5 @@ def validate_patches(store, topology: Topology, session=None) -> BoundaryReport:
             interfaces.append(f"{label} ({store.get(a.domain).name} | {store.get(b.domain).name})")
     unused = [store.get(c).name for c, u in sorted(topology.uses.items()) if not u]
     boundary_names = [store.get(c).name for c in sorted(boundary)]
-    periodic = _check_periodic(store, session, issues)
+    periodic = check_periodic(store, session, issues)
     return BoundaryReport(boundary_names, interfaces, unused, unassigned, issues, periodic)

@@ -3,12 +3,14 @@
 Patch types and their CGNS boundary-condition types:
     wall -> BCWall, inlet -> BCInflow, outlet -> BCOutflow, symmetry -> BCSymmetryPlane,
     farfield -> BCFarfield, periodic / interface / user -> BCTypeUserDefined.
-Periodic patches are paired (see opengrid.model.periodic); paired periodic boundaries are
-exported as periodic connectivity, not as boundary conditions.
+Periodic patches are paired (see opengrid.model.periodic: a rotation about an axis through a
+centre, then a translation; 3D faces are matched by opengrid.model.periodic_faces); paired
+periodic boundaries are exported as periodic connectivity, not as boundary conditions.
 """
 
 import math
 
+from opengrid.model.periodic import DEFAULT_AXIS
 from opengrid.validation import Issue, ValidationError
 
 PATCH_TYPES = ("wall", "inlet", "outlet", "symmetry", "farfield", "periodic", "interface", "user")
@@ -74,7 +76,8 @@ def _periodic(raw, store, where: str, issues: list[Issue]) -> dict | None:
     if not isinstance(raw, dict) or "partner" not in raw:
         issues.append(Issue(f"{where}: periodic", "needs 'partner' (and a transform)"))
         return None
-    for key in sorted(set(raw) - {"partner", "rotation_center", "rotation_angle", "translation"}):
+    known = {"partner", "rotation_center", "rotation_axis", "rotation_angle", "translation"}
+    for key in sorted(set(raw) - known):
         issues.append(Issue(f"{where}: periodic.{key}", "unexpected key"))
     partner = raw["partner"]
     if isinstance(partner, bool) or not isinstance(partner, (str, int)) or partner not in store:
@@ -92,11 +95,19 @@ def _periodic(raw, store, where: str, issues: list[Issue]) -> dict | None:
             Issue(f"{where}: periodic.rotation_angle", f"expected a number, got {angle!r}")
         )
         return None
+    axis = _vec3(raw.get("rotation_axis", DEFAULT_AXIS), "rotation_axis", where, issues)
+    if axis is not None:
+        length = math.sqrt(sum(v * v for v in axis))
+        if length == 0.0 or not math.isfinite(length):
+            issues.append(Issue(f"{where}: periodic.rotation_axis", "must not be zero"))
+        elif abs(length - 1.0) > 1e-12:
+            axis = tuple(v / length for v in axis)  # a unit vector (kept once it is one)
     return {
         "partner": entity.id,
         "rotation_center": _vec3(
             raw.get("rotation_center", (0.0, 0.0, 0.0)), "rotation_center", where, issues
         ),
+        "rotation_axis": axis,
         "rotation_angle": float(angle),
         "translation": _vec3(raw.get("translation", (0.0, 0.0, 0.0)), "translation", where, issues),
     }

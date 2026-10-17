@@ -7,6 +7,8 @@ node orders as in opengrid.model.volumes.CELL_TYPES);
 points shared by several blocks / volumes (interfaces carry identical nodes) are merged.
 Boundary faces in patches become quads (block faces) or triangles / quads (volume faces) with
 outward normals. Blocks and volumes in no zone are collected in the implicit zone "default".
+Periodic pairs are listed as in the 2D assembly (node correspondences in the merged numbering,
+opengrid.model.periodic_faces.assembly_links).
 """
 
 import numpy as np
@@ -172,15 +174,17 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
                         boundary_cells.append(inverse[row])
                         boundary_patch.append(patch)
             else:
-                volume_id, domain = entry["volume"]
+                # The face key: the domain id, or ("top", domain) / ("side", connector) of an
+                # extruded volume (those have no domain of their own).
+                volume_id, key = entry["volume"]
                 cells = [
                     inverse[np.asarray(cell) + starts[volume_id]]
-                    for cell in meshes[volume_id]["faces"][domain]
+                    for cell in meshes[volume_id]["faces"][key]
                 ]
                 boundary_sources.append(
                     {
                         "block": None,
-                        "volume": (volume_id, domain),
+                        "volume": (volume_id, key),
                         "domain": domain,
                         "cells": cells,
                         "grid": None,
@@ -191,6 +195,13 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
                     for cell in cells:
                         boundary_cells.append(cell)
                         boundary_patch.append(patch)
+    periodic = []
+    if topology is not None and topology.get("periodic"):
+        from opengrid.model.periodic_faces import assembly_links
+
+        periodic = assembly_links(
+            merged, boundary_cells, boundary_patch, patch_names, topology["periodic"]
+        )
     lengths = np.array([len(c) for c in connectivity], dtype=np.int64)
     return MeshAssembly(
         points=merged,
@@ -212,4 +223,5 @@ def assemble_blocks(session, topology=None, quality: bool = True) -> MeshAssembl
         boundary_cells=boundary_cells,
         boundary_patch=np.asarray(boundary_patch, dtype=np.int32),
         boundary_sources=boundary_sources,
+        periodic=periodic,
     )

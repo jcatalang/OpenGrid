@@ -36,6 +36,7 @@ from opengrid.model.domains import (
 )
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.model.patches import PATCH_TYPES, member_label
+from opengrid.model.periodic import DEFAULT_AXIS
 from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
 from opengrid.model.volumes import BACKENDS, DEFAULT_VOLUME_INFLATION, PYRAMID_MODES
 from opengrid.validation import ValidationError
@@ -143,6 +144,67 @@ class ExtrusionEditor(QWidget):
             "distribution": distribution,
             "edges": tuple(e.strip() for e in self.edges.text().split(",") if e.strip()),
             "dissipation": one(self.dissipation, "dissipation"),
+        }
+
+
+class PeriodicEditor(QWidget):
+    """Periodic pairing of a patch: the partner (another periodic patch, or none), the rotation
+    axis, centre and angle (degrees here, radians in the model) and the translation (empty: the
+    translation that maps the centroid of this patch's nodes onto the partner's)."""
+
+    def __init__(self, value: dict | None, partners, paired_from=(), parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.partner = QComboBox()
+        self.partner.addItem("(none)", None)
+        for name, entity_id in partners:
+            self.partner.addItem(name, entity_id)
+        axis = DEFAULT_AXIS
+        center = (0.0, 0.0, 0.0)
+        angle = 0.0
+        translation = ""
+        if value is not None:
+            index = self.partner.findData(value["partner"])
+            if index >= 0:
+                self.partner.setCurrentIndex(index)
+            axis = value["rotation_axis"]
+            center = value["rotation_center"]
+            angle = value["rotation_angle"]
+            translation = format_vec3(value["translation"])
+        self.axis = QLineEdit(format_vec3(axis))
+        self.center = QLineEdit(format_vec3(center))
+        self.angle = QLineEdit(format_number(math.degrees(angle)))
+        self.translation = QLineEdit(translation)
+        self.translation.setPlaceholderText("automatic (centroid to centroid)")
+        layout.addRow("partner", self.partner)
+        if paired_from:
+            note = QLabel(f"paired from {', '.join(paired_from)} (pair from one side only)")
+            note.setWordWrap(True)
+            layout.addRow(note)
+        layout.addRow("rotation axis", self.axis)
+        layout.addRow("rotation centre", self.center)
+        layout.addRow("angle [deg]", self.angle)
+        layout.addRow("translation", self.translation)
+
+    def value(self) -> dict | None:
+        """None without a partner; otherwise the pairing, ``translation`` None when the
+        automatic one is wanted."""
+        partner = self.partner.currentData()
+        if partner is None:
+            return None
+        translation = None
+        if self.translation.text().strip():
+            translation = parse_vec3(self.translation.text(), "translation")
+        angle = parse_numbers(self.angle.text(), "angle")
+        if len(angle) != 1:
+            raise ParseError("angle: expected one number (degrees)")
+        return {
+            "partner": partner,
+            "rotation_center": parse_vec3(self.center.text(), "rotation centre"),
+            "rotation_axis": parse_vec3(self.axis.text(), "rotation axis"),
+            "rotation_angle": math.radians(angle[0]),
+            "translation": translation,
         }
 
 
@@ -1125,10 +1187,23 @@ class PropertyPanel(QWidget):
         members = QPlainTextEdit("\n".join(names))
         placeholder = f"one {key} name per line"
         if entity.kind == "patch":
-            placeholder = "one connector, domain or block.face per line"
+            placeholder = "one connector, domain, block.face or volume.top / .bottom per line"
         members.setPlaceholderText(placeholder)
         self._form.addRow("members", members)
         self._editors["members"] = (f"members:{key}", members)
+        if entity.kind == "patch" and entity.params["patch_type"] == "periodic":
+            partners = []
+            paired_from = []
+            for patch in self.session.store.entities("patch"):
+                if patch.id == entity.id or patch.params["patch_type"] != "periodic":
+                    continue
+                partners.append((patch.name, patch.id))
+                pairing = patch.params["periodic"]
+                if pairing is not None and pairing["partner"] == entity.id:
+                    paired_from.append(patch.name)
+            editor = PeriodicEditor(entity.params["periodic"], partners, paired_from)
+            self._form.addRow("periodic", editor)
+            self._editors["periodic"] = ("periodic", editor)
 
     def _domain_rows(self, entity) -> None:
         lines = []
@@ -1316,16 +1391,21 @@ class PropertyPanel(QWidget):
                 if name in store:
                     entity = store.get(name)
                     member_key = key
-                    if key == "connector" and entity.kind == "domain":
+                    if key == "connector" and entity.kind in ("domain", "unstructured_domain"):
                         member_key = "domain"
                     members.append({member_key: entity.id})
                     continue
-                block, _dot, face = name.rpartition(".")
-                if key == "connector" and block in store:
-                    members.append({"block": store.get(block).id, "face": face})
+                owner, _dot, face = name.rpartition(".")
+                if key == "connector" and owner in store:
+                    if store.get(owner).kind == "volume":
+                        members.append({"volume": store.get(owner).id, "face": face})
+                    else:
+                        members.append({"block": store.get(owner).id, "face": face})
                     continue
                 raise ParseError(f"members: no entity {name!r}")
             return tuple(members)
+        if kind == "periodic":
+            return self._periodic_value(editor)
         if kind in ("generator", "extrusion", "smoothing"):
             return editor.value()
         if kind == "dimension":
@@ -1356,6 +1436,35 @@ class PropertyPanel(QWidget):
         if kind == "points":
             return tuple(_canonical_vec(p) for p in parse_points(editor.toPlainText(), field))
         return tuple(parse_numbers(editor.toPlainText(), field))
+
+    def _periodic_value(self, editor):
+        """The pairing from the editor: the automatic translation filled in, and the stored
+        pairing itself when nothing changed beyond the rounding of the editor's text."""
+        from opengrid.model.periodic import automatic_translation
+
+        value = editor.value()
+        if value is None:
+            return None
+        entity = self.session.store.get(self.entity_id)
+        if value["translation"] is None:
+            if value["rotation_angle"] != 0.0:
+                raise ParseError("periodic: give the translation together with a rotation")
+            try:
+                value["translation"] = automatic_translation(
+                    self.session, entity, self.session.store.get(value["partner"])
+                )
+            except (ValueError, ValidationError) as error:
+                raise ParseError(f"periodic: {error}") from None
+        current = entity.params["periodic"]
+        if current is None or current["partner"] != value["partner"]:
+            return value
+        same = math.isclose(current["rotation_angle"], value["rotation_angle"], abs_tol=1e-12)
+        for key in ("rotation_axis", "rotation_center", "translation"):
+            for a, b in zip(current[key], value[key], strict=True):
+                same = same and math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+        if same:
+            return current
+        return value
 
     def apply(self) -> bool:
         """Apply edits as commands; returns True if the model changed."""

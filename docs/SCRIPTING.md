@@ -177,6 +177,24 @@ Modes: "translate" (``vector``), "rotate" (axis ``vector`` through ``axis_point`
 in radians) and "normal" (``distance``, planar domains); ``distribution`` as for connectors.
 A structured domain extrudes to a block (``create_extruded_block``).
 
+### Periodic pairs in 3D
+    og.create_patch("back", "periodic", ["disc"])
+    og.create_patch("front", "periodic", [{"volume": v, "face": "top"}])
+    og.pair_periodic("back", "front")                    # the translation: centroid to centroid
+    og.create_patch("side0", "periodic", [{"block": b, "face": "kmin"}])
+    og.create_patch("side1", "periodic", [{"block": b, "face": "kmax"}])
+    og.pair_periodic("side0", "side1", translation=(0, 0, 0),   # a sector turned about y
+                     rotation_angle=math.pi / 3, rotation_axis=(0, 1, 0))
+
+Any boundary faces pair (block faces, volume faces, the ends and side walls of extruded
+volumes) when the source faces map node by node and face by face onto the target's under
+x_target = R(axis, angle)(x_source - centre) + centre + translation; the boundary report says
+how many nodes have no image and where the first one lands. The exports carry the pairs: CGNS
+periodic connectivity (1-to-1 between block faces that map corner to corner, point lists
+otherwise), Gmsh ``$Periodic``, VTKHDF field data, and the high-order meshes extend them to the
+edge and face nodes. In the GUI the property panel of a periodic patch has the partner and
+the transform (an empty translation is found from the centroids).
+
 A double-click on a polyline, spline or NURBS curve (or on a connector lying on it) adds a
 point there; a double-click on a handle removes it. NURBS control points are added by knot
 insertion (the curve is unchanged) and removed by knot removal (exact when the curve allows

@@ -1114,11 +1114,17 @@ class Session:
         translation=None,
         rotation_angle: float = 0.0,
         rotation_center=(0.0, 0.0, 0.0),
+        rotation_axis=(0.0, 0.0, 1.0),
     ) -> str:
-        """Pair two periodic patches: target = R(angle)(source - center) + center + translation.
+        """Pair two periodic patches: target = R(axis, angle)(source - center) + center +
+        translation (the rotation by ``rotation_angle`` radians about ``rotation_axis``
+        through ``rotation_center``, right-hand rule).
 
         Without a translation and with no rotation, the translation that maps the centroid of
-        the source nodes onto that of the target is computed and stored explicitly.
+        the source nodes onto that of the target is computed and stored explicitly. 2D: the
+        source connectors must map node by node onto the target's; 3D (block faces, volume
+        faces, the ends and side walls of extruded volumes): the faces must map node by node
+        and face by face. The boundary report names what does not match.
         """
         from opengrid.model.periodic import automatic_translation
 
@@ -1129,6 +1135,7 @@ class Session:
         periodic = {
             "partner": target,
             "rotation_center": rotation_center,
+            "rotation_axis": rotation_axis,
             "rotation_angle": rotation_angle,
             "translation": translation,
         }
@@ -1240,7 +1247,9 @@ class Session:
                     issues.append(issue)
             boundary = [e["label"] for e in result["entries"]]
             unassigned = [e["label"] for e in result["entries"] if e["patch"] is None]
-            return BoundaryReport(boundary, result["interfaces"], [], unassigned, issues, [])
+            return BoundaryReport(
+                boundary, result["interfaces"], [], unassigned, issues, result["periodic"]
+            )
         from opengrid.model.topology import validate_patches
 
         return validate_patches(self.store, self.topology(), self)

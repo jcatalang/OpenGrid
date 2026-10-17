@@ -10,7 +10,8 @@ has:
   referenced by a BC_t (FamilySpecified, FamilyName = the patch; EdgeCenter / FaceCenter);
   periodic patches have no BC (their family has no BC type), as in the linear export;
 * general vertex connectivity (Abutting1to1, point lists) to every other zone it shares nodes
-  with, in both directions, and periodic pairs likewise with their translation.
+  with, in both directions, and periodic pairs likewise with their transform (2D bases:
+  translations only).
 
 One Family_t per zone and per patch (with its BC type). CGNS limits names to 32 characters.
 """
@@ -21,6 +22,7 @@ from opengrid import _core
 from opengrid.io import lagrange
 from opengrid.io.cgns import MAX_NAME, _unique
 from opengrid.model.patches import CGNS_BC_TYPES
+from opengrid.model.periodic import cgns_property, inverse
 from opengrid.validation import Issue, ValidationError
 
 SECTION_NAMES = {
@@ -92,10 +94,11 @@ def write_cgns_elements(path, mesh, base_name: str = "OpenGrid") -> dict:
         if len(name) > MAX_NAME:
             issues.append(Issue(name, f"is longer than {MAX_NAME} characters (CGNS limit)"))
     for _source, _target, transform, _t, _s in mesh.periodic:
-        if transform.get("rotation_angle", 0.0) != 0.0:
+        if mesh.dim == 2 and transform.get("rotation_angle", 0.0) != 0.0:
             issues.append(
                 Issue(
-                    "periodic", "rotational periodicity is not written to CGNS (translation only)"
+                    "periodic",
+                    "rotational periodicity is not written to a 2D CGNS base (translation only)",
                 )
             )
     if issues:
@@ -182,7 +185,8 @@ def write_cgns_elements(path, mesh, base_name: str = "OpenGrid") -> dict:
                 )
             )
     for source, _target, transform, target_ids, source_ids in mesh.periodic:
-        t = transform["translation"]
+        forward = cgns_property(transform)
+        backward = cgns_property(inverse(transform))
         label = mesh.patch_names[source]
         groups: dict = {}
         for tid, sid in zip(target_ids.tolist(), source_ids.tolist(), strict=True):
@@ -192,9 +196,9 @@ def write_cgns_elements(path, mesh, base_name: str = "OpenGrid") -> dict:
         for (zs, zt), pairs in sorted(groups.items()):
             s_ids = np.array([x for x, _ in pairs])
             t_ids = np.array([y for _, y in pairs])
-            for this, donor, here, there, shift in (
-                (zs, zt, s_ids, t_ids, (t[0], t[1])),
-                (zt, zs, t_ids, s_ids, (-t[0], -t[1])),
+            for this, donor, here, there, periodic in (
+                (zs, zt, s_ids, t_ids, forward),
+                (zt, zs, t_ids, s_ids, backward),
             ):
                 connections.append(
                     (
@@ -203,7 +207,7 @@ def write_cgns_elements(path, mesh, base_name: str = "OpenGrid") -> dict:
                         donor,
                         (np.searchsorted(zone_nodes[this], here) + 1).tolist(),
                         (np.searchsorted(zone_nodes[donor], there) + 1).tolist(),
-                        shift,
+                        periodic,
                     )
                 )
     _core.write_cgns_elements(str(path), base_name, mesh.dim, zones, families, connections)

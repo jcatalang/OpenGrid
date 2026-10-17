@@ -1031,9 +1031,16 @@ def analyze_3d(session) -> dict:
 
     Returns {"entries": [{"label", "block": (block id, face) or None, "volume": (volume id,
     domain id) or None, "keys": set, "patch": name or None}], "interfaces": [labels],
-    "issues": [Issue]}. Keys are ("domain", id) and ("block", id, face): what patch members name.
+    "issues": [Issue], "blocks": Topology3D, "periodic": [(source patch, target patch,
+    periodic_faces.FaceMatch)]}. Keys are ("domain", id), ("block", id, face), ("volume", id,
+    "top" | "bottom") and ("connector", id): what patch members name. Periodic patches are
+    paired and matched node by node and face by face (opengrid.model.periodic_faces).
     """
+    from functools import partial
+
     from opengrid.model.blocks import Topology3D, analyze_blocks
+    from opengrid.model.periodic_faces import match_faces
+    from opengrid.model.topology import check_periodic
 
     store = session.store
     issues: list[Issue] = []
@@ -1153,8 +1160,6 @@ def analyze_3d(session) -> dict:
                 issues.append(Issue(label, f"is in patch {patch.name} but is not a boundary face"))
             for index in hits:
                 assigned.setdefault(index, []).append(patch.name)
-        if patch.params["periodic"] is not None:
-            issues.append(Issue(patch.name, "periodic pairing of 3D faces is not supported yet"))
     for index, entry in enumerate(entries):
         names = sorted(set(assigned.get(index, [])))
         if not names:
@@ -1163,4 +1168,11 @@ def analyze_3d(session) -> dict:
             issues.append(Issue(entry["label"], f"belongs to several patches: {', '.join(names)}"))
         else:
             entry["patch"] = names[0]
-    return {"entries": entries, "interfaces": interfaces, "issues": issues, "blocks": topo}
+    periodic = check_periodic(store, session, issues, matcher=partial(match_faces, entries=entries))
+    return {
+        "entries": entries,
+        "interfaces": interfaces,
+        "issues": issues,
+        "blocks": topo,
+        "periodic": periodic,
+    }

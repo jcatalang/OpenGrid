@@ -323,13 +323,18 @@ segment, so derivative jumps at knots never cost accuracy.
   PointRangeDonor holds the images of its ends, and the transform maps the running axes
   (signed) and the face-normal axes (+ for min↔max faces, − for faces of the same kind).
   Examples: O-cut i_min↔i_max gives [1, 2]; the C-grid wake cut on j_min↔j_min gives [−1, −2].
-- **Periodic pairing** (added after the Phase 4 review): stored once, on the source patch,
-  as `periodic = {partner, rotation_center, rotation_angle, translation}` with the CGNS
-  convention x_target = R(angle)(x − c) + c + t. The validator requires every periodic patch
-  to be paired exactly once and every source connector to map node by node (either direction)
-  onto a distinct target connector. Exports: CGNS periodic GridConnectivity1to1 in both
-  directions (inverse transform on the reverse side; translations only in 2D), Gmsh
-  `$Periodic` (affine matrix + node correspondences), VTKHDF field data on the patch blocks.
+- **Periodic pairing** (added after the Phase 4 review; 3D faces 2026-10-17): stored once,
+  on the source patch, as `periodic = {partner, rotation_center, rotation_axis,
+  rotation_angle, translation}` with the CGNS convention x_target = R(axis, angle)(x − c) +
+  c + t (Rodrigues' rotation about a unit axis, z by default). The validator requires every
+  periodic patch to be paired exactly once and, in 2D, every source connector to map node by
+  node (either direction) onto a distinct target connector; in 3D (`model/periodic_faces.py`)
+  every source face to map node by node and face by face onto the target's (a grid hash
+  within 1e-8 of the model size). Exports: CGNS periodic GridConnectivity1to1 (2D structured
+  zones; 3D block faces that map corner to corner) or point-list connectivity with the
+  periodic property, in both directions (inverse transform on the reverse side; translations
+  only in 2D bases), Gmsh `$Periodic` (affine matrix + node correspondences), VTKHDF field
+  data on the patch blocks.
   Paired periodic faces are connectivity, never BCs. Projects load pairings in a second pass
   because they reference other patches of the same section.
 - **Exports refuse to run** while the boundary does not validate (CGNS, Gmsh, and VTKHDF when

@@ -226,6 +226,127 @@ def write_cgns(path, session, topology, base_name: str = "OpenGrid", periodic=()
     }
 
 
+def _pool_refs(pool, zone_index) -> list:
+    """(coordinates, (zone, 1-based place)) of every distinct node of the entries in ``pool``
+    (entry, points, faces, places): block faces give (i, j, k) triples, volume faces vertex
+    numbers."""
+    refs = {}
+    for entry, points, _faces, local in pool:
+        if entry["block"] is not None:
+            zone = zone_index[entry["block"][0]]
+            places = [tuple(int(v) + 1 for v in row) for row in local]
+        else:
+            zone = zone_index[entry["volume"][0]]
+            places = [(int(v) + 1,) for v in local]
+        for point, place in zip(points, places, strict=True):
+            refs.setdefault((zone, place), point)
+    return [(point, key) for key, point in refs.items()]
+
+
+def _periodic_connections(
+    session, topology, source, target, grids, zone_index, unique_in, connections, vertex_connections
+) -> None:
+    """The CGNS connections of one 3D periodic pair (see write_cgns_3d)."""
+    from opengrid.model.periodic import apply, cgns_property, inverse
+    from opengrid.model.periodic_faces import (
+        entry_faces,
+        match_points,
+        one_to_one_periodic,
+        tolerance_of,
+    )
+
+    forward = source.params["periodic"]
+    backward = inverse(forward)
+    label = f"{source.name}_periodic"
+    pools = {}
+    for patch in (source, target):
+        pools[patch.name] = [
+            (e, *entry_faces(session, e)) for e in topology["entries"] if e["patch"] == patch.name
+        ]
+    tolerance = tolerance_of(*[points for pool in pools.values() for _e, points, _f, _l in pool])
+    s_pool = pools[source.name]
+    t_pool = pools[target.name]
+    paired_s = set()
+    paired_t = set()
+    for a, (ea, *_rest) in enumerate(s_pool):
+        if ea["block"] is None:
+            continue
+        for b, (eb, *_rest) in enumerate(t_pool):
+            if eb["block"] is None or b in paired_t:
+                continue
+            ga = grids[ea["block"][0]]
+            gb = grids[eb["block"][0]]
+            there = one_to_one_periodic(ga, ea["block"][1], gb, eb["block"][1], forward, tolerance)
+            if there is None:
+                continue
+            back = one_to_one_periodic(gb, eb["block"][1], ga, ea["block"][1], backward, tolerance)
+            if back is None:
+                continue
+            for entry, donor, data, transform in (
+                (ea, eb, there, forward),
+                (eb, ea, back, backward),
+            ):
+                zone = zone_index[entry["block"][0]]
+                connections.append(
+                    (
+                        zone,
+                        unique_in(zone, label),
+                        zone_index[donor["block"][0]],
+                        tuple(v + 1 for v in data["range"]),
+                        tuple(v + 1 for v in data["donor_range"]),
+                        data["transform"],
+                        cgns_property(transform),
+                    )
+                )
+            paired_s.add(a)
+            paired_t.add(b)
+            break
+    # The rest as point lists: every remaining source node against the remaining target nodes
+    # merged by coordinates (a node shared by two target zones is the image of the same source
+    # node in both).
+    s_refs = _pool_refs([s_pool[k] for k in range(len(s_pool)) if k not in paired_s], zone_index)
+    t_refs = _pool_refs([t_pool[k] for k in range(len(t_pool)) if k not in paired_t], zone_index)
+    if not s_refs and not t_refs:
+        return
+    mismatch = ValidationError(
+        [Issue(source.name, f"its nodes do not map onto those of {target.name}")]
+    )
+    if not s_refs or not t_refs:
+        raise mismatch
+    s_points = np.array([point for point, _key in s_refs])
+    t_points = np.array([point for point, _key in t_refs])
+    t_unique, t_inverse = np.unique(t_points, axis=0, return_inverse=True)
+    t_inverse = t_inverse.reshape(-1)
+    found, _distance = match_points(apply(s_points, forward), t_unique, tolerance)
+    if np.any(found < 0) or len(np.unique(found)) != len(t_unique):
+        raise mismatch
+    members: dict[int, list] = {}
+    for k, u in enumerate(t_inverse.tolist()):
+        members.setdefault(u, []).append(t_refs[k][1])
+    groups: dict[tuple, list] = {}
+    for k, u in enumerate(found.tolist()):
+        zone_s, place_s = s_refs[k][1]
+        for zone_t, place_t in members[u]:
+            groups.setdefault((zone_s, zone_t), []).append((place_s, place_t))
+    for (zs, zt), pairs in sorted(groups.items()):
+        here = [p for p, _q in pairs]
+        there = [q for _p, q in pairs]
+        for this, donor, mine, theirs, transform in (
+            (zs, zt, here, there, forward),
+            (zt, zs, there, here, backward),
+        ):
+            vertex_connections.append(
+                (
+                    this,
+                    unique_in(this, label),
+                    donor,
+                    [n for place in mine for n in place],
+                    [n for place in theirs for n in place],
+                    cgns_property(transform),
+                )
+            )
+
+
 class _MeshLookup:
     """Vertex ids of connector nodes in an unstructured mesh (exact coordinates: boundary points
     are the connector nodes bitwise) and boundary edges oriented as in the cells."""
@@ -285,6 +406,10 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
     * One Family_t per zone and per patch.
     * Faces shared by a volume and a block or another volume: general connectivity
       (Abutting1to1, Vertex) in both directions, matching the identical nodes of the face.
+    * Periodic pairs (connectivity, not BCs, as in 2D): two block faces that map corner to
+      corner give 1-to-1 periodic connections, all other nodes general connections with the
+      periodic property (RotationCenter, RotationAngle = axis times angle, Translation),
+      grouped by zone pair; both in both directions with the inverse transform on the way back.
     """
     from opengrid.io.assembly3d import block_zones
     from opengrid.model.blocks import face_range, one_to_one_3d
@@ -301,8 +426,13 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
         zone_index[v.id] = len(blocks) + k
     zone_names, block_zone = block_zones(session)
     families = [(name, "") for name in zone_names]
+    periodic_patches = set()
     for patch in store.entities("patch"):
-        families.append((patch.name, CGNS_BC_TYPES[patch.params["patch_type"]]))
+        bc_type = CGNS_BC_TYPES[patch.params["patch_type"]]
+        if patch.params["patch_type"] == "periodic":
+            bc_type = ""  # periodic faces are connectivity, not boundary conditions
+            periodic_patches.add(patch.name)
+        families.append((patch.name, bc_type))
     issues = []
     for name in [e.name for e in [*blocks, *volumes]] + [f[0] for f in families]:
         if len(name) > MAX_NAME:
@@ -319,7 +449,11 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
     grids = {b.id: np.ascontiguousarray(session.block_grid(b.name)) for b in blocks}
     block_zones_out = [(b.name, grids[b.id], zone_names[block_zone[b.id]]) for b in blocks]
     bcs = []
-    patched = [e for e in topology["entries"] if e["block"] is not None and e["patch"]]
+    patched = [
+        e
+        for e in topology["entries"]
+        if e["block"] is not None and e["patch"] and e["patch"] not in periodic_patches
+    ]
     for entry in sorted(patched, key=lambda e: e["block"]):
         block_id, face = entry["block"]
         zone = zone_index[block_id]
@@ -340,6 +474,7 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
                     tuple(v + 1 for v in c["range"]),
                     tuple(v + 1 for v in c["donor_range"]),
                     c["transform"],
+                    None,
                 )
             )
     # Unstructured zones: cells, then one boundary section per patched face.
@@ -357,6 +492,8 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
                 sections.append((name, kind, array.reshape(-1).tolist(), ""))
         for entry in topology["entries"]:
             if entry["volume"] is None or entry["volume"][0] != v.id or entry["patch"] is None:
+                continue
+            if entry["patch"] in periodic_patches:
                 continue
             cells = mesh["faces"][entry["volume"][1]]
             for size, kind in ((3, "TRI_3"), (4, "QUAD_4")):
@@ -417,8 +554,21 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
                     zone_index[donor],
                     [n for key in keys for n in here[key]],
                     [n for key in keys for n in there[key]],
+                    None,
                 )
             )
+    for source, target, _match in topology["periodic"]:
+        _periodic_connections(
+            session,
+            topology,
+            source,
+            target,
+            grids,
+            zone_index,
+            unique_in,
+            connections,
+            vertex_connections,
+        )
     _core.write_cgns_3d(
         str(path), base_name, block_zones_out, zones, families, bcs, connections, vertex_connections
     )

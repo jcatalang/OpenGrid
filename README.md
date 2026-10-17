@@ -136,8 +136,9 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - **Patches** (wall, inlet, outlet, symmetry, farfield, periodic, interface, user) and **zones**,
   validated before export: every boundary in exactly one patch, interfaces detected
   automatically, clear messages naming the entity and what is wrong.
-- **Periodic pairs** (translational and rotational), written as periodic connectivity
-  (CGNS 2D: translational).
+- **Periodic pairs** (translational and rotational, about any axis) of 2D connectors and 3D
+  faces (block faces, volume faces, the ends and side walls of extruded volumes), matched node
+  by node and written as periodic connectivity (CGNS 2D: translational).
 
 ### Quality
 - Scaled Jacobian, equiangle skewness, aspect ratio, minimum / maximum included angle,

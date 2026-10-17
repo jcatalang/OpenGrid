@@ -848,6 +848,55 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## 3D periodic pairing (2026-10-17) — requested by the user
+
+Periodic patches could only be paired in 2D (connectors); 3D faces were refused ("not
+supported yet"), so the ends of an extruded volume or the sides of a block sector could not
+be periodic. The user asked for it before the extruded-volume work is pushed.
+
+### Built
+- The periodic transform takes a rotation axis (`periodic.rotation_matrix`, Rodrigues;
+  `rotation_axis` in the pairing, z by default, so old projects load unchanged):
+  x_target = R(axis, angle)(x - c) + c + t; `pair_periodic(..., rotation_axis=...)`. The
+  inverse keeps the centre and turns the translation back (the CGNS reader sees the same
+  centre on both sides).
+- `model/periodic_faces.py`: the nodes of the source patch's faces (block faces, volume
+  faces, the ends and side walls of extruded volumes) are transformed and matched to the
+  target's by a uniform grid hash within 1e-8 of the model size (`match_points`, cells of
+  twice the tolerance); the nodes must map one to one and every source face onto a target
+  face with the same nodes (`match_faces`). `analyze_3d` runs the pairing checks shared with
+  2D (`topology.check_periodic` with a matcher) and the report lists the pairs (`FaceMatch`:
+  nodes and faces). Mismatches say how many nodes have no image and where the first one lands.
+- Exports: the 3D assembly carries the links in its merged numbering (`assembly_links`), so
+  Gmsh `$Periodic`, VTKHDF field data and the high-order node extension work unchanged;
+  CGNS 3D writes 1-to-1 periodic connections between block faces that map corner to corner
+  (`one_to_one_periodic`) and point-list connections with the periodic property for the rest,
+  both ways; the C++ writer takes RotationCenter / RotationAngle (axis x angle) / Translation
+  with three components (2D bases keep two), the high-order CGNS export too. Periodic faces
+  are connectivity, not BCs (as in 2D). Curved high-order export leaves periodic faces
+  straight-sided (`curving._periodic_sources`), as it did with periodic connectors.
+- GUI: the property panel of a periodic patch has a pairing editor (partner, rotation axis /
+  centre / angle in degrees, translation; empty = centroid to centroid); the target says
+  where it is paired from.
+- Fixed on the way: the 3D assembly stored an extruded volume's face key ("top" / "side") as
+  the face's domain, which crashed the curved high-order export of a patched extruded volume.
+
+### Verified
+- pytest +5 (`tests/python/test_periodic_3d.py`): the matcher (images found within the
+  tolerance only, cell boundaries); an extruded disc's ends paired by the automatic
+  translation (match = the 2D mesh's points and cells; CGNS 2 point-list connections whose
+  Translation maps the lists, boundaries exclude the periodic faces; Gmsh `$Periodic` affine
+  check to 1e-12 and a Gmsh read without warnings when Gmsh is present; VTKHDF fields; order
+  2 links = vertices + edges + quad faces, images exact to 1e-12, high-order Gmsh / CGNS
+  exports; replay and project round trip); a block sector turned 60 degrees about y paired by
+  rotation (CGNS 1-to-1 periodic both ways, Transform (1, 2, 3), RotationAngle (0, +-pi/3,
+  0), the range corners mapped to 1e-6 in single precision; Gmsh affine = the transform
+  matrix; a wrong angle reported with the node count); a rotated extrusion's ends paired by a
+  rotation about x through (0, -2, 0) (CGNS point lists mapped by the stored property) and
+  the refusals (rotation without a translation, zero axis, a patch with other faces: node and
+  face counts); the property-panel pairing, re-apply = no change, unpairing.
+- The full suite, ruff, clang-format, clang-tidy on the changed C++ and the ternary check.
+
 ## Extruded volumes: prisms and hexahedra from unstructured domains (2026-10-17) — requested by the user
 
 "Extrude domain" only took structured domains (it builds a block). The user asked why; the

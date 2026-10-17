@@ -753,7 +753,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
           og::CgnsVertexConnection connection{zone, name, donor, points, donor_points};
           if (translation) {
             connection.periodic = true;
-            connection.translation = *translation;
+            connection.translation = {(*translation)[0], (*translation)[1], 0.0};
           }
           vc.push_back(connection);
         }

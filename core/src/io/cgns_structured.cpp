@@ -114,6 +114,28 @@ struct File {
   }
 };
 
+// Dimensional exponents (mass, length, time, temperature, angle) of the three arrays of a
+// connection's periodic property, written under `periodic_path` (".../Periodic/").
+void write_periodic_exponents(int handle, const std::string& periodic_path) {
+  const std::array<double, 5> length = {0.0, 1.0, 0.0, 0.0, 0.0};
+  const std::array<double, 5> radian = {0.0, 0.0, 0.0, 0.0, 1.0};
+  for (const auto& [array, exponents] :
+       {std::pair{"RotationCenter", &length}, std::pair{"RotationAngle", &radian},
+        std::pair{"Translation", &length}}) {
+    check(cg_gopath(handle, (periodic_path + array).c_str()), "goto periodic data");
+    check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents->data()), "periodic exponents");
+  }
+}
+
+// The first `n` components of a periodic array as the library stores them (single precision).
+std::vector<float> periodic_floats(const std::array<double, 3>& values, std::size_t n) {
+  std::vector<float> out(n, 0.0F);
+  for (std::size_t k = 0; k < n && k < values.size(); ++k) {
+    out[k] = static_cast<float>(values[k]);
+  }
+  return out;
+}
+
 }  // namespace
 
 bool cgns_available() {
@@ -328,18 +350,10 @@ void write_cgns_2d(const std::string& path, const std::string& base_name,
       check(cg_1to1_periodic_write(file.handle, base, z, index, center.data(), angle.data(),
                                    translation.data()),
             "periodic 1to1");
-      // Dimensional exponents of the periodic data (mass, length, time, temperature, angle).
-      const std::array<double, 5> length = {0.0, 1.0, 0.0, 0.0, 0.0};
-      const std::array<double, 5> radian = {0.0, 0.0, 0.0, 0.0, 1.0};
-      const std::string periodic_path =
-          "/" + base_name + "/" + zones.at(static_cast<std::size_t>(c.zone)).name +
-          "/ZoneGridConnectivity/" + c.name + "/GridConnectivityProperty/Periodic/";
-      for (const auto& [array, exponents] :
-           {std::pair{"RotationCenter", &length}, std::pair{"RotationAngle", &radian},
-            std::pair{"Translation", &length}}) {
-        check(cg_gopath(file.handle, (periodic_path + array).c_str()), "goto periodic data");
-        check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents->data()), "periodic exponents");
-      }
+      write_periodic_exponents(file.handle, "/" + base_name + "/" +
+                                                zones.at(static_cast<std::size_t>(c.zone)).name +
+                                                "/ZoneGridConnectivity/" + c.name +
+                                                "/GridConnectivityProperty/Periodic/");
     }
   }
   for (const CgnsVertexConnection& c : vertex_connections) {
@@ -380,24 +394,16 @@ void write_cgns_2d(const std::string& path, const std::string& base_name,
               static_cast<cgsize_t>(donor.size() / donor_dim), donor.data(), &index),
           "connectivity");
     if (c.periodic) {
-      const std::array<float, 2> center = {0.0F, 0.0F};
-      const std::array<float, 2> angle = {0.0F, 0.0F};
-      const std::array<float, 2> translation = {static_cast<float>(c.translation[0]),
-                                                static_cast<float>(c.translation[1])};
+      // A 2D base: the x and y components (translations only, see CgnsConnection).
+      const std::vector<float> center = periodic_floats(c.rotation_center, 2);
+      const std::vector<float> angle = periodic_floats(c.rotation_angle, 2);
+      const std::vector<float> translation = periodic_floats(c.translation, 2);
       check(cg_conn_periodic_write(file.handle, base, z, index, center.data(), angle.data(),
                                    translation.data()),
             "periodic connectivity");
-      const std::array<double, 5> length = {0.0, 1.0, 0.0, 0.0, 0.0};
-      const std::array<double, 5> radian = {0.0, 0.0, 0.0, 0.0, 1.0};
-      const std::string periodic_path = "/" + base_name + "/" + zone_names.at(zi) +
-                                        "/ZoneGridConnectivity/" + c.name +
-                                        "/GridConnectivityProperty/Periodic/";
-      for (const auto& [array, exponents] :
-           {std::pair{"RotationCenter", &length}, std::pair{"RotationAngle", &radian},
-            std::pair{"Translation", &length}}) {
-        check(cg_gopath(file.handle, (periodic_path + array).c_str()), "goto periodic data");
-        check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents->data()), "periodic exponents");
-      }
+      write_periodic_exponents(file.handle, "/" + base_name + "/" + zone_names.at(zi) +
+                                                "/ZoneGridConnectivity/" + c.name +
+                                                "/GridConnectivityProperty/Periodic/");
     }
   }
   const int handle = file.handle;
@@ -605,6 +611,18 @@ void write_cgns_impl(const std::string& path, const std::string& base_name, int 
     check(cg_1to1_write(file.handle, base, z, c.name.c_str(), donor.c_str(), range.data(),
                         donor_range.data(), transform.data(), &index),
           "1to1");
+    if (c.periodic) {
+      const std::vector<float> center = periodic_floats(c.rotation_center, 3);
+      const std::vector<float> angle = periodic_floats(c.rotation_angle, 3);
+      const std::vector<float> translation = periodic_floats(c.translation, 3);
+      check(cg_1to1_periodic_write(file.handle, base, z, index, center.data(), angle.data(),
+                                   translation.data()),
+            "periodic 1to1");
+      write_periodic_exponents(file.handle, "/" + base_name + "/" +
+                                                blocks.at(static_cast<std::size_t>(c.zone)).name +
+                                                "/ZoneGridConnectivity/" + c.name +
+                                                "/GridConnectivityProperty/Periodic/");
+    }
   }
   // The donor data are cgsize_t (32 or 64 bit depending on the library build).
   CGNS_ENUMT(DataType_t) donor_data_type = CGNS_ENUMV(Integer);
@@ -653,27 +671,17 @@ void write_cgns_impl(const std::string& path, const std::string& base_name, int 
                         donor.data(), &index),
           "connectivity");
     if (c.periodic) {
-      // Translational periodicity (in the base's physical dimension).
+      // The base's physical dimension decides how many components are written.
       const auto n = static_cast<std::size_t>(cell_dimension);
-      const std::vector<float> center(n, 0.0F);
-      const std::vector<float> angle(n, 0.0F);
-      std::vector<float> translation(n, 0.0F);
-      translation[0] = static_cast<float>(c.translation[0]);
-      translation[1] = static_cast<float>(c.translation[1]);
+      const std::vector<float> center = periodic_floats(c.rotation_center, n);
+      const std::vector<float> angle = periodic_floats(c.rotation_angle, n);
+      const std::vector<float> translation = periodic_floats(c.translation, n);
       check(cg_conn_periodic_write(file.handle, base, zone_ids[zi], index, center.data(),
                                    angle.data(), translation.data()),
             "periodic connectivity");
-      const std::array<double, 5> length = {0.0, 1.0, 0.0, 0.0, 0.0};
-      const std::array<double, 5> radian = {0.0, 0.0, 0.0, 0.0, 1.0};
-      const std::string periodic_path = "/" + base_name + "/" + zone_names.at(zi) +
-                                        "/ZoneGridConnectivity/" + c.name +
-                                        "/GridConnectivityProperty/Periodic/";
-      for (const auto& [array, exponents] :
-           {std::pair{"RotationCenter", &length}, std::pair{"RotationAngle", &radian},
-            std::pair{"Translation", &length}}) {
-        check(cg_gopath(file.handle, (periodic_path + array).c_str()), "goto periodic data");
-        check(cg_exponents_write(CGNS_ENUMV(RealDouble), exponents->data()), "periodic exponents");
-      }
+      write_periodic_exponents(file.handle, "/" + base_name + "/" + zone_names.at(zi) +
+                                                "/ZoneGridConnectivity/" + c.name +
+                                                "/GridConnectivityProperty/Periodic/");
     }
   }
   const int handle = file.handle;

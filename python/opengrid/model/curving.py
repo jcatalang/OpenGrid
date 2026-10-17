@@ -153,6 +153,41 @@ def _periodic_connectors(store) -> set:
     return out
 
 
+def _periodic_sources(store, assembly) -> set[int]:
+    """Indices of the 3D boundary face sources in periodic patches (block faces, volume faces,
+    the ends and side walls of extruded volumes): they are not curved, so the paired nodes stay
+    images of each other."""
+    keys = set()
+    for patch in store.entities("patch"):
+        if patch.params["patch_type"] != "periodic":
+            continue
+        for item in patch.params["members"]:
+            if "block" in item:
+                keys.add(("block", item["block"], item["face"]))
+            elif "volume" in item:
+                keys.add(("volume", item["volume"], item["face"]))
+            elif "domain" in item:
+                keys.add(("domain", item["domain"]))
+            else:
+                keys.add(("connector", item["connector"]))
+    out = set()
+    for index, source in enumerate(assembly.boundary_sources):
+        if source["block"] is not None and ("block", *source["block"]) in keys:
+            out.add(index)
+        if source["domain"] is not None and ("domain", source["domain"]) in keys:
+            out.add(index)
+        if source["volume"] is not None:
+            volume, key = source["volume"]
+            if isinstance(key, tuple):
+                if key[0] == "top" and ("volume", volume, "top") in keys:
+                    out.add(index)
+                if key[0] == "side" and ("connector", key[1]) in keys:
+                    out.add(index)
+            elif ("volume", volume, "bottom") in keys:
+                out.add(index)
+    return out
+
+
 def _connector_curves(store, connector_id) -> list:
     return [store.geometry(s["curve"]) for s in store.get(connector_id).params["segments"]]
 
@@ -254,10 +289,7 @@ def _targets_3d(session, assembly, mesh, targets: _Targets):
     p = mesh.order
     points = mesh.points
     periodic = _periodic_connectors(store)
-    periodic_domains = set()
-    for patch in store.entities("patch"):
-        if patch.params["patch_type"] == "periodic":
-            periodic_domains.update(i["domain"] for i in patch.params["members"] if "domain" in i)
+    periodic_sources = _periodic_sources(store, assembly)
     on_connectors = set()
     # Connector edges first (they override face targets): a face domain's border edges (used
     # by one of its faces) lie on its connectors; each goes to the connector whose curves are
@@ -273,10 +305,10 @@ def _targets_3d(session, assembly, mesh, targets: _Targets):
             oriented.setdefault(key, (a, b))
     flat = [_planar_source(session, store, source) for source in assembly.boundary_sources]
     candidates = []
-    for source in assembly.boundary_sources:
+    for index, source in enumerate(assembly.boundary_sources):
         domain = source["domain"]
         found = []
-        if domain is not None and domain not in periodic_domains:
+        if domain is not None and index not in periodic_sources:
             found = [
                 _connector_curves(store, c)
                 for c in _domain_connectors(store.get(domain))
@@ -301,9 +333,9 @@ def _targets_3d(session, assembly, mesh, targets: _Targets):
             continue  # not on any of the faces' connectors
         _connector_edges(mesh, points, [a, b], best[1], targets)
         on_connectors.update(int(n) for n in mesh.edge_nodes([a], [b]).reshape(-1) if n >= 0)
-    for source in assembly.boundary_sources:
+    for index, source in enumerate(assembly.boundary_sources):
         domain = source["domain"]
-        if domain is not None and domain in periodic_domains:
+        if index in periodic_sources:
             continue
         surface = None
         entity = None

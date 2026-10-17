@@ -150,6 +150,24 @@ std::vector<std::array<std::int64_t, N>> index_input(const Cells<N>& a) {
   return out;
 }
 
+// A connection's periodic property as the Python side passes it: (rotation centre, rotation
+// angle vector (axis times angle, radians), translation).
+using Periodic = std::tuple<std::array<double, 3>, std::array<double, 3>, std::array<double, 3>>;
+
+og::CgnsVertexConnection vertex_connection(int zone, const std::string& name, int donor,
+                                           const std::vector<std::int64_t>& points,
+                                           const std::vector<std::int64_t>& donor_points,
+                                           const std::optional<Periodic>& periodic) {
+  og::CgnsVertexConnection c{zone, name, donor, points, donor_points};
+  if (periodic) {
+    c.periodic = true;
+    c.rotation_center = std::get<0>(*periodic);
+    c.rotation_angle = std::get<1>(*periodic);
+    c.translation = std::get<2>(*periodic);
+  }
+  return c;
+}
+
 }  // namespace
 
 void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called from og_core.cpp
@@ -534,9 +552,10 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          const std::vector<std::tuple<std::string, std::string>>& families,
          const std::vector<std::tuple<int, std::string, std::string, std::array<int, 6>>>& bcs,
          const std::vector<std::tuple<int, std::string, int, std::array<int, 6>, std::array<int, 6>,
-                                      std::array<int, 3>>>& connections,
+                                      std::array<int, 3>, std::optional<Periodic>>>& connections,
          const std::vector<std::tuple<int, std::string, int, std::vector<std::int64_t>,
-                                      std::vector<std::int64_t>>>& vertex_connections) {
+                                      std::vector<std::int64_t>, std::optional<Periodic>>>&
+             vertex_connections) {
         std::vector<og::CgnsBlock> bl;
         bl.reserve(blocks.size());
         for (const auto& [name, grid, family] : blocks) {
@@ -573,13 +592,21 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         }
         std::vector<og::CgnsConnection3D> c;
         c.reserve(connections.size());
-        for (const auto& [zone, name, donor, range, donor_range, transform] : connections) {
-          c.push_back({zone, name, donor, range, donor_range, transform});
+        for (const auto& [zone, name, donor, range, donor_range, transform, periodic] :
+             connections) {
+          og::CgnsConnection3D connection{zone, name, donor, range, donor_range, transform};
+          if (periodic) {
+            connection.periodic = true;
+            connection.rotation_center = std::get<0>(*periodic);
+            connection.rotation_angle = std::get<1>(*periodic);
+            connection.translation = std::get<2>(*periodic);
+          }
+          c.push_back(std::move(connection));
         }
         std::vector<og::CgnsVertexConnection> vc;
         vc.reserve(vertex_connections.size());
-        for (const auto& [zone, name, donor, points, donor_points] : vertex_connections) {
-          vc.push_back({zone, name, donor, points, donor_points});
+        for (const auto& [zone, name, donor, points, donor_points, periodic] : vertex_connections) {
+          vc.push_back(vertex_connection(zone, name, donor, points, donor_points, periodic));
         }
         const nb::gil_scoped_release release;
         og::write_cgns_3d(path, base_name, bl, z, f, b, c, vc);
@@ -591,10 +618,11 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "(name, grid (nk, nj, ni, 3), family); zones: (name, x, y, z, sections [(name, type, "
       "0-based nodes, bc family or '')], family); families: (name, bc_type or ''); boundaries "
       "(blocks only): (zone, name, family, (imin, jmin, kmin, imax, jmax, kmax)); connections "
-      "(blocks only): (zone, name, donor zone, range, donor range, transform); "
-      "vertex_connections: (zone, name, donor zone, points, donor points), points as (i, j, k) "
-      "triples on blocks and vertex numbers on unstructured zones. All indices 1-based except "
-      "section nodes.");
+      "(blocks only): (zone, name, donor zone, range, donor range, transform, periodic); "
+      "vertex_connections: (zone, name, donor zone, points, donor points, periodic), points as "
+      "(i, j, k) triples on blocks and vertex numbers on unstructured zones; periodic: None or "
+      "(rotation centre, rotation angle vector (axis times angle), translation). All indices "
+      "1-based except section nodes.");
   m.def(
       "write_cgns_elements",
       [](const std::string& path, const std::string& base_name, int cell_dimension,
@@ -604,9 +632,9 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
                                                std::string>>,
                         std::string>>& zones,
          const std::vector<std::tuple<std::string, std::string>>& families,
-         const std::vector<
-             std::tuple<int, std::string, int, std::vector<std::int64_t>, std::vector<std::int64_t>,
-                        std::optional<std::array<double, 2>>>>& vertex_connections) {
+         const std::vector<std::tuple<int, std::string, int, std::vector<std::int64_t>,
+                                      std::vector<std::int64_t>, std::optional<Periodic>>>&
+             vertex_connections) {
         std::vector<og::CgnsUnstructuredZone3D> z;
         z.reserve(zones.size());
         for (const auto& [name, x, y, zz, sections, family] : zones) {
@@ -623,13 +651,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         }
         std::vector<og::CgnsVertexConnection> vc;
         vc.reserve(vertex_connections.size());
-        for (const auto& [zone, name, donor, points, donor_points, shift] : vertex_connections) {
-          og::CgnsVertexConnection c{zone, name, donor, points, donor_points};
-          if (shift) {
-            c.periodic = true;
-            c.translation = *shift;
-          }
-          vc.push_back(std::move(c));
+        for (const auto& [zone, name, donor, points, donor_points, periodic] : vertex_connections) {
+          vc.push_back(vertex_connection(zone, name, donor, points, donor_points, periodic));
         }
         const nb::gil_scoped_release release;
         og::write_cgns_elements(path, base_name, cell_dimension, z, f, vc);
@@ -639,8 +662,8 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "Write unstructured element zones of any order up to 4 (SIDS types BAR_2 .. HEXA_125) "
       "in one base of cell dimension 2 (coordinates X, Y; boundary sections at EdgeCenter) or 3 "
       "(X, Y, Z; FaceCenter). zones and families as in write_cgns_3d; vertex_connections: "
-      "(zone, name, donor zone, points, donor points, translation (x, y) of a periodic link or "
-      "None), 1-based vertex numbers.");
+      "(zone, name, donor zone, points, donor points, periodic (as in write_cgns_3d; a 2D base "
+      "writes the x, y components) or None), 1-based vertex numbers.");
   m.def(
       "inflate_3d",
       [](const nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>& points,

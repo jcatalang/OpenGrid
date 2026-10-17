@@ -552,12 +552,17 @@ to a patch.
 
 Remove members from a patch.
 
-### `pair_periodic(source: str, target: str, translation=None, rotation_angle: float = 0.0, rotation_center=(0.0, 0.0, 0.0)) -> str`
+### `pair_periodic(source: str, target: str, translation=None, rotation_angle: float = 0.0, rotation_center=(0.0, 0.0, 0.0), rotation_axis=(0.0, 0.0, 1.0)) -> str`
 
-Pair two periodic patches: target = R(angle)(source - center) + center + translation.
+Pair two periodic patches: target = R(axis, angle)(source - center) + center +
+translation (the rotation by ``rotation_angle`` radians about ``rotation_axis``
+through ``rotation_center``, right-hand rule).
 
 Without a translation and with no rotation, the translation that maps the centroid of
-the source nodes onto that of the target is computed and stored explicitly.
+the source nodes onto that of the target is computed and stored explicitly. 2D: the
+source connectors must map node by node onto the target's; 3D (block faces, volume
+faces, the ends and side walls of extruded volumes): the faces must map node by node
+and face by face. The boundary report names what does not match.
 
 ### `unpair_periodic(source: str) -> str`
 

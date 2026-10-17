@@ -9,7 +9,9 @@
 //    edges; SIDS "unstructured BCs as element ranges", CGNS >= 3.1).
 //  * Interfaces involving an unstructured zone: general connectivity (GridConnectivity_t,
 //    Abutting1to1, GridLocation Vertex) with PointList / PointListDonor of matching vertices
-//    (unstructured zones: vertex numbers; structured zones: (i, j) pairs), optionally periodic.
+//    (unstructured zones: vertex numbers; structured zones: (i, j) pairs), optionally periodic
+//    (GridConnectivityProperty/Periodic: RotationCenter, RotationAngle, Translation, with their
+//    dimensional exponents; 2D bases take translations only).
 // Written with the CGNS mid-level library. Reference: CFD General Notation System, Standard
 // Interface Data Structures (SIDS), and the CGNS Mid-Level Library documentation.
 #pragma once
@@ -81,8 +83,13 @@ struct CgnsVertexConnection {
   // zones; points[k] matches donor_points[k].
   std::vector<std::int64_t> points;
   std::vector<std::int64_t> donor_points;
+  // Periodicity (GridConnectivityProperty/Periodic): the donor is this side rotated about
+  // `rotation_center` by the vector `rotation_angle` (axis times angle, radians) and shifted by
+  // `translation`; the first PhysicalDimension components are written.
   bool periodic = false;
-  std::array<double, 2> translation{};
+  std::array<double, 3> rotation_center{};
+  std::array<double, 3> rotation_angle{};
+  std::array<double, 3> translation{};
 };
 
 // 3D structured blocks (base with cell and physical dimension 3): ranges are
@@ -112,6 +119,11 @@ struct CgnsConnection3D {
   std::array<int, 6> range{};
   std::array<int, 6> donor_range{};
   std::array<int, 3> transform{};
+  // Periodicity as in CgnsVertexConnection (three components).
+  bool periodic = false;
+  std::array<double, 3> rotation_center{};
+  std::array<double, 3> rotation_angle{};
+  std::array<double, 3> translation{};
 };
 
 // 3D unstructured zones (base with cell and physical dimension 3): element sections numbered 1..

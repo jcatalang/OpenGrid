@@ -861,7 +861,10 @@ day before is Python with quadratic cost.
   (w + 1), scaled to 3D length units on average; exact both ways (the far pole handled by
   its 1 / (1 - t) asymptote). `make_frame(..., surface_entity, store)` picks it for such
   surfaces of less than a full turn; `domain_frame` passes the entity.
-- The pole opening and the on-surface cleanup remain as the fallback for other frames.
+- The on-surface cleanup of the day before (collapses, smoothing, flips in Python) is
+  removed: a mesh algorithm in Python breaks the project's rule (grid algorithms in C++),
+  and the conformal plane makes it unnecessary; the pole opening (index bookkeeping around
+  the C++ mesher) remains as the fallback for other frames, without cleanup.
 
 ### Verified
 - A unit sphere at spacing 0.15: about 850 triangles per half (645 ideal; 2 870 crowded, 490

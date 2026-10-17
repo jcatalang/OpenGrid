@@ -14,6 +14,24 @@ from opengrid.validation import ValidationError
 BOX_FACES = ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")
 
 
+def _smallest_angles(points, triangles):
+    """The smallest angle (degrees) of each triangle (a test-side check)."""
+    import numpy as np
+
+    out = np.full(len(triangles), 180.0)
+    for k in range(3):
+        p = points[triangles[:, k]]
+        q = points[triangles[:, (k + 1) % 3]]
+        r = points[triangles[:, (k + 2) % 3]]
+        u = q - p
+        v = r - p
+        cosine = np.einsum("ij,ij->i", u, v) / (
+            np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1) + 1e-300
+        )
+        out = np.minimum(out, np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+    return out
+
+
 def test_box_faces_share_their_edges():
     og = opengrid.Session()
     og.create_box(size=(2, 2, 2), name="box")
@@ -118,8 +136,6 @@ def test_sphere_meshes_with_fans_at_the_poles():
 
     import numpy as np
 
-    from opengrid.model.unstructured import _min_angles
-
     og = opengrid.Session()
     assert og.create_sphere(radius=1.0, name="sp") == [
         "sp-meridian-a",
@@ -137,7 +153,7 @@ def test_sphere_meshes_with_fans_at_the_poles():
         triangles = np.asarray(mesh["triangles"])
         assert np.max(np.abs(np.linalg.norm(points, axis=1) - 1.0)) < 1e-9  # on the sphere
         assert 600 < len(triangles) < 1100  # ~645 for equilateral triangles of the spacing
-        assert _min_angles(points, triangles).min() > 15.0
+        assert _smallest_angles(points, triangles).min() > 15.0
         edges = np.sort(
             np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]]),
             axis=1,

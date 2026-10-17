@@ -439,10 +439,10 @@ history). Phase tags show where each item came from.
   bringing both poles to finite points), so the triangle count is about right and the shapes
   are kept; the 3D size still varies by the conformal factor (up to about 2x over a
   hemisphere, smaller near the poles). Any other surface with a pole (a NURBS face from CAD,
-  a ruled surface closing at a point) falls back to opening the pole in parameter space plus
-  a cleanup on the surface (edge collapses, smoothing, flips) that is written in Python and
-  slow beyond a few thousand triangles; quads touching such a pole become triangles or go.
-  CAD faces with degenerate edges are still skipped by the importer.
+  a ruled surface closing at a point) falls back to opening the pole in parameter space,
+  which crowds the triangles near it (no cleanup: a mesh-improvement pass belongs in the C++
+  mesher and is not written); quads touching such a pole become triangles or go. CAD faces
+  with degenerate edges are still skipped by the importer.
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a

@@ -84,7 +84,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - Airfoil `.dat` (Selig and Lednicer) and CSV point import.
 - STEP / IGES import through OpenCASCADE (optional backend): sewing and healing, faces as
   surfaces, automatic connectors and structured or unstructured domains on every face.
-- Freehand curves drawn with the mouse, fitted to splines; curve networks with snapping.
+- Freehand curves drawn with the mouse, fitted to splines; a stroke released at its start is a
+  closed loop, meshed with one click; curve networks with snapping.
 
 ### Connectors and distributions
 - Uniform, geometric, tanh (Vinokur), sine distributions with begin / end spacings, growth

@@ -2,13 +2,16 @@
 
 Method:
 1. Vertices: the curves' end points, their sharp corners (turning angle of the tessellation
-   above ``corner_angle``), points where an end lies on another curve, and crossings - found
-   on the tessellations (segment-segment tests), then refined by Newton's method on
-   c_a(t_a) = c_b(t_b) in the plane. Points closer than the tolerance are one vertex.
-2. Edges: the pieces of each curve between consecutive vertices.
+   above ``corner_angle``), points where an end lies on another curve, and crossings (between
+   curves and of a curve with itself) - found on the tessellations (segment-segment tests),
+   then refined by Newton's method on c_a(t_a) = c_b(t_b) in the plane. Points closer than
+   the tolerance are one vertex.
+2. Edges: the pieces of each curve between consecutive vertices. Dangling pieces (an end that
+   meets nothing: an open stroke, the tail beyond a self-crossing) are dropped and reported.
 3. Faces: the bounded faces of the planar arrangement, traced with the half-edge rule "leave
    each vertex along the next edge clockwise from the one you arrived by" (the face lies on the
-   left); faces with negative area (the outer boundary) are dropped.
+   left); faces with negative area (the outer boundary) are dropped, and a face whose boundary
+   runs along an edge twice (a curve joining two loops) is reported, not meshed.
 4. Corners of a face: vertices where its boundary turns by more than ``corner_angle``. A
    face with four corners becomes a structured domain whose sides are the edge chains between
    them. Other faces (e.g. a smooth closed curve, no corners) are reported, or become
@@ -129,6 +132,21 @@ def build_network(store, curve_ids, corner_angle: float = 30.0) -> Network:
                     continue
                 cuts[a].append(ta)
                 cuts[b].append(tb)
+    # Self-crossings (a stroke that crosses its own beginning): segment pairs that are neither
+    # the same, neighbours (they share a point) nor the mirror image of a pair seen already.
+    for a in ids:
+        for i, j, s, r in _segment_hits(points[a], points[a]):
+            if j <= i + 1:
+                continue
+            ta = params[a][i] + s * (params[a][i + 1] - params[a][i])
+            tb = params[a][j] + r * (params[a][j + 1] - params[a][j])
+            ta, tb = _refine(curves[a], curves[a], ta, tb)
+            if abs(ta - tb) < 1e-6:
+                continue
+            if np.linalg.norm(_xy(curves[a].eval(ta)) - _xy(curves[a].eval(tb))) > tol:
+                continue
+            cuts[a].append(ta)
+            cuts[a].append(tb)
     for a in ids:
         for end in (0.0, 1.0):
             p = curves[a].eval(end)
@@ -162,6 +180,31 @@ def build_network(store, curve_ids, corner_angle: float = 30.0) -> Network:
                 continue  # degenerate
             length = float(np.sum(np.linalg.norm(np.diff(sample, axis=0), axis=1)))
             net.edges.append(Edge(c, t0, t1, v0, v1, length, sample))
+    # Dangling pieces (an end that meets nothing: an open stroke, the tail beyond a
+    # self-crossing) bound no face and would be walked on both sides: drop them, repeatedly.
+    while True:
+        degree: dict[int, int] = {}
+        for edge in net.edges:
+            degree[edge.v0] = degree.get(edge.v0, 0) + 1
+            degree[edge.v1] = degree.get(edge.v1, 0) + 1
+        dangling = []
+        for e, edge in enumerate(net.edges):
+            if degree[edge.v0] == 1 or degree[edge.v1] == 1:
+                dangling.append(e)
+        if not dangling:
+            break
+        net.edges = [edge for e, edge in enumerate(net.edges) if e not in dangling]
+    # The tails of strokes drawn across each other are dropped silently; a curve of which
+    # nothing is left (an open stroke, a curve touching nothing) is reported.
+    used_curves = {edge.curve for edge in net.edges}
+    for c in ids:
+        if c not in used_curves:
+            net.issues.append(
+                Issue(
+                    store.get(c).name,
+                    "bounds no region (an open curve, or one whose ends meet nothing): ignored",
+                )
+            )
     # Faces: half-edge traversal.
     out: dict[int, list[tuple[float, int, bool]]] = {}
     for e, edge in enumerate(net.edges):
@@ -202,8 +245,21 @@ def build_network(store, curve_ids, corner_angle: float = 30.0) -> Network:
             x = polygon[:, 0]
             y = polygon[:, 1]
             area = 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
-            if area > 0:
-                net.faces.append(cycle)
+            if area <= 0:
+                continue
+            if len({h[0] for h in cycle}) < len(cycle):
+                # Both sides of an edge: a curve joining two loops (the region between them
+                # is a ring, which needs an outer loop and a hole, not one loop).
+                net.issues.append(
+                    Issue(
+                        "curve network",
+                        "a region's boundary runs along a curve twice (a curve joining two "
+                        "loops): not meshed; delete that curve and mesh the loops as a domain "
+                        "with a hole",
+                    )
+                )
+                continue
+            net.faces.append(cycle)
     del z
     return net
 

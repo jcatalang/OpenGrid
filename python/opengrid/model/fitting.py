@@ -197,13 +197,22 @@ def fit_stroke(
     tolerance: float = 0.005,
     corner_angle: float | None = 60.0,
     max_control: int = 64,
+    close_tolerance: float = 0.0,
 ) -> list[dict]:
     """NURBS pieces for a pointer stroke: split at corners (``corner_angle`` degrees; None:
-    no splitting) and fitted within ``tolerance`` times the stroke length."""
+    no splitting) and fitted within ``tolerance`` times the stroke length. A stroke that ends
+    within ``close_tolerance`` (absolute; 0: never) of its start is closed first: its start
+    point is appended, so the fitted pieces form a loop whose ends meet exactly (strokes
+    shorter than four tolerances are left alone)."""
     pts = _clean(points)
     if len(pts) < 2:
         raise ValueError("a stroke needs two distinct points")
     length = float(_arc(pts)[-1])
+    if close_tolerance > 0.0 and length > 4.0 * close_tolerance:
+        gap = float(np.linalg.norm(pts[-1] - pts[0]))
+        if 0.0 < gap <= close_tolerance:
+            pts = np.vstack([pts, pts[:1]])
+            length = float(_arc(pts)[-1])
     cuts = []
     if corner_angle is not None:
         cuts = find_corners(pts, corner_angle)

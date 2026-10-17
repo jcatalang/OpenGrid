@@ -215,3 +215,68 @@ def test_move_handle_keeps_a_curve_network_connected():
     assert og.entity("h1").params["points"][6] == point
     with pytest.raises(ValidationError, match="no movable field"):
         og.move_handle("h1", "control_points", 0, (0, 0, 0))
+
+
+def test_freehand_stroke_closes_within_the_close_tolerance():
+    og = opengrid.Session()
+    t = np.linspace(0.0, 2 * np.pi, 120)[:-2]  # the hand stops short of the start
+    pts = np.stack([np.cos(t), np.sin(t), 0 * t], axis=1)
+    gap = float(np.linalg.norm(pts[-1] - pts[0]))
+    (open_,) = og.create_freehand(pts, close_tolerance=0.5 * gap)
+    (closed,) = og.create_freehand(pts, close_tolerance=2.0 * gap)
+    c_open = og.geometry(open_)
+    c_closed = og.geometry(closed)
+    assert np.linalg.norm(np.subtract(c_open.eval(1.0), c_open.eval(0.0))) > 0.5 * gap
+    assert np.linalg.norm(np.subtract(c_closed.eval(1.0), c_closed.eval(0.0))) == 0.0
+    assert distance_to([og.entity(closed).params], pts) < 0.005 * 2 * np.pi  # the fit tolerance
+    # A scribble shorter than four tolerances is never closed into a loop.
+    (scribble,) = og.create_freehand(pts[:3] * 0.01, close_tolerance=1.0)
+    c = og.geometry(scribble)
+    assert np.linalg.norm(np.subtract(c.eval(1.0), c.eval(0.0))) > 0.0
+
+
+def spiral_with_tail():
+    """One stroke: almost a full turn, then a tail that crosses its own beginning."""
+    t = np.linspace(0.0, 2 * np.pi - 0.3, 200)
+    radius = 1.0 - 0.1 * t / (2 * np.pi)
+    spiral = np.stack([radius * np.cos(t), radius * np.sin(t), 0 * t], axis=1)
+    steps = np.linspace(0.0, 1.0, 25)[1:, None]
+    tail = spiral[-1] + steps * (np.array([1.0, 0.8, 0.0]) - spiral[-1])
+    return spiral, np.vstack([spiral, tail])
+
+
+def test_self_crossing_stroke_bounds_a_region_and_an_open_one_does_not():
+    og = opengrid.Session()
+    spiral, stroke = spiral_with_tail()
+    (curve,) = og.create_freehand(stroke)
+    (domain,) = og.domains_from_curves([curve], spacing=0.1, unstructured=True)
+    assert og.last_warnings == []  # the tails beyond the crossing are dropped silently
+    assert "triangles" in og.domain_status(domain)
+    assert replays(og)
+    og2 = opengrid.Session()
+    (curve,) = og2.create_freehand(spiral)
+    with pytest.raises(ValidationError, match="enclose no region"):
+        og2.domains_from_curves([curve], spacing=0.1, unstructured=True)
+    assert og2.names("unstructured_domain") == []
+
+
+def test_loose_curves_and_bridges_are_reported_not_meshed():
+    og = opengrid.Session()
+    square = (("s0", (0, 0), (3, 0)), ("s1", (3, 0), (3, 3)), ("s2", (3, 3), (0, 3)))
+    for name, a, b in (*square, ("s3", (0, 3), (0, 0)), ("loose", (1, 1), (1.5, 1.5))):
+        og.create_line(a, b, name=name)
+    (domain,) = og.domains_from_curves(["s0", "s1", "s2", "s3", "loose"], spacing=0.25)
+    assert og.entity(domain).kind == "domain"
+    assert og.last_warnings == [
+        "loose: bounds no region (an open curve, or one whose ends meet nothing): ignored"
+    ]
+    # An inner square joined to the outer one by a line: the ring between them has that
+    # line on both sides of its boundary; it is reported, the inner square is meshed.
+    inner = (("i0", (1, 1), (2, 1)), ("i1", (2, 1), (2, 2)), ("i2", (2, 2), (1, 2)))
+    for name, a, b in (*inner, ("i3", (1, 2), (1, 1)), ("bridge", (2, 1.5), (3, 1.5))):
+        og.create_line(a, b, name=name)
+    og.delete(["loose", domain])
+    curves = ["s0", "s1", "s2", "s3", "i0", "i1", "i2", "i3", "bridge"]
+    made = og.domains_from_curves(curves, spacing=0.25, unstructured=True)
+    assert len(made) == 1 and og.entity(made[0]).kind == "domain"
+    assert any("runs along a curve twice" in warning for warning in og.last_warnings)

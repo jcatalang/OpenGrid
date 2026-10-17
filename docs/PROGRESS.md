@@ -848,6 +848,45 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Freehand loops meshed from the GUI (2026-10-17) — requested by the user
+
+The user drew a freehand curve, clicked "Unstructured domain" and nothing happened: the
+stroke is a curve, the action needs connectors (its only answer was a five-second status
+message), and a hand-drawn loop never closes exactly (connector ends must coincide to 1e-9),
+so there was no route from a stroke to a mesh.
+
+### Built
+- A stroke released within the pick tolerance (8 pixels) of its start is closed: the start
+  point is appended to the samples before the fit (`fit_stroke(close_tolerance)`,
+  `create_freehand(close_tolerance)`), so the loop's curves meet exactly; strokes shorter than
+  four tolerances are left alone. The new curves are the selection after a stroke.
+- `Session.unstructured_domain_from_curves(curves, dimension, connectors=())`: one connector
+  per curve plus the given connectors, assembled into loops (`assemble_polylines`, now shared
+  with `create_unstructured_domain(connectors=...)`), and the domain, in one `CreateEntities`
+  (one undo step, journaled as explicit calls). "Unstructured domain" uses it when curves are
+  selected (points from the "dim" box). Loop assembly errors name the connector and its open
+  end ("its end at (x, y, z) meets 0 other end(s), not exactly one").
+- The status bar says what is selected and what is needed when an action does not fit the
+  selection (`_selection_hint`: "d is a domain: select the connectors or curves of the
+  boundary loops"), for the unstructured and structured domain, connector and network actions.
+- Curve networks (`model/network.py`): self-crossings of a curve are cut (segment tests of
+  the tessellation against itself, Newton refinement); dangling pieces (an end that meets
+  nothing: open strokes, the tails beyond a crossing) are pruned before the faces are traced.
+  They used to be walked on both sides, which made a zero-area "face" that passed the
+  `area > 0` test by rounding and, with `unstructured=True`, a domain with a repeated
+  connector that failed to triangulate ("duplicate points"). A curve of which nothing remains
+  is reported; a face whose boundary runs along an edge twice (a curve joining two loops) is
+  reported and not meshed.
+- `tests/python/conftest.py` forces Qt's offscreen platform on macOS whatever `DISPLAY` says
+  (XQuartz exports one in every shell; on-screen test windows get resized by the window
+  manager and the real-event tests' display coordinates drift).
+
+### Verified
+- pytest +6 -> 457 passed, 1 xfailed: closed strokes, self-crossing / open / loose / bridged
+  networks, `unstructured_domain_from_curves` (one step, replay, error text), a loop drawn
+  with real mouse events and meshed with one click, the selection hints. No C++ change.
+- ruff, format, ternary check, API docs regenerated, `tools/check_launcher.py` current.
+
 ## Phase 12d — 3D speed (2026-10-17) — requested by the user, committed when its checks passed
 
 ### Measured first

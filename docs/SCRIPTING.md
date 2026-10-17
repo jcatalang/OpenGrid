@@ -158,8 +158,17 @@ while it is in a group.
 
 ### Freehand curves and curve networks
     names = og.create_freehand(points)                # pointer samples -> NURBS curve(s)
+    loop = og.create_freehand(points, close_tolerance=0.01)  # ends near the start: closed
+    d = og.unstructured_domain_from_curves(loop, 41)  # connectors + triangles, one step
     domains = og.domains_from_curves(curves)          # crossing curves -> structured domains
+    og.domains_from_curves(curves, unstructured=True)  # regions without 4 corners: triangles
     og.move_handle("h1", "points", 6, (1.0, 0.9, 0))  # as a mouse drag: crossings follow
+
+In the GUI a freehand stroke released within the pick tolerance of its start is a closed
+loop, the new curves are selected, and **Unstructured domain** meshes selected curves
+directly (one connector per curve with the "dim" box's points, one undo step). A stroke that
+crosses its own beginning encloses a region for "Domains from curves"; the tails beyond the
+crossing are dropped.
 
 ### Sketch topology
 ```python

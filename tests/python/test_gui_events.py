@@ -349,3 +349,53 @@ def test_property_panel_edit_by_keyboard(live):
     assert live.og.entity("cf").params["dimension"] == 31
     live.window.undo()
     assert live.og.entity("cf").params["dimension"] == 11
+
+
+def test_freehand_loop_released_near_its_start_meshes_with_one_click(live):
+    window = live.window
+    window.set_tool("freehand")
+    before = set(live.og.names("nurbs"))
+    centre = np.array([1.0, 0.5, 0.0])
+    radius = 0.3
+    pixel = window.scene.world_per_pixel()
+    start = centre + np.array([radius, 0.0, 0.0])
+    live.press(start)
+    for angle in np.linspace(0.0, 2 * math.pi, 60)[1:-1]:
+        live.move(centre + np.array([radius * math.cos(angle), radius * math.sin(angle), 0.0]))
+    live.release(start - np.array([0.0, 3 * pixel, 0.0]))  # three pixels short of the start
+    (curve,) = set(live.og.names("nurbs")) - before
+    geometry = live.og.geometry(curve)
+    assert np.linalg.norm(np.subtract(geometry.eval(1.0), geometry.eval(0.0))) == 0.0
+    assert window.selected_names() == [curve]  # ready for the next action
+    window.dimension_box.setValue(41)
+    window.unstructured_action.trigger()
+    (domain,) = live.og.names("unstructured_domain")
+    assert window.selected_names() == [domain]
+    assert "triangles" in live.og.domain_status(domain)
+    (loop,) = live.og.entity(domain).params["loops"]
+    assert len(loop) == 1
+    assert live.og.entity(loop[0]["connector"]).params["dimension"] == 41
+    window.undo_action.trigger()  # one step: the connector and the domain
+    assert live.og.names("unstructured_domain") == [] and live.og.names("connector") == [
+        "cb",
+        "ct",
+        "cr",
+        "cl",
+    ]
+
+
+def test_actions_explain_a_wrong_selection(live):
+    window = live.window
+    window.set_selection([live.og.entity("d").id])
+    window.unstructured_action.trigger()
+    assert (
+        window.statusBar().currentMessage()
+        == "d is a domain: select the connectors or curves of the boundary loops"
+    )
+    window.set_selection([])
+    window.unstructured_action.trigger()
+    assert (
+        window.statusBar().currentMessage()
+        == "Select the connectors or curves of the boundary loops first"
+    )
+    assert live.og.names("unstructured_domain") == []

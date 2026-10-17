@@ -147,15 +147,20 @@ class Session:
         tolerance: float = 0.005,
         corner_angle: float | None = 60.0,
         name: str | None = None,
+        close_tolerance: float = 0.0,
     ) -> list[str]:
         """NURBS curves fitted to a freehand stroke (pointer samples): split at corners (turns
         of ``corner_angle`` degrees or more; None: never) and fitted by cubic B-splines within
-        ``tolerance`` times the stroke length (opengrid.model.fitting). One undo step; the
-        journal records the fitted curves. ``name`` is used for a single piece, else
-        ``name-1``, ``name-2``..."""
+        ``tolerance`` times the stroke length (opengrid.model.fitting). A stroke that ends
+        within ``close_tolerance`` (absolute; 0: never) of its start is closed into a loop
+        whose curves meet exactly (the GUI passes its pick tolerance), ready for
+        ``unstructured_domain_from_curves``. One undo step; the journal records the fitted
+        curves. ``name`` is used for a single piece, else ``name-1``, ``name-2``..."""
         from opengrid.model.fitting import fit_stroke
 
-        pieces = fit_stroke([_as3(p) for p in points], tolerance, corner_angle)
+        pieces = fit_stroke(
+            [_as3(p) for p in points], tolerance, corner_angle, close_tolerance=close_tolerance
+        )
         items = []
         for k, piece in enumerate(pieces):
             params = {key: piece[key] for key in ("degree", "knots", "control_points", "weights")}
@@ -431,6 +436,59 @@ class Session:
                 )
         params = {"loops": loops, "generator": generator, "surface": surface}
         return self._create("unstructured_domain", params, name)
+
+    def unstructured_domain_from_curves(
+        self,
+        curves,
+        dimension: int,
+        connectors=(),
+        generator=None,
+        distribution="uniform",
+        name: str | None = None,
+    ) -> str:
+        """Unstructured (triangle) domain bounded by curves: one connector of ``dimension``
+        points on each curve, assembled together with the existing ``connectors`` into closed
+        loops (the largest = outer), then the domain, as one undo step (the GUI's
+        "Unstructured domain" on selected curves, e.g. a freehand loop). The curve ends must
+        meet exactly (``create_freehand`` with ``close_tolerance`` closes a stroke). Returns
+        the domain's name; ``generator`` as in ``create_unstructured_domain``."""
+        from opengrid.model.unstructured import assemble_polylines
+
+        if isinstance(curves, str):
+            curves = [curves]
+        if isinstance(connectors, str):
+            connectors = [connectors]
+        polylines = {}
+        labels = {}
+        items = []
+        counter = self.store.name_counters.get("connector", 0)
+        for curve in curves:
+            entity = self.store.get(curve)
+            if entity.kind not in CURVE_KINDS:
+                raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a curve")])
+            while True:
+                counter += 1
+                connector_name = f"connector-{counter}"
+                if connector_name not in self.store:
+                    break
+            geometry = self.store.geometry(entity.id)
+            polylines[connector_name] = geometry.eval_many(np.linspace(0.0, 1.0, 65))
+            labels[connector_name] = f"{connector_name} (on {entity.name})"
+            params = {"segments": entity.name, "dimension": dimension, "distribution": distribution}
+            items.append(("connector", params, connector_name))
+        for connector in connectors:
+            entity = self.store.get(connector)
+            if entity.kind != "connector":
+                raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a connector")])
+            polylines[entity.name] = self.connectors.nodes(entity.id).points
+            labels[entity.name] = entity.name
+        if not polylines:
+            raise ValidationError([Issue("unstructured domain", "no curves or connectors given")])
+        loops = assemble_polylines(polylines, labels)
+        params = {"loops": loops, "generator": generator, "surface": None}
+        items.append(("unstructured_domain", params, name))
+        label = f"Unstructured domain from {len(curves)} curves"
+        return self.commands.run(CreateEntities(items, label=label))[-1]
 
     def set_unstructured_generator(self, name: str, **changes) -> str:
         """Change some generator settings of an unstructured domain."""

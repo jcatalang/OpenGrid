@@ -655,9 +655,16 @@ class MainWindow(QMainWindow):
             stroke = [*self._stroke, tuple(xyz)]
             self._stroke = None
             self.scene.show_preview([])
-            created = self._run(lambda: self.tool.create_stroke(stroke))
+            # Released within the pick tolerance of the start: a closed loop.
+            close_tolerance = PICK_PIXELS * self.scene.world_per_pixel()
+            created = self._run(
+                lambda: self.tool.create_stroke(stroke, close_tolerance=close_tolerance)
+            )
             if created:
                 log.info("freehand: %s", ", ".join(created))
+                # The new curves are the selection: "Connectors on curves" or
+                # "Unstructured domain" apply to them directly.
+                self.set_selection([self.session.store.get(n).id for n in created])
             return created or []
         if self._drag is None:
             return []
@@ -692,7 +699,7 @@ class MainWindow(QMainWindow):
 
         curves = [n for n in self.selected_names() if self.session.store.get(n).kind in CURVE_KINDS]
         if not curves:
-            self.statusBar().showMessage("Select the curves of the network first", 5000)
+            self.statusBar().showMessage(self._selection_hint("the curves of the network"), 5000)
             return []
         total = sum(self.session.length(c) for c in curves)
         spacing = total / len(curves) / max(self.dimension_box.value() - 1, 1)
@@ -1090,7 +1097,7 @@ class MainWindow(QMainWindow):
             if self.session.store.get(name).kind == "connector":
                 connectors.append(name)
         if not connectors:
-            self.statusBar().showMessage("Select the connectors of the domain first", 5000)
+            self.statusBar().showMessage(self._selection_hint("the connectors of the domain"), 5000)
             return None
         name = self._run(lambda: self.session.create_structured_domain(connectors=connectors))
         if name:
@@ -1126,11 +1133,24 @@ class MainWindow(QMainWindow):
         return name
 
     def create_unstructured_on_selection(self) -> str | None:
+        """Unstructured domain from the selected connectors; selected curves first get a
+        connector each ('dim' box points), all in one undo step."""
         connectors = self._selected_of_kind("connector")
-        if not connectors:
-            self.statusBar().showMessage("Select the connectors of the boundary loops first", 5000)
+        curves = self._selected_curves()
+        if not connectors and not curves:
+            self.statusBar().showMessage(
+                self._selection_hint("the connectors or curves of the boundary loops"), 5000
+            )
             return None
-        name = self._run(lambda: self.session.create_unstructured_domain(connectors=connectors))
+        if curves:
+            dimension = self.dimension_box.value()
+            name = self._run(
+                lambda: self.session.unstructured_domain_from_curves(
+                    curves, dimension, connectors=connectors
+                )
+            )
+        else:
+            name = self._run(lambda: self.session.create_unstructured_domain(connectors=connectors))
         if name:
             log.info("created %s: %s", name, self.session.domain_status(name))
             self.set_selection([self.session.store.get(name).id])
@@ -1470,17 +1490,10 @@ class MainWindow(QMainWindow):
         return summary
 
     # -------------------------------------------------------------- connectors
-    def _selected_curves(self) -> list[str]:
-        names = []
-        for name in self.selected_names():
-            if self.session.store.get(name).kind in CURVE_KINDS:
-                names.append(name)
-        return names
-
     def create_connectors_on_selection(self) -> list[str]:
         curves = self._selected_curves()
         if not curves:
-            self.statusBar().showMessage("Select one or more curves first", 5000)
+            self.statusBar().showMessage(self._selection_hint("one or more curves"), 5000)
             return []
         names = self._run(
             lambda: self.session.create_connectors_on_curves(curves, self.dimension_box.value())
@@ -1544,6 +1557,20 @@ class MainWindow(QMainWindow):
         names = self.selected_names()
         if names:
             self._run(lambda: self.session.delete(names))
+
+    def _selection_hint(self, needed: str) -> str:
+        """Status text when the selection does not fit an action: what is selected (and what
+        it is), then what is needed."""
+        names = self.selected_names()
+        if not names:
+            return f"Select {needed} first"
+        shown = []
+        for name in names[:3]:
+            kind = self.session.store.get(name).kind.replace("_", " ")
+            shown.append(f"{name} is a {kind}")
+        if len(names) > 3:
+            shown.append(f"{len(names) - 3} more")
+        return f"{', '.join(shown)}: select {needed}"
 
     def _run(self, function):
         """Run a model operation; report validation errors instead of raising."""

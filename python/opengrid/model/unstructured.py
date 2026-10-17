@@ -347,8 +347,6 @@ def assemble_loops(
 ) -> list[list[dict]]:
     """Closed loops from a set of connectors: the loop enclosing the largest area becomes the
     outer loop (counter-clockwise), the others holes (clockwise)."""
-    from opengrid.model.domains import _walk
-
     ids = []
     for name in names:
         entity = store.get(name)
@@ -356,7 +354,22 @@ def assemble_loops(
             raise ValidationError([Issue(name, f"is a {entity.kind}, not a connector")])
         ids.append(entity.id)
     ids = sorted(set(ids))
-    nodes = {i: connectors.nodes(i).points for i in ids}
+    polylines = {i: connectors.nodes(i).points for i in ids}
+    labels = {i: store.get(i).name for i in ids}
+    surface_geometry = None
+    if surface is not None:
+        surface_geometry = store.geometry(surface)
+    return assemble_polylines(polylines, labels, surface_geometry)
+
+
+def assemble_polylines(polylines: dict, labels: dict, surface_geometry=None) -> list[list[dict]]:
+    """Closed loops from polylines keyed by connector (an id, or the name of a connector about
+    to be created): ``[{"connector": key, "reversed": bool}, ...]`` per loop, the loop
+    enclosing the largest area first and counter-clockwise, the others (holes) clockwise.
+    Ends coincide within the chain tolerance; every end must meet exactly one other end, else
+    the error names the connectors (``labels``) and where their open ends are."""
+    from opengrid.model.domains import _walk
+
     keys = []
 
     def key_of(point):
@@ -364,25 +377,39 @@ def assemble_loops(
         for index, known in enumerate(keys):
             if np.linalg.norm(known - point) <= tolerance:
                 return index
-        keys.append(np.asarray(point))
+        keys.append(np.asarray(point, dtype=float))
         return len(keys) - 1
 
-    ends = {i: (key_of(nodes[i][0]), key_of(nodes[i][-1])) for i in ids}
+    nodes = {i: np.asarray(points, dtype=float) for i, points in polylines.items()}
+    ends = {i: (key_of(nodes[i][0]), key_of(nodes[i][-1])) for i in nodes}
     degree = {}
     for a, b in ends.values():
         degree[a] = degree.get(a, 0) + 1
         degree[b] = degree.get(b, 0) + 1
-    if any(d != 2 for d in degree.values()):
-        raise ValidationError(
-            [
+    issues = []
+    for i in nodes:
+        for which, end in (("start", ends[i][0]), ("end", ends[i][1])):
+            if degree[end] == 2:
+                continue
+            x, y, z = keys[end]
+            issues.append(
                 Issue(
-                    "unstructured domain",
-                    "connectors must form closed loops "
-                    "(every end shared by exactly two connector ends)",
+                    str(labels[i]),
+                    f"its {which} at ({x:.4g}, {y:.4g}, {z:.4g}) meets {degree[end] - 1} "
+                    "other end(s), not exactly one",
                 )
-            ]
+            )
+    if issues:
+        issues.insert(
+            0,
+            Issue(
+                "unstructured domain",
+                "connectors must form closed loops (every end shared by exactly two "
+                "connector ends)",
+            ),
         )
-    remaining = list(ids)
+        raise ValidationError(issues)
+    remaining = list(nodes)
     loops = []
     while remaining:
         order = _walk(remaining, ends, remaining[0])
@@ -401,9 +428,6 @@ def assemble_loops(
 
     from opengrid.model.frames import make_frame
 
-    surface_geometry = None
-    if surface is not None:
-        surface_geometry = store.geometry(surface)
     frame = make_frame(
         [oriented(order) for order in loops], surface_geometry, "unstructured domain"
     )

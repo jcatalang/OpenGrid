@@ -158,6 +158,15 @@ apply to the Delaunay mesher only). Further keys: ``element_type`` ("triangles",
 layers from wall connectors, e.g. ``{"connectors": ["c-wall"], "first_height": 1e-5,
 "growth_rate": 1.2, "layers": 30, "total_thickness": None, "transition": True}``.
 
+### `unstructured_domain_from_curves(curves, dimension: int, connectors=(), generator=None, distribution='uniform', name: str | None = None) -> str`
+
+Unstructured (triangle) domain bounded by curves: one connector of ``dimension``
+points on each curve, assembled together with the existing ``connectors`` into closed
+loops (the largest = outer), then the domain, as one undo step (the GUI's
+"Unstructured domain" on selected curves, e.g. a freehand loop). The curve ends must
+meet exactly (``create_freehand`` with ``close_tolerance`` closes a stroke). Returns
+the domain's name; ``generator`` as in ``create_unstructured_domain``.
+
 ### `set_domain_generator(name: str, **changes) -> str`
 
 Update generator settings, e.g. ``set_domain_generator("d", method="hermite_tfi")`` or
@@ -206,13 +215,15 @@ One-line summary of a structured or unstructured domain.
 
 ## Freehand curves, curve networks, live editing
 
-### `create_freehand(points, tolerance: float = 0.005, corner_angle: float | None = 60.0, name: str | None = None) -> list[str]`
+### `create_freehand(points, tolerance: float = 0.005, corner_angle: float | None = 60.0, name: str | None = None, close_tolerance: float = 0.0) -> list[str]`
 
 NURBS curves fitted to a freehand stroke (pointer samples): split at corners (turns
 of ``corner_angle`` degrees or more; None: never) and fitted by cubic B-splines within
-``tolerance`` times the stroke length (opengrid.model.fitting). One undo step; the
-journal records the fitted curves. ``name`` is used for a single piece, else
-``name-1``, ``name-2``...
+``tolerance`` times the stroke length (opengrid.model.fitting). A stroke that ends
+within ``close_tolerance`` (absolute; 0: never) of its start is closed into a loop
+whose curves meet exactly (the GUI passes its pick tolerance), ready for
+``unstructured_domain_from_curves``. One undo step; the journal records the fitted
+curves. ``name`` is used for a single piece, else ``name-1``, ``name-2``...
 
 ### `domains_from_curves(curves, spacing: float | None = None, corner_angle: float = 30.0, unstructured: bool = False) -> list[str]`
 

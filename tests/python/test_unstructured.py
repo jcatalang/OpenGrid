@@ -256,3 +256,29 @@ def test_advancing_front_sources():
     assert len(mesh["triangles"]) > coarse
     q = og.domain_quality("ring")
     assert q["min_angle"].min() >= 20.7
+
+
+def test_unstructured_domain_from_curves_is_one_step_and_names_open_ends():
+    from opengrid.validation import ValidationError
+
+    og = opengrid.Session()
+    og.create_circle((0, 0), 1.0, name="c")
+    name = og.unstructured_domain_from_curves("c", 61)
+    assert og.names("connector") == ["connector-1"]
+    assert og.entity("connector-1").params["dimension"] == 61
+    assert "triangles" in og.domain_status(name)
+    assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
+    og.undo()
+    assert og.names("connector") == [] and og.names("unstructured_domain") == []
+    # Curves and existing connectors mixed: a half disc.
+    og = opengrid.Session()
+    og.create_spline([(1, 0), (0, 1), (-1, 0)], name="top")
+    og.create_line((-1, 0), (1, 0), name="bottom")
+    og.create_connector("bottom", 21, name="c-bottom")
+    name = og.unstructured_domain_from_curves(["top"], 31, connectors=["c-bottom"])
+    assert "triangles" in og.domain_status(name)
+    with pytest.raises(ValidationError) as error:
+        og.unstructured_domain_from_curves(["top"], 31)
+    text = str(error.value)
+    assert "closed loops" in text and "(on top)" in text and "meets 0 other" in text
+    assert og.names("unstructured_domain") == [name]

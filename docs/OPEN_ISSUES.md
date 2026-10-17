@@ -356,7 +356,14 @@ history). Phase tags show where each item came from.
   four sides; meeting points of three curves follow only the first two when a curve is
   dragged. "Block from curves" (3D) was not built.
 - **Freehand** [10c]: fitted once (later drags move control points); pointer samples in the
-  z = 0 plane; corners below 60 degrees are smoothed over.
+  z = 0 plane; corners below 60 degrees are smoothed over. A stroke is closed into a loop only
+  when released within the pick tolerance (8 pixels) of its start [2026-10-17]: a loop whose
+  end misses its start by more is open, and "Unstructured domain" says which end meets
+  nothing; the closure is C0 (the loop may have a small kink where the stroke began).
+- **Curve networks: rings** [2026-10-17]: a curve joining an outer loop to an inner one makes
+  the region between them a face whose boundary runs along that curve twice; it is reported,
+  not meshed (delete the joining curve and mesh the loops as a domain with a hole, or select
+  the connectors and use "Unstructured domain").
 - **Sketch vertices on curves in 3D stay where drawn** [10d]: 3D vertices slide on planes and
   surfaces only. Sliding along an edge between two surfaces (e.g. where the wing stub's
   outflow meets a side wall) was built (one chain per curve, as in 2D) but made the 3D solver

@@ -214,15 +214,22 @@ class FreehandTool(Tool):
     corner_angle = 60.0
 
     def prompt(self) -> str:
-        return "Freehand: press and draw; release to fit NURBS curves (corners kept)"
+        return (
+            "Freehand: press and draw; release to fit NURBS curves (corners kept); release "
+            "near the start to close a loop"
+        )
 
     def click(self, xyz) -> None:
         return None
 
-    def create_stroke(self, points) -> list[str]:
+    def create_stroke(self, points, close_tolerance: float = 0.0) -> list[str]:
+        """The curves of a stroke; a stroke released within ``close_tolerance`` of its start
+        (the window's pick tolerance) becomes a closed loop."""
         if len(points) < 2:
             return []
-        return self.session.create_freehand(points, self.tolerance, self.corner_angle)
+        return self.session.create_freehand(
+            points, self.tolerance, self.corner_angle, close_tolerance=close_tolerance
+        )
 
     def preview(self, cursor) -> list[tuple]:
         return list(self.points)

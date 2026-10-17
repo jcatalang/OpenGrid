@@ -183,8 +183,8 @@ def test_group_validation():
     og.create_smoothing_group([low, high], name="g2")
     with pytest.raises(ValidationError, match="several smoothing groups"):
         og.domain_grid(low)
-    with pytest.raises(ValidationError, match="is used by"):
-        og.delete(high)
+    og.delete(high)  # a group member: the group loses it (it keeps low)
+    assert og.entity("g2").params["domains"] == (og.entity(low).id,)
 
 
 def test_o_type_domain_smooths_across_its_cut():

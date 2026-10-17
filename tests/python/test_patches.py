@@ -99,8 +99,8 @@ def test_non_manifold_connector_reported():
 
 def test_patch_and_zone_entities():
     og = step_session()
-    with pytest.raises(opengrid.ValidationError, match="used by patch 'walls'"):
-        og.delete("c-step")
+    with pytest.raises(opengrid.ValidationError, match="used by domain 'lower-block'"):
+        og.delete("c-step")  # a connector of a domain; its patch would just lose it
     # Domains are face members (3D models); in a 2D model the boundary report rejects them.
     og.create_patch("bad", "wall", ["lower-block"])
     assert any("but the model has no blocks" in str(i) for i in og.boundary_report().issues)

@@ -428,6 +428,12 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Deleting** [2026-10-17]: removing a block from a sketch renumbers the remaining blocks,
+  so a domain's name can shift (``s-d1`` becomes ``s-d0``); 3D patches naming such a domain
+  by id keep the entity, which now stands for another block. A sketch's connector or curve
+  cannot be deleted on its own (delete the domain of its block, or the sketch). Blocks can
+  only be removed from 2D sketches. Deleting a curve a sketch edge is assigned to is refused
+  (unassign first).
 - **Boundary panel** [2026-10-17]: a 2D model's report is recomputed at every change (the
   connector nodes are cached, so it is cheap); a 3D model's report meshes every block and
   volume, so the panel only marks itself stale and waits for Refresh. Empty patches are kept

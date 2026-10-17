@@ -1511,11 +1511,13 @@ def write_plan(store, sketch_id: int, the_plan: Plan) -> dict:
     stale = [(role, entity_id) for role, entity_id in old.items() if role not in wanted]
     stale = [(r, i) for r, i in stale if i in store]
     stale.sort(key=lambda item: (order.get(store.get(item[1]).kind, 4), item[0]))
+    from opengrid.model.membership import MEMBERSHIP_KINDS, drop_members
+
     for role, entity_id in stale:
         outside = [
             d.name
             for d in store.dependents(entity_id)
-            if d.id not in old.values() and d.kind != KIND
+            if d.id not in old.values() and d.kind != KIND and d.kind not in MEMBERSHIP_KINDS
         ]
         if outside:
             raise ValidationError(
@@ -1527,6 +1529,10 @@ def write_plan(store, sketch_id: int, the_plan: Plan) -> dict:
                     )
                 ]
             )
+        # Patches, zones and groups listing it lose the member.
+        for group_id in drop_members(store, {entity_id}):
+            if group_id in store and group_id not in old.values():
+                store.remove(group_id)
         store.remove(entity_id)
         del role
     for role, kind, raw in the_plan.items:
@@ -2183,3 +2189,70 @@ __all__ = [
     "report",
     "suggestions",
 ]
+
+
+def output_owner(store) -> dict:
+    """{output entity id: (sketch entity, role)} for every output of every sketch."""
+    owners = {}
+    for sketch in store.entities("sketch"):
+        for role, output in sketch.params["outputs"]:
+            owners[output] = (sketch, role)
+    return owners
+
+
+def _item_edge(item):
+    """The edge key an edge-keyed sketch item refers to (a wall dict, a (edge, value) pair
+    or a bare edge), or None."""
+    if isinstance(item, dict):
+        return item.get("edge")
+    if isinstance(item, tuple) and len(item) == 2:
+        if isinstance(item[0], tuple):
+            return item[0]
+        if all(isinstance(v, int) for v in item):
+            return item
+    return None
+
+
+def remove_blocks(store, name, blocks):
+    """Blocks (indices) out of a 2D sketch, in one regeneration: the remaining blocks are
+    renumbered (a domain's name follows its block index, so names can shift), the walls,
+    pinned edges, dimensions, distributions, curves and adopted connectors of edges left in
+    no block are dropped, the unstructured indices follow; the vertices stay. Refused for the
+    last block (delete the sketch instead) and for 3D sketches. The GUI deletes a sketch's
+    domain this way."""
+    entity = store.get(name)
+    if entity.kind != "sketch":
+        raise ValidationError([Issue(name, f"is a {entity.kind}, not a sketch")])
+    params = entity.params
+    if isinstance(blocks, int):
+        blocks = [blocks]
+    issues: list[Issue] = []
+    indices = set()
+    for item in blocks:
+        if isinstance(item, bool) or not isinstance(item, int):
+            issues.append(Issue(name, f"block index must be an integer, got {item!r}"))
+        elif not 0 <= item < len(params["blocks"]):
+            issues.append(Issue(name, f"block {item} does not exist"))
+        else:
+            indices.add(item)
+    if issues:
+        raise ValidationError(issues)
+    if any(len(block) != 4 for block in params["blocks"]):
+        raise ValidationError([Issue(name, "blocks can only be removed from a 2D sketch")])
+    if not indices:
+        raise ValidationError([Issue(name, "no block given")])
+    if len(indices) >= len(params["blocks"]):
+        raise ValidationError([Issue(name, "would remove every block: delete the sketch instead")])
+    keep = [k for k in range(len(params["blocks"])) if k not in indices]
+    remap = {old: new for new, old in enumerate(keep)}
+    new_blocks = [params["blocks"][k] for k in keep]
+    edges = {edge_key(b[i], b[(i + 1) % 4]) for b in new_blocks for i in range(4)}
+    changes = {
+        "blocks": new_blocks,
+        "unstructured": tuple(remap[b] for b in params["unstructured"] if b in remap),
+    }
+    for key in ("walls", "pinned", "dimensions", "distributions", "curves", "connectors"):
+        changes[key] = tuple(
+            item for item in params[key] if _item_edge(item) is None or _item_edge(item) in edges
+        )
+    return edit_sketch(store, name, **changes)

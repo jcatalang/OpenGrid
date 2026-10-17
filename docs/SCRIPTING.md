@@ -45,6 +45,13 @@ except opengrid.ValidationError as error:
 
 Every change (create, modify, rename, delete, split, import, ...) is one command:
 
+- `og.delete(names)` refuses while other entities depend on them (the connectors on a
+  curve, the domains on a connector, the blocks on a domain), naming them;
+  `og.delete(names, dependents=True)` takes them along (`og.deletion_dependents(names)`
+  lists them first; the GUI asks). Patches, zones and smoothing groups never block: they
+  lose the members. A sketch takes its outputs along; one output on its own is refused
+  (`og.remove_sketch_blocks("s", [1])` takes a block out of a sketch, which is what deleting
+  a sketch's domain does in the GUI).
 - `og.undo()` / `og.redo()` restore exact before / after states (nothing is recomputed);
 - `og.journal_text()` is a Python script that rebuilds the session from scratch, including
   undo / redo; `opengrid.replay(text)` runs it. Imports are journaled as the entities they

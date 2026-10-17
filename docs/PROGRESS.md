@@ -848,6 +848,37 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Deleting with dependents, membership never blocking, sketch blocks removable (2026-10-17) — requested by the user
+
+The user could not delete connectors, sketches or domains: every deletion was refused
+because something used the entity (a domain its connector, a patch its members, a group its
+domain), with the reason in the status bar only.
+
+### Built
+- `commands/geometry.py`: `delete_plan(store, names)` (the entities plus the sketches'
+  outputs, the transitive dependents, the refusals) and `DeleteEntities(names, dependents)`:
+  with ``dependents`` the dependents go too, without it they are named ("delete it too, or
+  delete with dependents=True"). `model/membership.py`: patches, zones and smoothing groups
+  lose deleted members instead of blocking (a group left without domains goes; a periodic
+  patch losing its partner is unpaired); sketch regeneration uses the same rule for outputs
+  no longer generated. `Session.delete(names, dependents=False)`,
+  `Session.deletion_dependents(names)`.
+- `sketch.remove_blocks` / `Session.remove_sketch_blocks(name, blocks)`: blocks out of a 2D
+  sketch in one regeneration (remaining blocks renumbered, edge-keyed items of edges left in
+  no block dropped, unstructured indices remapped, vertices kept; the last block refused).
+  `sketch.output_owner(store)`.
+- GUI `delete_selected`: a sketch's domain removes its block (the whole sketch when every
+  block is selected); a sketch's connector or curve gives a hint; other entities with
+  dependents ask for confirmation listing them (`_confirm_deletion`), then go with them;
+  a status line says what was deleted.
+
+### Verified
+- pytest +4 (`tests/python/test_delete.py`): dependents named then deleted (undo / redo,
+  replay), membership removal and unpairing, sketch outputs and block removal (walls,
+  pinned, unstructured, patches, renumbering), the GUI flow (hint, block removal, whole
+  sketch, confirmation cancel / accept, a domain alone); the old refusal expectations in
+  `test_groups.py`, `test_sketch.py` and `test_patches.py` updated.
+
 ## The Boundary panel made plain (2026-10-17) — requested by the user
 
 The user found setting boundary conditions confusing: the panel's report was a list of

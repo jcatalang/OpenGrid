@@ -104,11 +104,10 @@ def test_outputs_are_owned_by_the_sketch():
     og.move_handle("sk", "vertices", 1, (1.05, 0.0, 0.0))
     assert og.entity("sk-c0-1").id == before
     assert og.journal_text().splitlines()[-1].startswith("og.move_handle('sk', 'vertices', 1")
-    # Deleting the sketch deletes its outputs (refused while a patch uses them).
-    with pytest.raises(ValidationError, match="used by patch"):
-        og.delete("sk")
-    og.delete("bottom")
+    # Deleting the sketch deletes its outputs; the patch on them loses the members.
     og.delete("sk")
+    assert og.names() == ["bottom"] and og.entity("bottom").params["members"] == ()
+    og.delete("bottom")
     assert og.names() == []
     assert replays(og)
 

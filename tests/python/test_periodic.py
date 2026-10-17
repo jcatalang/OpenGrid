@@ -96,8 +96,9 @@ def test_pairing_errors():
     og.pair_periodic("right", "left")
     assert any("from one side only" in str(i) for i in og.boundary_report().issues)
     og.unpair_periodic("right")
-    with pytest.raises(opengrid.ValidationError, match="used by patch 'left'"):
-        og.delete("right")
+    og.delete("right")  # the partner: left is unpaired, not blocked
+    assert og.entity("left").params["periodic"] is None
+    og.undo()
     og.set_patch_type("right", "wall")
     assert any(
         "partner right is a wall patch, not periodic" in str(i) for i in og.boundary_report().issues

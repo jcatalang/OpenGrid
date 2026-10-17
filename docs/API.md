@@ -340,6 +340,13 @@ Change sketch parameters (any of those of create_sketch) and regenerate its
 outputs in place (same names: patches and other references to them stay valid).
 One undo step.
 
+### `remove_sketch_blocks(name: str, blocks) -> str`
+
+Take blocks (indices) out of a 2D sketch and regenerate it: the remaining blocks
+are renumbered (domain names follow), edges left in no block lose their walls,
+pinned state, dimensions and assignments; the vertices stay. The last block cannot
+go (delete the sketch). The GUI deletes a sketch's domain this way. One undo step.
+
 ### `regenerate_sketch(name: str) -> str`
 
 Generate a sketch's outputs again (e.g. after its geometry changed).
@@ -759,9 +766,20 @@ edit_sketch, which regenerates it.
 
 Rename an entity (references follow; journals stay valid).
 
-### `delete(names) -> int`
+### `delete(names, dependents: bool = False) -> int`
 
-Delete entities (a name or a list); refused while other entities use them.
+Delete entities (a name or a list). What depends on them (the connectors on a
+curve, the domains on a connector, the blocks and volumes on a domain, ...) goes too
+with ``dependents=True``; without it such a deletion is refused naming them (see
+:meth:`deletion_dependents`). Patches, zones and smoothing groups never block: they
+lose the members (a group left empty goes, a periodic patch losing its partner is
+unpaired). A sketch takes its outputs along; an output on its own is refused (remove
+its block with :meth:`remove_sketch_blocks`). Returns the number deleted.
+
+### `deletion_dependents(names) -> list[str]`
+
+The entities that deleting ``names`` would take along (``delete(...,
+dependents=True)``), in deletion order; raises for what cannot be deleted at all.
 
 ### `undo() -> None`
 

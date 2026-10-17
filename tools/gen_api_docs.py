@@ -90,6 +90,7 @@ GROUPS = [
         [
             "create_sketch",
             "edit_sketch",
+            "remove_sketch_blocks",
             "regenerate_sketch",
             "sketch_report",
             "sketch_suggestions",
@@ -167,7 +168,7 @@ GROUPS = [
     ),
     (
         "Editing, undo and the model",
-        ["modify", "rename", "delete", "undo", "redo", "entity", "names"],
+        ["modify", "rename", "delete", "deletion_dependents", "undo", "redo", "entity", "names"],
     ),
     ("Projects and journals", ["new", "save", "load", "journal_text", "save_journal"]),
 ]

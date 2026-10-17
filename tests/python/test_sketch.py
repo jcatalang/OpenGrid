@@ -383,3 +383,104 @@ def test_gui_sketch_block_drawn_on_connector_ends_adopts_them(qtbot):
     assert params["connectors"] == ({"edge": (2, 3), "connector": og.entity("c-base").id},)
     assert og.domain_dimensions(f"{sketch}-d0")[0] == 51
     window.close()
+
+
+def test_unstructured_sketch_blocks_share_connectors_and_take_layers_from_the_walls(tmp_path):
+    og = square()
+    og.edit_sketch(
+        "sk", unstructured=[1, 3], walls={(2, 5): {"spacing": 0.01, "layers": 4, "growth": 1.3}}
+    )
+    params = og.entity("sk").params
+    assert params["unstructured"] == (1, 3) and params["generator"] is None
+    assert og.entity("sk-d1").kind == "unstructured_domain"
+    assert og.entity("sk-d3").kind == "unstructured_domain"
+    assert og.entity("sk-d0").kind == "domain" and og.entity("sk-d2").kind == "domain"
+    group = og.entity("sk-group").params
+    assert sorted(og.store.get(d).name for d in group["domains"]) == ["sk-d0", "sk-d2"]
+    pinned = sorted(og.store.get(c).name for c in group["pinned"])
+    assert pinned == ["sk-c1-4", "sk-c4-7"]  # between a structured and an unstructured block
+    # The unstructured domain stands on the shared connector's nodes, which the structured
+    # grid uses too (the group left them in place).
+    mesh = og.unstructured_mesh("sk-d1")
+    nodes = og.connector_nodes("sk-c1-4").points
+    grid = og.domain_grid("sk-d0")
+    assert np.allclose(grid[:, -1], nodes, atol=1e-12)
+    points = mesh["points"]
+    for node in nodes:
+        assert np.min(np.linalg.norm(points - node, axis=1)) < 1e-12
+    # The wall on edge (2, 5) became inflation layers of sk-d1 (quads along that connector).
+    generator = og.entity("sk-d1").params["generator"]
+    inflation = generator["inflation"]
+    assert og.store.get(inflation["connectors"][0]).name == "sk-c2-5"
+    assert inflation["first_height"] == 0.01 and inflation["layers"] == 4
+    assert inflation["growth_rate"] == 1.3
+    assert len(mesh["quads"]) >= 10  # at least one full layer along the 10 intervals
+    assert og.entity("sk-d3").params["generator"]["inflation"] is None
+    assert "unstructured blocks: 1, 3" in og.sketch_report("sk")
+    # The sketch's generator applies to the unstructured blocks; its layers come from walls.
+    og.edit_sketch("sk", generator={"element_type": "quad_dominant"})
+    assert og.entity("sk-d3").params["generator"]["element_type"] == "quad_dominant"
+    assert len(og.unstructured_mesh("sk-d3")["quads"]) > 0
+    with pytest.raises(ValidationError, match="come from the sketch's walls"):
+        og.edit_sketch(
+            "sk",
+            generator={"inflation": {"connectors": ["sk-c2-5"], "first_height": 0.01}},
+        )
+    with pytest.raises(ValidationError, match="first-cell height"):
+        og.edit_sketch("sk", walls={(2, 5): None})
+    # Extruded: the structured blocks give blocks, the unstructured ones volumes.
+    og.edit_sketch("sk", extrude={"vector": (0, 0, 0.5), "points": 3})
+    assert og.entity("sk-x0").kind == "block" and og.entity("sk-x1").kind == "volume"
+    assert len(og.volume_mesh("sk-x1")["prisms"]) > 0
+    # Back to structured: the same roles, now domains again, all in the group.
+    og.edit_sketch("sk", unstructured=[], extrude=None)
+    assert og.entity("sk-d1").kind == "domain"
+    assert len(og.entity("sk-group").params["domains"]) == 4
+    og.edit_sketch("sk", unstructured=[0, 1, 2, 3])
+    assert "sk-group" not in og.store  # nothing structured to smooth
+    assert all(og.entity(f"sk-d{k}").kind == "unstructured_domain" for k in range(4))
+    with pytest.raises(ValidationError, match="block 7 does not exist"):
+        og.edit_sketch("sk", unstructured=[7])
+    og.save(tmp_path / "unstructured.ogp")
+    other = opengrid.Session()
+    other.load(tmp_path / "unstructured.ogp")
+    assert to_json(other.store) == to_json(og.store)
+    assert replays(og)
+
+
+def test_gui_unstructured_sketch_blocks_toggle(qtbot):
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyvistaqt")
+    from opengrid.app.main_window import MainWindow
+
+    window = MainWindow(off_screen=True)
+    qtbot.addWidget(window)
+    window.resize(1200, 800)
+    window.show()
+    og = window.session
+    window.viewport.ren_win.SetSize(1000, 700)
+    window.sketch_unstructured_action.setChecked(True)
+    window.set_tool("sketch")
+    window.dimension_box.setValue(9)
+    for xyz in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)):
+        window.handle_click(xyz)
+    (sketch,) = og.names("sketch")
+    assert og.entity(sketch).params["unstructured"] == (0,)
+    assert og.entity(f"{sketch}-d0").kind == "unstructured_domain"
+    window.sketch_unstructured_action.setChecked(False)
+    window.set_selection([og.entity(sketch).id])
+    window.set_tool("sketch")
+    for xyz in ((1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)):
+        window.handle_click(xyz)
+    params = og.entity(sketch).params
+    assert len(params["blocks"]) == 2 and params["unstructured"] == (0,)
+    assert og.entity(f"{sketch}-d1").kind == "domain"
+    # The panel edits the list and shows the generator of the unstructured blocks.
+    window.set_selection([og.entity(sketch).id])
+    _kind, editor = window.property_panel._editors["unstructured"]
+    assert editor.text() == "0"
+    assert "generator" in window.property_panel._editors
+    editor.setText("0, 1")
+    assert window.property_panel.apply()
+    assert og.entity(f"{sketch}-d1").kind == "unstructured_domain"
+    window.close()

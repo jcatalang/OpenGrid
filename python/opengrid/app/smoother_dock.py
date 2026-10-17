@@ -7,6 +7,7 @@ result is handed back through a queued Qt signal and stored in the session's cac
 GUI thread, so the model is never touched from the worker.
 """
 
+import logging
 import threading
 
 import numpy as np
@@ -219,6 +220,19 @@ class SmootherDock(QWidget):
             return
         group = self._group
         self._group = None
+        members = []
+        if group is not None:
+            params, _layout = group
+            members = [*params.get("domains", ()), *params.get("blocks", ())]
+        store = self.session.store
+        if name not in store or any(m not in store for m in members):
+            # The model changed while the smoother ran (an entity regenerated as another
+            # kind, or deleted): the result no longer fits anything.
+            self.status.setText(f"{name}: smoothing discarded, the model changed meanwhile")
+            logging.getLogger("opengrid").info(
+                "%s: smoothing discarded (the model changed meanwhile)", name
+            )
+            return
         if group is not None:
             params, layout = group
             result = self.session.groups.finish(params, layout, result)

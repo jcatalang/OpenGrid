@@ -375,6 +375,7 @@ class MainWindow(QMainWindow):
             "nurbs": self.tool_actions["nurbs"],
             "freehand": self.tool_actions["freehand"],
             "sketch": self.tool_actions["sketch"],
+            "sketch-unstructured": self.sketch_unstructured_action,
             "finish": self.finish_action,
             "cancel": self.cancel_action,
             "connectors": self.connectors_action,
@@ -631,6 +632,13 @@ class MainWindow(QMainWindow):
             self.tool_actions[name] = action
             self.addAction(action)
         self.tool_actions["select"].setChecked(True)
+        self.sketch_unstructured_action = QAction("Unstructured sketch blocks", self)
+        self.sketch_unstructured_action.setCheckable(True)
+        self.sketch_unstructured_action.setStatusTip(
+            "New sketch blocks are meshed unstructured on their connectors (the sketch's walls "
+            "on them become inflation layers) instead of structured"
+        )
+        self.sketch_unstructured_action.toggled.connect(self._on_sketch_unstructured)
         self._decorate()
         for action in self.actions_with_single_keys():
             self.model_tree.passthrough_keys.add(int(action.shortcut()[0].key()))
@@ -668,6 +676,7 @@ class MainWindow(QMainWindow):
         create_menu = self.menuBar().addMenu("&Create")
         for name in ("point", "line", "arc", "polyline", "spline", "nurbs", "freehand", "sketch"):
             create_menu.addAction(self.tool_actions[name])
+        create_menu.addAction(self.sketch_unstructured_action)
         create_menu.addSeparator()
         create_menu.addAction(self.connectors_action)
         create_menu.addAction(self.chain_action)
@@ -752,6 +761,7 @@ class MainWindow(QMainWindow):
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         for action in self.tool_actions.values():
             toolbar.addAction(action)
+        toolbar.addAction(self.sketch_unstructured_action)
         toolbar.addSeparator()
         toolbar.addAction(self.finish_action)
         toolbar.addAction(self.cancel_action)
@@ -1326,6 +1336,7 @@ class MainWindow(QMainWindow):
             if sketches:
                 self.tool.sketch = sketches[0]
             self.tool.points_per_edge = self.dimension_box.value()
+            self.tool.unstructured = self.sketch_unstructured_action.isChecked()
         self._stroke = None
         self._drag = None
         self._show_handles()
@@ -1333,6 +1344,10 @@ class MainWindow(QMainWindow):
         self.scene.show_preview([])
         self.scene.show_snap(None)
         self._update_tool_feedback(None)
+
+    def _on_sketch_unstructured(self, checked: bool) -> None:
+        if self.tool.name == "sketch":
+            self.tool.unstructured = checked
 
     def finish_tool(self) -> None:
         created = self._run(self.tool.finish)
@@ -1886,9 +1901,11 @@ class MainWindow(QMainWindow):
                 if cached is not None:
                     ids += sorted(cached.roles)  # moved interfaces, sliding connectors / faces
                     for d in getattr(cached, "faces", {}):
+                        if d not in self.session.store:
+                            continue  # regenerated meanwhile (a sketch block changed kind)
                         for edge in self.session.store.get(d).params["edges"]:
                             ids += [item["connector"] for item in edge]
-                ids = sorted(set(ids))
+                ids = sorted({i for i in ids if i in self.session.store})
             self.scene.update_entities(ids)
         self.model_tree.populate(self.session)
         self.property_panel.refresh()

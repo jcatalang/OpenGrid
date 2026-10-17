@@ -422,6 +422,12 @@ history). Phase tags show where each item came from.
   sketch-owned copy of an adopted connector at half resolution; adopted connectors are kept
   fixed by the group (their nodes belong to both sides), so the sketch's vertices at their
   ends do not relax; a wall on an adopted edge gets wall control on the sketch's side only.
+- **Unstructured sketch blocks** [2026-10-17]: 2D only; all unstructured blocks of a sketch
+  share one generator; a wall on an unstructured block needs a first-cell height (its layers
+  take the sketch wall's layers and growth; the structured wall's decay / relaxation have no
+  unstructured meaning); the vertex passes relax the topology as if every block were
+  structured; an unstructured block does not take part in the smoothing group, so a
+  connector between the two kinds stays where the connector puts it.
 - **Reference grid** [2026-10-17]: the z = 0 plane only (the plane the 2D tools draw in);
   coordinates are written along the edges only in views along z; the step follows the view's
   extent (1, 2, 5 x 10^k with 10, 4 or 5 minor divisions), not the model's units.

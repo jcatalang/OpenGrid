@@ -37,7 +37,12 @@ from opengrid.model.domains import (
 from opengrid.model.entities import SPLINE_METHODS
 from opengrid.model.patches import PATCH_TYPES, member_label
 from opengrid.model.periodic import DEFAULT_AXIS
-from opengrid.model.unstructured import ALGORITHMS, ELEMENT_TYPES, SMOOTHING_METHODS
+from opengrid.model.unstructured import (
+    ALGORITHMS,
+    DEFAULT_GENERATOR,
+    ELEMENT_TYPES,
+    SMOOTHING_METHODS,
+)
 from opengrid.model.volumes import BACKENDS, DEFAULT_VOLUME_INFLATION, PYRAMID_MODES
 from opengrid.validation import ValidationError
 
@@ -1178,6 +1183,19 @@ class PropertyPanel(QWidget):
         relax.setChecked(params["relax"])
         self._form.addRow("relax", relax)
         self._editors["relax"] = ("flag", relax)
+        unstructured = QLineEdit(", ".join(str(k) for k in params["unstructured"]))
+        unstructured.setPlaceholderText("block indices meshed unstructured, e.g. 1, 3")
+        self._form.addRow("unstructured blocks", unstructured)
+        self._editors["unstructured"] = ("sketch_unstructured", unstructured)
+        if params["unstructured"]:
+            generator = params["generator"]
+            if generator is None:
+                generator = dict(DEFAULT_GENERATOR)
+            editor = UnstructuredEditor(generator, self.session.store)
+            editor.walls.setEnabled(False)
+            editor.walls.setPlaceholderText("from the sketch's walls")
+            self._form.addRow("unstructured generator", editor)
+            self._editors["generator"] = ("sketch_generator", editor)
 
     def _group_rows(self, entity) -> None:
         key = "domain"
@@ -1383,6 +1401,18 @@ class PropertyPanel(QWidget):
             return parse_sketch_lines(
                 editor.toPlainText(), kind, self.session.store.get(self.entity_id)
             )
+        if kind == "sketch_unstructured":
+            parts = [p for p in editor.text().replace(",", " ").split() if p]
+            try:
+                return tuple(sorted({int(p) for p in parts}))
+            except ValueError:
+                raise ParseError(
+                    f"unstructured blocks: {editor.text()!r} is not a list of block indices"
+                ) from None
+        if kind == "sketch_generator":
+            value = editor.value()
+            value["inflation"] = None  # the sketch's walls give the layers
+            return value
         if kind == "spin":
             return editor.value()
         if kind == "patch_type":

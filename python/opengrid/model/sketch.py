@@ -22,6 +22,12 @@ in VTK). Its edges and faces are those of the blocks, shared where blocks share 
   Everything else stays where it was drawn. Unassigned edges
   and faces lying near geometry are offered for assignment (:func:`suggestions`, also listed
   as warnings of a generation) and never snapped silently.
+* **Unstructured blocks** (``unstructured``: block indices, 2D): those blocks become
+  unstructured domains on the same connectors (``generator``: their triangulation settings,
+  shared by all of them; a wall on one of their edges becomes inflation layers from that
+  connector with the wall's first-cell height, layers and growth). They are not members of
+  the smoothing group; a connector between a structured and an unstructured block is pinned
+  so both sides keep the same nodes. The vertex passes treat every block as structured.
 * **Generation:** an edge assigned to a curve becomes a connector on the part of the curve
   between its vertices; any other edge a straight line (in 3D, between two faces on the same
   surface: a spline through the line's points projected onto it) and a connector on it. Each
@@ -76,6 +82,8 @@ DEFAULT_SKETCH = {
     "curves": (),
     "connectors": (),
     "surfaces": (),
+    "unstructured": (),
+    "generator": None,
     "walls": (),
     "fixed": (),
     "pinned": (),
@@ -397,6 +405,36 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
             "layers": _count(wall["layers"], f"{label}.layers", issues),
             "growth": _growth(wall["growth"], f"{label}.growth", issues),
         }
+    unstructured = set()
+    for index, item in enumerate(merged["unstructured"]):
+        label = f"{where}: unstructured[{index}]"
+        block = _int(item, label, issues)
+        if block is None:
+            continue
+        if lattice.dim == 3:
+            issues.append(Issue(label, "unstructured blocks are 2D (an unstructured domain each)"))
+            break
+        if not 0 <= block < len(blocks):
+            issues.append(Issue(label, f"block {block} does not exist"))
+            continue
+        unstructured.add(block)
+    generator = None
+    if merged["generator"] is not None:
+        from opengrid.model.unstructured import normalize_generator
+
+        try:
+            generator = normalize_generator(merged["generator"], where, store)
+        except ValidationError as error:
+            issues.extend(error.issues)
+        else:
+            if generator["inflation"] is not None:
+                issues.append(
+                    Issue(
+                        f"{where}: generator.inflation",
+                        "the layers of unstructured blocks come from the sketch's walls "
+                        "(first-cell height, layers, growth)",
+                    )
+                )
     fixed = set()
     for index, item in enumerate(merged["fixed"]):
         vertex = _int(item, f"{where}: fixed[{index}]", issues)
@@ -474,6 +512,8 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
         "fixed": tuple(sorted(fixed)),
         "pinned": tuple(sorted(pinned)),
         "symmetry": tuple(sorted(symmetry)),
+        "unstructured": tuple(sorted(unstructured)),
+        "generator": generator,
         "relax": relax,
         "interval_multiple": multiple,
         "slide_limit": slide_limit,
@@ -1175,6 +1215,9 @@ def plan(
     adopted = {item["edge"]: item["connector"] for item in params.get("connectors", ())}
     ends = adopted_ends(store, params)
     direction = {}
+    unstructured = set()
+    if not coarse:
+        unstructured = set(params.get("unstructured", ()))
     for key in sorted(lattice.edges):
         a, b = key
         pa = pos[a]
@@ -1276,29 +1319,61 @@ def plan(
 
     domains = {}
     walls = []
+    group = None
     if lattice.dim == 2:
+
+        def connector_ref(key):
+            if key in adopted and not coarse:
+                return adopted[key]
+            return f"@c{key[0]}-{key[1]}"
+
+        structured = [k for k in range(len(lattice.blocks)) if k not in unstructured]
         for index, block in enumerate(lattice.blocks):
-            items.append((f"d{index}", "domain", {"edges": loop(block), "generator": None}))
             domains[index] = f"d{index}"
+            if index in unstructured:
+                generator = _block_generator(params, block, connector_ref)
+                outer = [item for edge in loop(block) for item in edge]  # one loop, flat
+                items.append(
+                    (
+                        f"d{index}",
+                        "unstructured_domain",
+                        {"loops": [outer], "generator": generator},
+                    )
+                )
+                if params["extrude"] is not None:
+                    items.append((f"x{index}", "volume", {"extrusion": _extrusion(params, index)}))
+                continue
+            items.append((f"d{index}", "domain", {"edges": loop(block), "generator": None}))
             if params["extrude"] is not None:
                 items.append((f"x{index}", "block", {"extrusion": _extrusion(params, index)}))
+        structured_edges = {
+            edge_key(lattice.blocks[k][m], lattice.blocks[k][(m + 1) % 4])
+            for k in structured
+            for m in range(4)
+        }
         pinned = list(params["pinned"])
         for wall in params["walls"]:
-            a, b = wall["edge"]
+            if wall["edge"] not in structured_edges:
+                continue  # a wall of an unstructured block only: its inflation layers
             if walls_on:
                 entry = {k: wall[k] for k in WALL_KEYS}
-                entry["connector"] = f"@c{a}-{b}"
-                if wall["edge"] in adopted and not coarse:
-                    entry["connector"] = adopted[wall["edge"]]
+                entry["connector"] = connector_ref(wall["edge"])
                 walls.append(entry)
             elif wall["edge"] not in lattice.boundary_edges:
                 pinned.append(wall["edge"])  # internal walls stay in place in the passes
         pinned_refs = [f"@c{a}-{b}" for a, b in sorted(pinned)]
         if not coarse:
-            # Adopted connectors keep their nodes: a domain on their other side shares them.
+            # Adopted connectors keep their nodes: a domain on their other side shares them;
+            # so do the connectors between a structured and an unstructured block.
             pinned_refs.extend(adopted[key] for key in sorted(adopted))
+            for key, uses in sorted(lattice.edges.items()):
+                blocks_at = {use[0] for use in uses}
+                if blocks_at & unstructured and blocks_at - unstructured:
+                    ref = connector_ref(key)
+                    if ref not in pinned_refs:
+                        pinned_refs.append(ref)
         group = {
-            "domains": tuple(f"@d{k}" for k in range(len(lattice.blocks))),
+            "domains": tuple(f"@d{k}" for k in structured),
             "walls": tuple(walls),
             "pinned": tuple(pinned_refs),
             "joints": "fixed",
@@ -1308,6 +1383,8 @@ def plan(
         }
         if params["relax"]:
             group["joints"] = "slide"
+        if not structured:
+            group = None  # every block unstructured: nothing to smooth
     else:
         face_role = {}
         for key in sorted(lattice.faces):
@@ -1356,9 +1433,57 @@ def plan(
             "tolerance": params["tolerance"],
             "max_iterations": params["max_iterations"],
         }
-    items.append(("group", "smoothing_group", group))
+    if group is not None:
+        items.append(("group", "smoothing_group", group))
     del base
     return Plan(items=items, group_key="group", domains=domains, warnings=warnings)
+
+
+def _block_generator(params: dict, block, connector_ref) -> dict:
+    """The generator of an unstructured block: the sketch's ``generator`` (or the default)
+    with inflation layers from the walls on the block's edges (the smallest first-cell
+    height, the most layers, the first wall's growth)."""
+    from opengrid.model.unstructured import DEFAULT_INFLATION
+
+    generator = {}
+    if params.get("generator") is not None:
+        generator = dict(params["generator"])
+    edges = {edge_key(block[k], block[(k + 1) % 4]) for k in range(4)}
+    connectors = []
+    heights = []
+    layers = []
+    growth = None
+    for wall in params["walls"]:
+        if "edge" not in wall or wall["edge"] not in edges:
+            continue
+        if wall["spacing"] is None:
+            raise ValidationError(
+                [
+                    Issue(
+                        f"sketch edge {wall['edge']}",
+                        "is a wall of an unstructured block: give its first-cell height (the "
+                        "first height of the inflation layers)",
+                    )
+                ]
+            )
+        connectors.append(connector_ref(wall["edge"]))
+        heights.append(wall["spacing"])
+        if wall["layers"] > 0:
+            layers.append(wall["layers"])
+        if growth is None:
+            growth = wall["growth"]
+    generator["inflation"] = None
+    if connectors:
+        count = DEFAULT_INFLATION["layers"]
+        if layers:
+            count = max(layers)
+        generator["inflation"] = {
+            "connectors": tuple(connectors),
+            "first_height": min(heights),
+            "layers": count,
+            "growth_rate": growth,
+        }
+    return generator
 
 
 def _resolve(value, ids: dict):
@@ -2031,6 +2156,9 @@ def report(store, sketch) -> str:
             f"  edge {item['edge']}: adopts connector {connector.name} "
             f"({connector.params['dimension']} points, shared with its other side)"
         )
+    if params.get("unstructured"):
+        listed = ", ".join(str(k) for k in params["unstructured"])
+        lines.append(f"  unstructured blocks: {listed} (walls on them: inflation layers)")
     for issue in [*placement.issues, *issues]:
         lines.append(f"  ERROR {issue.where}: {issue.message}")
     for warning in placement.warnings:

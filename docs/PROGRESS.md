@@ -848,6 +848,36 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Unstructured sketch blocks (2026-10-17) — requested by the user
+
+The user asked why sketch blocks are limited to structured grids and whether wall layers
+exist only there (they do not: unstructured domains have inflation layers; structured grids
+add the orthogonal elliptic wall treatment), and asked for unstructured blocks in sketches.
+
+### Built
+- Sketch parameters ``unstructured`` (block indices) and ``generator`` (`model/sketch.py`):
+  those blocks become unstructured domains on the sketch's connectors; a wall on one of their
+  edges becomes inflation layers from that connector (`_block_generator`: the wall's
+  first-cell height - required -, layers, growth); the sketch's generator (no inflation of
+  its own) is shared by them. They are not group members; connectors between a structured
+  and an unstructured block are pinned; with ``extrude`` they give volumes; a sketch with no
+  structured block has no group. The vertex passes treat every block as structured. GUI:
+  an "Unstructured sketch blocks" toggle beside the Sketch block tool (new blocks), the
+  property panel's "unstructured blocks" list and the generator editor (walls greyed: the
+  sketch's walls give them). API: `create_sketch(unstructured=..., generator=...)`.
+- Fixed on the way: a smoother result arriving after its group's members had changed kind
+  (a block made unstructured while the smoother ran) crashed the completion slot; the dock
+  now discards results whose members are gone and says so, and the window's completion
+  handler skips entities that no longer exist.
+
+### Verified
+- pytest +2: a four-block square with blocks 1 and 3 unstructured (kinds, the group's
+  members and pinned connectors, the shared connector's nodes in both meshes, the wall's
+  inflation layers on the right connector with the given height / layers / growth, the
+  generator applied, the refusals, extrusion to blocks and volumes, back to structured, all
+  unstructured with no group, project round trip, replay); the GUI toggle through the tool
+  and the panel.
+
 ## Sketch edges adopt existing connectors; reference grid (2026-10-17) — requested by the user
 
 The user drew a sketch block under an unstructured dome and found the shared boundary not

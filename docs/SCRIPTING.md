@@ -225,6 +225,14 @@ selected geometry to sketch" adopts selected connectors under the edges, and the
 adoptions for edges drawn along a connector. Editing the adopted connector regenerates the
 sketch. (The sketch's own connectors cannot be adopted by another sketch.)
 
+Blocks can be meshed unstructured (`unstructured=[1, 3]`, or the "Unstructured sketch
+blocks" toggle next to the Sketch block tool): those blocks become unstructured domains on
+the same connectors, with the sketch's `generator` (triangles, quad-dominant, sizes) and the
+walls on their edges as inflation layers (`walls={(2, 5): {"spacing": 1e-3, "layers": 20,
+"growth": 1.2}}`). They stay out of the smoothing group; the connectors they share with
+structured blocks are pinned so both sides keep the same nodes; with `extrude` they give
+volumes of prisms and hexahedra beside the structured blocks.
+
 Wall layers keep grid lines normal to a wall through the boundary layer (11a): a wall entry
 `{"spacing": 1e-5, "layers": 30, "growth": 1.2}` (sketches: `walls={(1, 2): {...}}`; groups:
 `{"connector": ..., ...}`; templates: `layers=30, growth=1.2` for all walls); the first 30 layers

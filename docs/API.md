@@ -304,7 +304,7 @@ boundaries), else the connector's own nodes.
 
 ## Sketch topology (floating wireframe)
 
-### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, interval_multiple: int = 1, connectors=(), name: str | None = None) -> str`
+### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, interval_multiple: int = 1, connectors=(), unstructured=(), generator=None, name: str | None = None) -> str`
 
 Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
 (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
@@ -327,8 +327,12 @@ grid stops moving them. ``extrude`` (2D): ``{"vector": (0, 0, L), "points": n,
 "distribution": {...}}`` (spacings as lengths) also makes one extruded block per
 domain: the smoothed 2D grid extruded, the same in every section;
 ``interval_multiple`` m: interval counts rounded up to multiples of m (for
-``high_order`` meshes of order m). One undo step; warnings (e.g. unassigned edges
-lying on geometry) are in ``last_warnings``.
+``high_order`` meshes of order m). ``unstructured``: indices of the blocks meshed
+as unstructured domains on the same connectors (``generator``: their triangulation
+settings; a wall on their edges becomes inflation layers with the wall's first-cell
+height, layers and growth); they stay out of the smoothing group, and the connectors
+they share with structured blocks are pinned. One undo step; warnings (e.g.
+unassigned edges lying on geometry) are in ``last_warnings``.
 
 ### `edit_sketch(name: str, **changes) -> str`
 

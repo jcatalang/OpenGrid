@@ -656,6 +656,8 @@ class Session:
         extrude=None,
         interval_multiple: int = 1,
         connectors=(),
+        unstructured=(),
+        generator=None,
         name: str | None = None,
     ) -> str:
         """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
@@ -679,8 +681,12 @@ class Session:
         "distribution": {...}}`` (spacings as lengths) also makes one extruded block per
         domain: the smoothed 2D grid extruded, the same in every section;
         ``interval_multiple`` m: interval counts rounded up to multiples of m (for
-        ``high_order`` meshes of order m). One undo step; warnings (e.g. unassigned edges
-        lying on geometry) are in ``last_warnings``."""
+        ``high_order`` meshes of order m). ``unstructured``: indices of the blocks meshed
+        as unstructured domains on the same connectors (``generator``: their triangulation
+        settings; a wall on their edges becomes inflation layers with the wall's first-cell
+        height, layers and growth); they stay out of the smoothing group, and the connectors
+        they share with structured blocks are pinned. One undo step; warnings (e.g.
+        unassigned edges lying on geometry) are in ``last_warnings``."""
         from opengrid.model.sketch import create_sketch
 
         kwargs = {
@@ -701,6 +707,8 @@ class Session:
             "extrude": extrude,
             "interval_multiple": interval_multiple,
             "connectors": connectors,
+            "unstructured": unstructured,
+            "generator": generator,
             "name": name,
         }
         # The journal records what was given (defaults left out).

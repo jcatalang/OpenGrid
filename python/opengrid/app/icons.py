@@ -160,6 +160,18 @@ def _sketch(painter, color):
         _dot(painter, color, x, y, 0.08)
 
 
+def _sketch_unstructured(painter, color):
+    _poly(painter, [(0.18, 0.22), (0.82, 0.18), (0.84, 0.8), (0.2, 0.82)], close=True)
+    painter.save()
+    _thin(painter, 0.6)
+    centre = (0.5, 0.5)
+    for corner in ((0.18, 0.22), (0.82, 0.18), (0.84, 0.8), (0.2, 0.82), (0.5, 0.2), (0.52, 0.81)):
+        _poly(painter, [corner, centre])
+    painter.restore()
+    for x, y in ((0.18, 0.22), (0.82, 0.18), (0.84, 0.8), (0.2, 0.82)):
+        _dot(painter, color, x, y, 0.07)
+
+
 def _finish(painter, color):
     painter.save()
     pen = painter.pen()
@@ -450,6 +462,7 @@ GLYPHS = {
     "nurbs": _nurbs,
     "freehand": _freehand,
     "sketch": _sketch,
+    "sketch-unstructured": _sketch_unstructured,
     "finish": _finish,
     "cancel": _cancel,
     "connectors": _connectors,

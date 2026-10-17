@@ -246,6 +246,7 @@ class SketchTool(Tool):
     max_points = 4
     points_per_edge = 21
     sketch: str | None = None
+    unstructured = False  # new blocks are meshed unstructured
 
     def prompt(self) -> str:
         target = "a new sketch"
@@ -264,8 +265,11 @@ class SketchTool(Tool):
             spacing = mean / max(self.points_per_edge - 1, 1)
             block = (0, 1, 2, 3)
             adopted = matching_connectors(store, points, _block_edges(block))
+            unstructured = ()
+            if self.unstructured:
+                unstructured = (0,)
             self.sketch = self.session.create_sketch(
-                points, [block], spacing=spacing, connectors=adopted
+                points, [block], spacing=spacing, connectors=adopted, unstructured=unstructured
             )
             return self.sketch
         entity = store.get(self.sketch)
@@ -293,6 +297,8 @@ class SketchTool(Tool):
                 adopted[key] = connector
         if adopted != {item["edge"]: item["connector"] for item in entity.params["connectors"]}:
             changes["connectors"] = adopted
+        if self.unstructured:
+            changes["unstructured"] = (*entity.params["unstructured"], len(blocks) - 1)
         return self.session.edit_sketch(self.sketch, **changes)
 
     def preview(self, cursor) -> list[tuple]:

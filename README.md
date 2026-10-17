@@ -125,7 +125,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   (3 or 5 blocks around a vertex); symmetry planes; wall control and wall layers; Anderson
   acceleration with a safeguard.
 - **Sketch topology:** draw a block layout with the mouse (edges drawn onto existing
-  connectors adopt them and share their nodes); it is fitted to the geometry and
+  connectors adopt them and share their nodes; any block can be meshed unstructured, with
+  the walls on it as inflation layers); it is fitted to the geometry and
   meshed. Live editing: drag control points and vertices with immediate previews.
 - **Templates:** 2D `ogrid`, `butterfly`, `cgrid`, `hgrid`, `body_in_channel` (also
   extruded); 3D `pipe`, `cylinder_in_channel`, `bump_channel`, `wing_in_box` (taper, sweep,

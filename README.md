@@ -272,9 +272,10 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   by hand): left-drag rotates, Shift + drag pans, Alt + drag zooms to a window. `F` re-centres
   the view keeping its direction, `Z` zooms to the selection, `1 2 3` look at the XY, XZ and
   YZ planes (again: from the other side), `7` is the isometric view, `V` toggles perspective,
-  `Esc` cancels, `G` shows a reference grid of the z = 0 plane whose step follows the zoom,
-  with the coordinates along the edges in a view along z. The keys work wherever the focus is,
-  except in text fields.
+  `Esc` cancels, `G` shows a reference grid whose step follows the zoom: the plane facing an
+  axis view with the coordinates along the edges, or the three axis planes with the
+  coordinates along the axes in a tilted view. The keys work wherever the focus is, except in
+  text fields.
 - Selection by click in any view (3D picks along the view ray), hover highlight, the
   pointer's coordinates in the status bar, and a right-click menu with what applies to the
   selection.

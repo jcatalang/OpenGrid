@@ -865,6 +865,11 @@ add the orthogonal elliptic wall treatment), and asked for unstructured blocks i
   an "Unstructured sketch blocks" toggle beside the Sketch block tool (new blocks), the
   property panel's "unstructured blocks" list and the generator editor (walls greyed: the
   sketch's walls give them). API: `create_sketch(unstructured=..., generator=...)`.
+- Reference grid made 3D (the user: "only 2D and only in the z plane"): an axis view shows
+  the plane facing it (XY, XZ or YZ) with edge labels, a tilted view the three axis planes
+  through the round point nearest the focal point, the facing one with minor lines, with
+  billboard labels along the axes; the toolbar is back on two rows with 20 px icons (the
+  single row overflowed) and the saved window layout key was bumped so the new default shows.
 - Fixed on the way: a smoother result arriving after its group's members had changed kind
   (a block made unstructured while the smoother ran) crashed the completion slot; the dock
   now discards results whose members are gone and says so, and the window's completion

@@ -428,9 +428,11 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
-- **Reference grid** [2026-10-17]: the z = 0 plane only (the plane the 2D tools draw in);
-  coordinates are written along the edges only in views along z; the step follows the view's
-  extent (1, 2, 5 x 10^k with 10, 4 or 5 minor divisions), not the model's units.
+- **Reference grid** [2026-10-17]: an axis view shows the plane facing it, a tilted view the
+  three axis planes through the round point nearest the view centre (the lines on the world
+  axes are coloured only when that point lies on them); the step follows the view's extent
+  (1, 2, 5 x 10^k with 10, 4 or 5 minor divisions), not the model's units; the edge labels
+  of a perspective view are read at mid depth.
 - **Sketch GUI** [10d]: blocks are added four clicks at a time (2D, in the z = 0 plane);
   vertices, blocks and assignments are otherwise edited by script or the property panel
   (dimensions, walls, relax); no 3D axis handles; deleting single blocks has no tool.

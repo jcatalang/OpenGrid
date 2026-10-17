@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -69,6 +69,8 @@ UPDATE_CHECK_MS = 30000  # how often to look for updated code
 SETTINGS_ORGANIZATION = "OpenGrid"
 SETTINGS_APPLICATION = "OpenGrid"
 RECENT_FILES = 8
+TOOLBAR_ICON_SIZE = 20
+WINDOW_STATE_KEY = "window/state_v2"  # bumped when the default toolbar layout changes
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
@@ -759,6 +761,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Tools", self)
         toolbar.setObjectName("toolbar_tools")
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         for action in self.tool_actions.values():
             toolbar.addAction(action)
         toolbar.addAction(self.sketch_unstructured_action)
@@ -786,6 +789,7 @@ class MainWindow(QMainWindow):
         view_toolbar = QToolBar("View", self)
         view_toolbar.setObjectName("toolbar_view")
         view_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        view_toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         view_toolbar.addAction(self.fit_action)
         view_toolbar.addAction(self.zoom_selection_action)
         for key in ("xy", "xz", "yz", "iso"):
@@ -798,6 +802,7 @@ class MainWindow(QMainWindow):
         view_toolbar.addSeparator()
         view_toolbar.addAction(self.network_action)
         view_toolbar.addAction(self.group_action)
+        self.addToolBarBreak()  # the view toolbar on its own row: the tools fill the first
         self.addToolBar(view_toolbar)
         self.view_toolbar = view_toolbar
 
@@ -2754,7 +2759,7 @@ class MainWindow(QMainWindow):
         geometry = s.value("window/geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
-        state = s.value("window/state")
+        state = s.value(WINDOW_STATE_KEY)
         if state is not None:
             self.restoreState(state)
         self.zoom_window_action.setChecked(_setting_bool(s.value("view/zoom_window"), True))
@@ -2774,7 +2779,7 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         s = self.settings
         s.setValue("window/geometry", self.saveGeometry())
-        s.setValue("window/state", self.saveState())
+        s.setValue(WINDOW_STATE_KEY, self.saveState())
         s.setValue("view/zoom_window", self.zoom_window_action.isChecked())
         s.setValue("view/nodes", self.nodes_action.isChecked())
         s.setValue("view/stretching", self.color_action.isChecked())

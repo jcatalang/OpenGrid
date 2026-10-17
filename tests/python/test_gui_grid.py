@@ -35,7 +35,8 @@ def test_reference_grid_follows_the_camera_and_the_view(qtbot, tmp_path):
     assert grid.enabled and len(grid._actors) >= 2  # minor and major lines (and axes)
     assert len(grid._labels) > 4  # a view along z: coordinates along the edges
     names = {a.name for a in grid._actors}
-    assert {"reference-grid-minor", "reference-grid-major"} <= names
+    assert {"reference-grid-xy-minor", "reference-grid-xy-major"} <= names
+    assert not any("-xz-" in n or "-yz-" in n for n in names)  # one plane in an axis view
     centre, extent = grid.visible_extent()
     step = grid.step
     assert grid_step(extent)[0] == step
@@ -44,12 +45,28 @@ def test_reference_grid_follows_the_camera_and_the_view(qtbot, tmp_path):
     grid.update()
     assert abs(grid.step - step / 10.0) < 1e-12 * step
     # The lines cover the view around its centre.
-    major = next(a for a in grid._actors if a.name == "reference-grid-major")
+    major = next(a for a in grid._actors if a.name == "reference-grid-xy-major")
     bounds = np.array(major.GetBounds())
     assert bounds[0] <= centre[0] <= bounds[1] and bounds[2] <= centre[1] <= bounds[3]
-    # Camera actions keep the grid in step; a 3D view has lines but no edge labels.
+    # A view along y shows the XZ plane with its edge labels; along x the YZ plane.
+    window.view_actions["xz"].trigger()
+    names = {a.name for a in grid._actors}
+    assert "reference-grid-xz-minor" in names and not any("-xy-" in n for n in names)
+    assert len(grid._labels) > 4
+    window.view_actions["yz"].trigger()
+    assert any(a.name == "reference-grid-yz-minor" for a in grid._actors)
+    # A tilted view: the three planes (the facing one with minor lines) and labels along
+    # the axes that face the camera.
     window.view_actions["iso"].trigger()
-    assert grid._actors and grid._labels == []
+    names = {a.name for a in grid._actors}
+    assert {
+        "reference-grid-xy-major",
+        "reference-grid-xz-major",
+        "reference-grid-yz-major",
+    } <= names
+    assert sum(1 for n in names if n.endswith("-minor")) == 1
+    assert grid._labels and all(hasattr(label, "GetPosition") for label in grid._labels[:-1])
+    assert any("axis-x" in n for n in names)  # the planes meet on the world axes here
     window.view_actions["xy"].trigger()
     assert grid._labels
     window.grid_action.setChecked(False)

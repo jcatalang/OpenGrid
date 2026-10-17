@@ -848,6 +848,15 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Menu actions no longer pass Qt's "checked" flag into their slots (2026-10-18) — bug reported by the user
+
+Create > Mesh surfaces did nothing: `QAction.triggered` emits a ``checked`` bool, and the
+helper connected the slot directly, so ``mesh_selected_surfaces(spacing=False)`` ran and was
+refused ("spacing: must be a positive length, got False"); the same hit Extrude 2D model
+(``thickness=False``) and File > New (``confirm=False``: no "discard changes?" question).
+`MainWindow._action` now connects through a wrapper that drops the flag. Test: the three
+actions triggered from their menus (dialogs answered by patches) do what their slots do.
+
 ## Spheres mesh: poles opened in parameter space, cleaned up on the surface (2026-10-18) — the user
 
 The user asked how to mesh a sphere; neither the shape nor a CAD sphere could be (its poles

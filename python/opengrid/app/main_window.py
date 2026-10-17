@@ -367,7 +367,9 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         if tip:
             action.setStatusTip(tip)
-        action.triggered.connect(slot)
+        # QAction.triggered carries a "checked" bool: it must not land in the slot's first
+        # optional parameter (a spacing, a thickness, a confirmation flag).
+        action.triggered.connect(lambda _checked=False: slot())
         _tooltip(action)
         return action
 

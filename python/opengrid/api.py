@@ -294,14 +294,17 @@ class Session:
         sweep: float = 0.0,
         dihedral: float = 0.0,
         points: int = 101,
+        caps: bool = True,
         name=None,
     ) -> list[str]:
         """A straight tapered wing: NACA 4-digit sections at the root (y = 0) and the tip
         (y = ``span``, chord ``tip_chord``, leading edge swept back by ``sweep`` degrees and
         raised by ``dihedral`` degrees), chord along +x and thickness along z, as four
-        clamped splines ``<name>-root-upper`` ... ``-tip-lower`` and the ruled surfaces
-        ``<name>-upper`` and ``<name>-lower`` between them ("wing-<n>" by default). The tip
-        is open (no cap). One undo step."""
+        clamped splines ``<name>-root-upper`` ... ``-tip-lower``, the ruled surfaces
+        ``<name>-upper`` and ``<name>-lower`` between them and, with ``caps``, the flat
+        ``<name>-root`` and ``<name>-tip`` sections closing the body (ruled between each
+        section's upper and lower curves, so they meet at the leading and trailing edges).
+        "wing-<n>" by default; one undo step."""
         from opengrid.model.shapes import wing_sections
 
         base = self._shape_name(name, "wing")
@@ -323,6 +326,10 @@ class Session:
         for side in ("upper", "lower"):
             ruled = {"curve0": f"{base}-root-{side}", "curve1": f"{base}-tip-{side}"}
             items.append(("ruled_surface", ruled, f"{base}-{side}"))
+        if caps:
+            for station in ("root", "tip"):
+                cap = {"curve0": f"{base}-{station}-upper", "curve1": f"{base}-{station}-lower"}
+                items.append(("ruled_surface", cap, f"{base}-{station}"))
         return self.commands.run(CreateEntities(items, label=f"Wing {base}"))
 
     # ----------------------------------------------------------- connectors

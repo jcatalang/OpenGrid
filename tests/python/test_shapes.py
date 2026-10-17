@@ -103,8 +103,13 @@ def test_session_shapes_and_replay():
     assert tuple(meridian.eval(0.0)) == pytest.approx((1.0, 2.0, 5.0))  # the +z pole
     assert tuple(meridian.eval(1.0)) == pytest.approx((1.0, 2.0, 1.0))
     wing = og.create_wing("0012", 1.0, 0.5, 3.0, sweep=20.0, dihedral=5.0, name="wg")
-    assert wing[-2:] == ["wg-upper", "wg-lower"] and len(wing) == 6
+    assert wing[-4:] == ["wg-upper", "wg-lower", "wg-root", "wg-tip"] and len(wing) == 8
     assert og.entity("wg-upper").kind == "ruled_surface"
+    tip = og.geometry("wg-tip")  # the flat cap: inside the tip section, in its plane y = 3
+    for u, v in ((0.3, 0.5), (0.7, 0.2), (0.5, 0.9)):
+        point = tip.eval(u, v)
+        assert abs(point[1] - 3.0) < 1e-12
+    assert og.create_wing(caps=False, name="open")[-2:] == ["open-upper", "open-lower"]
     # An airfoil in a far-field rectangle meshes as one domain with the airfoil as a hole.
     og.create_airfoil(name="naca")
     og.create_rectangle((0.5, 0), 20, 20, name="far")

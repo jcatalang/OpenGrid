@@ -848,6 +848,13 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Predefined shapes are closed bodies (2026-10-18) — requested by the user
+
+The wing had an open tip. `create_wing(caps=True)` now adds the flat ``<name>-root`` and
+``<name>-tip`` sections (ruled surfaces between each section's upper and lower curves), the
+dialog has the switch; the box, cylinder (caps) and sphere were closed already, the 2D
+shapes are closed loops. Test: the cap lies in the tip plane; ``caps=False`` leaves it open.
+
 ## Selecting inside a box: lines first, hide selected (2026-10-18) — requested by the user
 
 The user could not select a wing inside its far-field box: the box's faces took every click.

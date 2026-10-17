@@ -105,14 +105,16 @@ A sphere as the surface of revolution ``<name>`` of a meridian half circle
 ``<name>-meridian`` (from the +z pole to the -z pole) about the z axis through the
 centre ("sphere-<n>" by default). One undo step.
 
-### `create_wing(code: str = '0012', root_chord: float = 1.0, tip_chord: float | None = None, span: float = 3.0, sweep: float = 0.0, dihedral: float = 0.0, points: int = 101, name=None) -> list[str]`
+### `create_wing(code: str = '0012', root_chord: float = 1.0, tip_chord: float | None = None, span: float = 3.0, sweep: float = 0.0, dihedral: float = 0.0, points: int = 101, caps: bool = True, name=None) -> list[str]`
 
 A straight tapered wing: NACA 4-digit sections at the root (y = 0) and the tip
 (y = ``span``, chord ``tip_chord``, leading edge swept back by ``sweep`` degrees and
 raised by ``dihedral`` degrees), chord along +x and thickness along z, as four
-clamped splines ``<name>-root-upper`` ... ``-tip-lower`` and the ruled surfaces
-``<name>-upper`` and ``<name>-lower`` between them ("wing-<n>" by default). The tip
-is open (no cap). One undo step.
+clamped splines ``<name>-root-upper`` ... ``-tip-lower``, the ruled surfaces
+``<name>-upper`` and ``<name>-lower`` between them and, with ``caps``, the flat
+``<name>-root`` and ``<name>-tip`` sections closing the body (ruled between each
+section's upper and lower curves, so they meet at the leading and trailing edges).
+"wing-<n>" by default; one undo step.
 
 ### `geometry(name: str)`
 

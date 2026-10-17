@@ -127,9 +127,11 @@ SHAPES = {
             Field("sweep", "sweep [deg]", "0", "number"),
             Field("dihedral", "dihedral [deg]", "0", "number"),
             Field("points", "points per side", "101", "int"),
+            Field("caps", "root and tip caps", "yes", "bool"),
             NAME,
         ),
-        "Root at y = 0 and tip sections in the xz plane, ruled upper and lower surfaces",
+        "Root at y = 0 and tip sections in the xz plane, ruled upper and lower surfaces, "
+        "the sections closed by flat caps (a closed body)",
     ),
 }
 

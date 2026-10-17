@@ -431,8 +431,10 @@ history). Phase tags show where each item came from.
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a
-  structured domain on them; a wing has no tip cap and straight taper / sweep / dihedral
-  only (no twist).
+  structured domain on them; a wing's root and tip caps are ruled between the section's
+  upper and lower curves (degenerate at the leading and trailing edges, like the cylinder
+  caps at their centre), and the wing is straight taper / sweep / dihedral only (no twist).
+  Every predefined shape is a closed body (the user asked for that).
 - **Sketch block generators** [2026-10-17]: a sketch has one generator for all its
   unstructured blocks (editing one block's settings changes them all); its inflation layers
   are sketch walls, which stop at the core cell size (no total thickness, no transition

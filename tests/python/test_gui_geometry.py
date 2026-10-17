@@ -132,9 +132,13 @@ def test_property_panel_edit_and_undo(window):
     assert panel.apply()
     entity = window.session.entity("wing-chord")
     assert entity.params["p1"] == (2.0, 0.5, 0.0)
-    window.undo()  # rename
-    window.undo()  # modify
+    window.undo()  # the edit and the rename are one step
     assert window.session.entity("chord").params["p1"] == (1.0, 0.0, 0.0)
+    assert not window.session.commands.can_undo or "chord" not in window.undo_action.text()
+    window.redo()
+    assert window.session.entity("wing-chord").params["p1"] == (2.0, 0.5, 0.0)
+    journal = window.session.journal_text()
+    assert "og.modify('chord', p1=(2.0, 0.5, 0.0))\nog.rename('chord', 'wing-chord')" in journal
 
 
 def test_property_panel_reports_errors(window):

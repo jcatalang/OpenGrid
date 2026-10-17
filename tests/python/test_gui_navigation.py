@@ -171,3 +171,128 @@ def test_high_order_overlay(qtbot):
     assert len(np.asarray(actor.mapper.dataset.points)) > before * SAMPLES
     window.hide_high_order()
     assert "high-order-edges" not in window.viewport.renderer.actors
+
+
+def test_navigation_mode_follows_the_model_until_chosen(qtbot):
+    """2D: a left-drag is a zoom window. A block switches to 3D navigation (left-drag
+    rotates, Alt + drag zooms to a window); the user's choice then sticks."""
+    from PySide6.QtCore import Qt
+    from test_gui_events import Live
+
+    live = Live(qtbot)
+    window = live.window
+    og = live.og
+    for a, b in (((0, 0), (2, 0)), ((2, 0), (2, 1)), ((2, 1), (0, 1)), ((0, 1), (0, 0))):
+        og.create_line(a, b)
+    for name, n in zip(og.names("line"), (21, 11, 21, 11), strict=True):
+        og.create_connector(name, n)
+    c = og.names("connector")
+    domain = og.create_domain([[c[0]], [c[1]], [c[2]], [c[3]]])
+    live.fit()
+    assert window.navigation_mode == "2d" and not window.navigation_3d_action.isChecked()
+    camera = live.widget.renderer.GetActiveCamera()
+    direction = np.array(camera.GetDirectionOfProjection())
+    scale = camera.GetParallelScale()
+    live.drag((0.3, 0.3, 0.0), (1.7, 0.8, 0.0))
+    assert camera.GetParallelScale() < scale  # a zoom window
+    assert np.allclose(camera.GetDirectionOfProjection(), direction)
+    block = og.create_extruded_block(domain, "translate", vector=(0, 0, 1), dimension=5)
+    assert window.navigation_mode == "3d" and window.navigation_3d_action.isChecked()
+    assert window.scene.default_view == "iso" and not window.zoom_window_action.isEnabled()
+    live.widget.render()
+    direction = np.array(camera.GetDirectionOfProjection())
+    scale = camera.GetParallelScale()
+    live.drag((0.5, 0.5, 0.0), (1.5, 0.6, 0.0))
+    assert not np.allclose(camera.GetDirectionOfProjection(), direction)  # rotated
+    assert abs(camera.GetParallelScale() - scale) < 1e-12 * scale
+    assert not window.zoom_box.active
+    live.drag((0.5, 0.5, 0.0), (1.5, 0.9, 0.0), modifier=Qt.KeyboardModifier.AltModifier)
+    assert camera.GetParallelScale() < scale  # Alt: the zoom window
+    # The user's choice is kept whatever the model does.
+    window.navigation_3d_action.setChecked(False)
+    assert window.navigation_mode == "2d"
+    og.delete(block)
+    og.create_extruded_block(domain, "translate", vector=(0, 0, 1), dimension=5)
+    assert window.navigation_mode == "2d"
+    window.navigation_3d_action.setChecked(True)
+    assert window.navigation_mode == "3d"
+    live.close()
+
+
+def test_camera_reset_keeps_the_direction_and_views_are_presets(qtbot):
+    window = _window(qtbot)
+    camera = window.viewport.renderer.GetActiveCamera()
+    window.scene.view_preset("iso")
+    direction = np.array(camera.GetDirectionOfProjection())
+    assert np.allclose(np.abs(direction), 1 / np.sqrt(3))
+    fitted = camera.GetParallelScale()
+    camera.SetParallelScale(1000.0 * fitted)  # lost: zoomed far out and panned away
+    focal = np.array(camera.GetFocalPoint())
+    position = np.array(camera.GetPosition())
+    camera.SetFocalPoint(*(focal + 50.0))
+    camera.SetPosition(*(position + 50.0))
+    window.fit_action.trigger()
+    assert abs(camera.GetParallelScale() - fitted) < 1e-9 * fitted
+    assert np.allclose(camera.GetDirectionOfProjection(), direction)  # still isometric
+    window.view_actions["xy"].trigger()
+    assert np.allclose(camera.GetDirectionOfProjection(), (0, 0, -1))
+    full = camera.GetParallelScale()
+    window.view_actions["xz"].trigger()
+    assert abs(camera.GetDirectionOfProjection()[1]) == 1.0
+    window.view_actions["yz"].trigger()
+    assert abs(camera.GetDirectionOfProjection()[0]) == 1.0
+    window.view_actions["xy"].trigger()
+    window.set_selection([window.session.entity("c-c-lower").id])
+    window.zoom_selection_action.trigger()
+    assert camera.GetParallelScale() < 0.5 * full
+    window.set_selection([])
+    window.zoom_selection_action.trigger()  # nothing selected: everything
+    assert abs(camera.GetParallelScale() - full) < 1e-9 * full
+    assert camera.GetParallelProjection()
+    window.perspective_action.setChecked(True)
+    assert not camera.GetParallelProjection()
+    window.perspective_action.setChecked(False)
+    assert camera.GetParallelProjection()
+
+
+def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
+    """In a rotated 3D view a click selects what is drawn under the pointer (blocks included);
+    nothing is picked in empty space, and the 2D picker is back for a top view in 2D mode."""
+    from test_gui_events import Live
+
+    live = Live(qtbot)
+    window = live.window
+    og = live.og
+    for a, b in (((0, 0), (2, 0)), ((2, 0), (2, 1)), ((2, 1), (0, 1)), ((0, 1), (0, 0))):
+        og.create_line(a, b)
+    for name, n in zip(og.names("line"), (21, 11, 21, 11), strict=True):
+        og.create_connector(name, n)
+    c = og.names("connector")
+    domain = og.create_domain([[c[0]], [c[1]], [c[2]], [c[3]]])
+    block = og.create_extruded_block(domain, "translate", vector=(0, 0, 1), dimension=11)
+    assert window.navigation_mode == "3d"
+    live.widget.render()
+    live.click((2.0, 0.5, 0.5))  # a grid line on the block's x = 2 face: only the block is there
+    assert window.selected_names() == [block]
+    live.click((1.0, 0.5, 1.0))  # the top face
+    assert window.selected_names() == [block]
+    live.click((6.0, -4.0, 0.0))  # empty space (off the block's projection)
+    assert window.selected_names() == []
+    live.click((2.0, 0.5, 0.5))
+    live.click((6.0, -4.0, 0.0), shift=True)  # Shift + empty: the selection stays
+    assert window.selected_names() == [block]
+    # Picking what is under the pointer also works from the API (display coordinates).
+    point = live.display((2.0, 0.5, 0.5))
+    x = point.x()
+    y = live.widget.height() - 1 - point.y()
+    entity_id, picked = window.scene.pick_display(x, y)
+    assert og.store.get(entity_id).name == block
+    assert abs(picked[0] - 2.0) < 1e-6
+    # A 2D view in 2D mode: the exact planar picker (inside a domain counts).
+    og.delete(block)
+    window.navigation_3d_action.setChecked(False)
+    window.view_actions["xy"].trigger()
+    live.widget.render()
+    live.click((1.0, 0.5, 0.0))
+    assert window.selected_names() == [domain]
+    live.close()

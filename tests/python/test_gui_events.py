@@ -45,7 +45,9 @@ class Live:
         # QTest does not update QApplication.mouseButtons(): the window asks it whether the
         # button is still down during a drag.
         self._buttons = Qt.MouseButton.NoButton
-        self._patch = mock.patch.object(mw, "_left_button_down", lambda: self._buttons != 0)
+        self._patch = mock.patch.object(
+            mw, "_left_button_down", lambda: bool(self._buttons & Qt.MouseButton.LeftButton)
+        )
         self._patch.start()
         qtbot.addWidget(self.window)
 
@@ -299,6 +301,7 @@ def test_model_tree_click_selects_in_the_viewport(live):
         for k in range(tree.topLevelItem(c).childCount())
         if tree.topLevelItem(c).child(k).text(0) == "cr"
     )
+    tree.scrollToItem(item)  # the docks are short: the item may be scrolled out of view
     rect = tree.visualItemRect(item)
     live.qtbot.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
     assert live.window.selected_names() == ["cr"]
@@ -432,3 +435,63 @@ def test_double_click_adds_and_removes_a_spline_point(live):
     live.double_click((1.0, 0.5, 0.0))  # inside the domain, on nothing editable
     assert window.statusBar().currentMessage().startswith("Double-click a polyline")
     assert len(live.og.entity("b").params["points"]) == before
+
+
+def test_hover_highlights_the_entity_under_the_pointer(live):
+    """A resting pointer highlights what a click would pick; the status bar shows the 2D
+    coordinates; the highlight goes when the entity is selected or the pointer leaves."""
+    window = live.window
+    scene = window.scene
+    live.move((2.0, 0.5, 0.0))  # on connector cr
+    live.qtbot.waitUntil(lambda: scene.hovered == live.og.entity("cr").id, timeout=2000)
+    assert scene._overlays.get("hover") is not None
+    shown = window.coordinates_label.text().split()  # "x 1.99968   y 0.5" (pixel rounding)
+    assert abs(float(shown[1]) - 2.0) < 0.01 and abs(float(shown[3]) - 0.5) < 0.01
+    live.move((5.0, 5.0, 0.0))  # nothing there
+    live.qtbot.waitUntil(lambda: scene.hovered is None, timeout=2000)
+    assert scene._overlays.get("hover") is None
+    live.move((1.0, 0.5, 0.0))  # inside the domain
+    live.qtbot.waitUntil(lambda: scene.hovered == live.og.entity("d").id, timeout=2000)
+    live.click((1.0, 0.5, 0.0))  # selected: the hover highlight makes way
+    assert window.selected_names() == ["d"] and scene.hovered is None
+    window.set_tool("line")  # drawing tools do not hover
+    live.move((2.0, 0.5, 0.0))
+    live.qtbot.wait(80)
+    assert scene.hovered is None
+    window.set_tool("select")
+    window._on_vtk_leave()
+    assert window.coordinates_label.text() == ""
+
+
+def test_context_menu_offers_what_applies_to_the_selection(live):
+    window = live.window
+    og = live.og
+
+    def labels(menu):
+        return [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]
+
+    window.set_selection([])
+    names = labels(window.context_menu())
+    assert "Delete" not in names and "Reset camera" in names and "Topology" in names
+    window.set_selection([og.entity("b").id])  # a curve
+    names = labels(window.context_menu())
+    assert "Connectors on curves" in names and "Structured domain" not in names
+    assert "Zoom to selection" in names and "Delete" in names
+    window.set_selection([og.entity("cr").id])  # a connector
+    names = labels(window.context_menu())
+    assert "Structured domain" in names and "Unstructured domain" in names
+    assert "Connectors on curves" not in names
+    window.set_selection([og.entity("d").id])  # a domain
+    names = labels(window.context_menu())
+    assert "Extrude domain" in names and "Smoothing group" in names
+    # A right click (no drag) opens it in the viewport: exercised through the handlers.
+    opened = []
+    window.show_context_menu = lambda position: opened.append(position)
+    window._right_press_position = (100.0, 100.0)
+    window.viewport.iren.interactor.SetEventInformation(101, 100, 0, 0, "\0", 0, None)
+    window._on_vtk_right_release()
+    assert len(opened) == 1
+    window._right_press_position = (100.0, 100.0)
+    window.viewport.iren.interactor.SetEventInformation(160, 140, 0, 0, "\0", 0, None)
+    window._on_vtk_right_release()  # a drag: no menu
+    assert len(opened) == 1

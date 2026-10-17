@@ -194,27 +194,41 @@ class CreateEntities(Command):
 
 
 class ModifyEntity(Command):
-    def __init__(self, name: str, changes: dict):
+    """Change parameters and / or rename, as one undo step (the journal gets a modify line
+    and a rename line)."""
+
+    def __init__(self, name: str, changes: dict, new_name: str | None = None):
         self.target = name
         self.changes = dict(changes)
+        self.new_name = new_name
         self.label = f"Modify {name}"
+        if new_name is not None and not changes:
+            self.label = f"Rename {name}"
         self._script = ""
 
     def execute(self, store: Store) -> str:
-        if not self.changes:
+        if not self.changes and self.new_name is None:
             raise ValidationError([Issue(self.target, "no parameters to modify")])
         entity = store.get(self.target)
-        merged = dict(entity.params)
-        merged.update(self.changes)
-        params = normalize_params(entity.kind, merged, entity.name, store)
-        store.update(entity.id, params=params)
-        _check_dependents_still_valid(store, entity.id)
-        recorded = {}
-        shown = _for_script(entity.kind, params, store)
-        for key in self.changes:
-            recorded[key] = shown[key]
-        self._script = f"og.modify({self.target!r}, {format_kwargs(recorded)})"
-        return entity.name
+        lines = []
+        if self.changes:
+            merged = dict(entity.params)
+            merged.update(self.changes)
+            params = normalize_params(entity.kind, merged, entity.name, store)
+            store.update(entity.id, params=params)
+            _check_dependents_still_valid(store, entity.id)
+            recorded = {}
+            shown = _for_script(entity.kind, params, store)
+            for key in self.changes:
+                recorded[key] = shown[key]
+            lines.append(f"og.modify({self.target!r}, {format_kwargs(recorded)})")
+        name = entity.name
+        if self.new_name is not None and self.new_name != entity.name:
+            store.update(entity.id, name=self.new_name)
+            lines.append(f"og.rename({self.target!r}, {self.new_name!r})")
+            name = self.new_name
+        self._script = "\n".join(lines)
+        return name
 
     def script(self) -> str:
         return self._script

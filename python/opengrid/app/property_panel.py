@@ -956,6 +956,11 @@ class PropertyPanel(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
+        self._build()
+        for edit in self.findChildren(QLineEdit):
+            edit.returnPressed.connect(self.apply)  # Enter applies (the widgets are new)
+
+    def _build(self) -> None:
         while self._form.rowCount():
             self._form.removeRow(0)
         self._editors.clear()
@@ -1477,10 +1482,8 @@ class PropertyPanel(QWidget):
             return False
         name = self.session.store.get(self.entity_id).name
         try:
-            if changes:
-                self.session.modify(name, **changes)
-            if new_name is not None:
-                self.session.rename(name, new_name)
+            if changes or new_name is not None:
+                self.session.modify(name, new_name=new_name, **changes)  # one undo step
         except ValidationError as error:
             self._show_error(str(error))
             return False

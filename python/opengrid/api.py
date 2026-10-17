@@ -1449,12 +1449,17 @@ class Session:
         write_plot3d(path, grids, binary=binary, three_d=three_d)
 
     # -------------------------------------------------------------- editing
-    def modify(self, name: str, **params) -> str:
-        """Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))`` (a
-        sketch: edit_sketch, which regenerates it)."""
+    def modify(self, name: str, *, new_name: str | None = None, **params) -> str:
+        """Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))``, and /
+        or rename it (``new_name``) as one undo step; returns the (new) name. A sketch:
+        edit_sketch, which regenerates it."""
         if name in self.store and self.store.get(name).kind == "sketch":
-            return self.edit_sketch(name, **params)
-        return self.commands.run(ModifyEntity(name, params))
+            if params:
+                name = self.edit_sketch(name, **params)
+            if new_name is not None:
+                return self.rename(name, new_name)
+            return name
+        return self.commands.run(ModifyEntity(name, params, new_name))
 
     def rename(self, name: str, new_name: str) -> str:
         """Rename an entity (references follow; journals stay valid)."""

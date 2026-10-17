@@ -260,13 +260,24 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
 ## The desktop application
 
 - Model tree, property panel, quality / smoother / boundary panels, log, Python console.
-- Drawing tools for geometry, connectors, freehand curves and sketch blocks; snapping; live
-  drag previews of handles.
+- Drawing tools for geometry, connectors, freehand curves and sketch blocks (toolbar icons,
+  keys `S P L A W B N D K`); snapping; live drag previews of handles; double-click adds or
+  removes curve points.
 - Colour by quality, patches or entities; node display; block cuts and shrunk cells for 3D.
-- **Navigation:** left-drag (or a three-finger drag on a trackpad) zooms to a window drawn
-  live; Shift + drag or middle-drag pans; wheel / two-finger scroll and right-drag zoom; `F`
-  fits the view; `Esc` cancels.
-- Undo / redo of every action; projects save the model with its journal.
+- **Navigation.** 2D: left-drag (or a three-finger drag on a trackpad) zooms to a window
+  drawn live, or pans (View menu); Shift + drag or middle-drag pans; wheel / two-finger scroll
+  and right-drag zoom. 3D (switched on when the model gains blocks, volumes or surfaces, or
+  by hand): left-drag rotates, Shift + drag pans, Alt + drag zooms to a window. `F` re-centres
+  the view keeping its direction, `Z` zooms to the selection, `1 2 3 7` are the top, front,
+  side and isometric views, `V` toggles perspective, `Esc` cancels.
+- Selection by click in any view (3D picks along the view ray), hover highlight, the
+  pointer's coordinates in the status bar, and a right-click menu with what applies to the
+  selection.
+- Long operations (volume meshing, templates, CAD import, high-order elements, exports) run in
+  a worker thread behind a busy dialog; the window keeps repainting.
+- Undo / redo of every action (an edit plus a rename in the property panel is one step; Enter
+  applies); projects save the model with its journal; window layout, view options, recent
+  files and the last directory persist between runs.
 - The window title shows the commit the application runs, and the status bar says when the
   code was updated while it runs.
 

@@ -701,10 +701,11 @@ or ``.h5`` (any node set: element node coordinates, Jacobians, merged numbering)
 
 ## Editing, undo and the model
 
-### `modify(name: str, **params) -> str`
+### `modify(name: str, *, new_name: str | None = None, **params) -> str`
 
-Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))`` (a
-sketch: edit_sketch, which regenerates it).
+Change some parameters of an entity, e.g. ``og.modify("line-1", p1=(2, 0))``, and /
+or rename it (``new_name``) as one undo step; returns the (new) name. A sketch:
+edit_sketch, which regenerates it.
 
 ### `rename(name: str, new_name: str) -> str`
 

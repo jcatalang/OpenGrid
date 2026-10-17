@@ -112,10 +112,15 @@ def test_stretching_warning_and_threshold(window):
 
 def test_colouring_and_nodes_toggle(window):
     window.session.create_connector("a", 21, {"type": "tanh", "begin_spacing": 0.01}, name="ca")
-    entity_id = window.session.entity("ca").id
-    assert window.scene._actors[entity_id] == [f"entity-{entity_id}", f"entity-{entity_id}-nodes"]
+    scene = window.scene
+    assert scene.layer("connectors") is not None and scene.layer("connector-nodes") is not None
     window.nodes_action.setChecked(False)
-    assert window.scene._actors[entity_id] == [f"entity-{entity_id}"]
+    assert scene.layer("connector-nodes") is None
+    # Selection moves the connector between the plain and the selected layer.
+    window.set_selection([window.session.entity("ca").id])
+    assert scene.layer("connectors") is None and scene.layer("connectors-selected") is not None
+    window.set_selection([])
+    assert scene.layer("connectors") is not None and scene.layer("connectors-selected") is None
     window.color_action.setChecked(False)
     assert not window.scene.color_by_stretching
     window.render_check = window.grab()

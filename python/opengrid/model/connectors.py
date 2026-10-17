@@ -409,36 +409,69 @@ class ConnectorEvaluator:
         self.store = store
         self._chains: dict[int, object] = {}
         self._nodes: dict[int, ConnectorNodes] = {}
-        self._canonical: list[np.ndarray] | None = None
+        self._canonical: np.ndarray | None = None  # (m, 3) distinct connector ends
+        self._ends: tuple | None = None  # every connector end, see _end_index
 
     def invalidate(self) -> None:
         self._chains.clear()
         self._nodes.clear()
         self._canonical = None
+        self._ends = None
+
+    def _end_index(self) -> tuple:
+        """Every connector end, built once per invalidation: points (2 n, 3) and, per end, the
+        connector id, "begin" / "end", the explicit spacing there (nan: none) and the
+        connector name. Lookups are one vectorised distance each."""
+        if self._ends is None:
+            points = []
+            ids = []
+            sides = []
+            spacings = []
+            names = []
+            for other in self.store.entities("connector"):
+                chain = self.chain(other.id)
+                subs = sub_connectors(other.params)
+                for side, point, spacing in (
+                    ("begin", chain.start(), subs[0]["distribution"]["begin_spacing"]),
+                    ("end", chain.end(), subs[-1]["distribution"]["end_spacing"]),
+                ):
+                    points.append(point)
+                    ids.append(other.id)
+                    sides.append(side)
+                    if spacing is None:
+                        spacings.append(np.nan)
+                    else:
+                        spacings.append(float(spacing))
+                    names.append(other.name)
+            self._ends = (
+                np.asarray(points, dtype=float).reshape(-1, 3),
+                np.asarray(ids, dtype=np.int64),
+                sides,
+                np.asarray(spacings, dtype=float),
+                names,
+            )
+        return self._ends
 
     def canonical_point(self, point) -> np.ndarray:
         """Shared coordinate of a connector end: coincident ends of different connectors are
         represented by one bitwise-identical point (the first in id order), so that domains
         sharing a node get identical coordinates."""
         if self._canonical is None:
-            self._canonical = []
-            for entity in self.store.entities("connector"):
-                chain = self.chain(entity.id)
-                for end in (chain.start(), chain.end()):
-                    self._register(np.asarray(end, dtype=float))
+            kept = np.zeros((0, 3))
+            for end in self._end_index()[0]:
+                tolerance = CHAIN_TOLERANCE * max(1.0, float(np.max(np.abs(end))))
+                if len(kept) == 0 or np.min(np.linalg.norm(kept - end, axis=1)) > tolerance:
+                    kept = np.vstack([kept, end[None, :]])
+            self._canonical = kept
         point = np.asarray(point, dtype=float)
+        if len(self._canonical) == 0:
+            return point
         tolerance = CHAIN_TOLERANCE * max(1.0, float(np.max(np.abs(point))))
-        for known in self._canonical:
-            if np.linalg.norm(known - point) <= tolerance:
-                return known
+        distances = np.linalg.norm(self._canonical - point, axis=1)
+        nearest = int(np.argmin(distances))
+        if distances[nearest] <= tolerance:
+            return self._canonical[nearest]
         return point
-
-    def _register(self, point: np.ndarray) -> None:
-        tolerance = CHAIN_TOLERANCE * max(1.0, float(np.max(np.abs(point))))
-        for known in self._canonical:
-            if np.linalg.norm(known - point) <= tolerance:
-                return
-        self._canonical.append(point)
 
     def chain(self, entity_id: int):
         if entity_id not in self._chains:
@@ -453,21 +486,14 @@ class ConnectorEvaluator:
     def _explicit_spacings_at(
         self, point: np.ndarray, exclude: int, tolerance: float
     ) -> list[tuple[float, str]]:
-        found = []
-        for other in self.store.entities("connector"):
-            if other.id == exclude:
-                continue
-            chain = self.chain(other.id)
-            subs = sub_connectors(other.params)
-            if np.linalg.norm(np.asarray(chain.start()) - point) <= tolerance:
-                spacing = subs[0]["distribution"]["begin_spacing"]
-                if spacing is not None:
-                    found.append((spacing, f"{other.name} begin"))
-            if np.linalg.norm(np.asarray(chain.end()) - point) <= tolerance:
-                spacing = subs[-1]["distribution"]["end_spacing"]
-                if spacing is not None:
-                    found.append((spacing, f"{other.name} end"))
-        return sorted(found)
+        """Explicit spacings of the other connectors' ends at ``point``: (spacing, "name
+        begin|end"), sorted."""
+        points, ids, sides, spacings, names = self._end_index()
+        if len(points) == 0:
+            return []
+        near = (np.linalg.norm(points - point, axis=1) <= tolerance) & (ids != exclude)
+        near &= np.isfinite(spacings)
+        return sorted((float(spacings[k]), f"{names[k]} {sides[k]}") for k in np.flatnonzero(near))
 
     def _evaluate(self, entity_id: int) -> ConnectorNodes:
         entity = self.store.get(entity_id)

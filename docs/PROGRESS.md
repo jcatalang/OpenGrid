@@ -848,6 +848,65 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## GUI round: navigation, speed, 3D picking, discoverability, workers, settings (2026-10-17) — requested by the user
+
+The user could not turn the camera in 3D after starting in 2D, missed a camera reset, asked
+whether a C++ GUI would be faster, and asked for an assessment of what would make the
+interface more intuitive, friendlier and faster; then asked for all of it.
+
+### Found
+- 3D rotation was bound to Ctrl + right-drag only, and "Fit view" always snapped back to the
+  top view. Picking intersected the view ray with z = 0 and never picked blocks or volumes.
+- After every command the scene removed and re-added the actors of every connector and
+  domain through pyvista's named-actor lookup, which walks the renderer's prop list: 51 s to
+  put 62 connectors on a 31 x 31 lattice of lines, 2.4 s per edit of one of them (the model
+  itself: 1 ms). The connector evaluator's shared-end lookup was a Python loop over all
+  connector ends (O(n^2)).
+- No icons, tooltips or tool shortcuts; no hover, cursor coordinates, context menu; nothing
+  persisted; only the smoother ran off the GUI thread.
+
+### Built
+- Navigation modes (`NAVIGATION`): 2D as before; 3D with left-drag rotate, Shift + drag pan,
+  Alt + drag zoom window (Alt tracked in the window's Qt event filter: the Qt -> VTK adapter
+  forwards Ctrl and Shift only). The mode follows the model (blocks, volumes, surfaces) until
+  the user picks one. `F` resets the camera keeping its direction, `Z` zooms to the
+  selection, `1 2 3 7` view presets, `V` perspective; a View toolbar. Click observers are
+  passive VTK observers (the camera style grabs the interactor's focus on every press it
+  sees; before, a plain left-drag mode never delivered the release).
+- Scene (`app/scene.py`): curves, points and connectors are merged layers (plain / selected /
+  nodes / ends, entity ids as cell data), rebuilt from numpy when any of them changes; domains,
+  blocks, volumes, surfaces and sketches keep one actor each, redrawn only for the dependents
+  closure of a change and recoloured in place on selection; actors are removed by object.
+  Multi-command actions refresh once (`batch_updates`). The connector evaluator indexes all
+  ends once per invalidation (vectorised lookups).
+- 3D picking: `vtkCellPicker` on the drawn actors (`Scene.pick_display`) whenever the view is
+  not along z or 3D navigation is on; the 2D picker (inside a domain counts) otherwise.
+- Discoverability: painted toolbar icons (`app/icons.py`, palette colour, HiDPI), tooltips
+  with shortcuts, tool keys, hover highlight after the pointer rests 30 ms, cursor coordinates
+  in the status bar (2D views), a right-click menu in the viewport and the tree with the
+  actions that apply to the selection.
+- Workers (`app/worker.py`): `run_blocking` runs a function in a thread behind a window-modal
+  busy dialog while the GUI thread processes events (the core and Netgen release the GIL);
+  the window's listener only records changes meanwhile. Used for volume / block meshing after
+  creation, templates, automatic topology, sketches, CAD import, the high-order overlay, the
+  exports and project loading.
+- Settings (QSettings; tests use a throw-away ini): window layout, zoom window / nodes /
+  stretching options, the dim box, recent files (File > Open recent) and the last directory.
+  Enter applies in the property panel; an edit plus a rename is one undo step
+  (`ModifyEntity(new_name=...)`, `Session.modify(new_name=...)`).
+
+### Verified
+- Timings on this machine (GUI attached): 62 lattice connectors 51 s -> 0.68 s; one lattice
+  edit 2.4 s -> 15 ms; a spline edit on the airfoil model 62 -> 27 ms; scene update of one
+  entity 40 -> 4 ms; 500 x 200 domain respacing 79 -> 88 ms (dominated by the actor rebuild
+  of 100k quads). The remaining per-command cost is the quality histogram redraw (~8 ms).
+- pytest: new tests for the navigation modes (zoom window in 2D, rotation and Alt zoom in
+  3D, the user's choice sticking), camera reset / presets / zoom to selection / perspective,
+  ray picking in an isometric view (blocks, empty space, back to the 2D picker), hover and
+  coordinates, the context menu, the worker (events processed meanwhile, exceptions, cancel),
+  one refresh per long operation, settings round trip with recent files, and the one-step
+  rename + edit with its journal lines; the full suite.
+
 ## 3D periodic pairing (2026-10-17) — requested by the user
 
 Periodic patches could only be paired in 2D (connectors); 3D faces were refused ("not

@@ -1,10 +1,11 @@
 """Main application window: viewport, model tree, property panel, log and Python console."""
 
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QScrollArea,
     QSpinBox,
@@ -29,6 +31,7 @@ from opengrid.app.boundary_dock import (
     BoundaryDock,
 )
 from opengrid.app.console import PythonConsole
+from opengrid.app.icons import icon
 from opengrid.app.log_panel import LogPanel
 from opengrid.app.model_tree import ModelTree
 from opengrid.app.property_panel import PropertyPanel
@@ -37,6 +40,7 @@ from opengrid.app.scene import Scene, pick_entity
 from opengrid.app.smoother_dock import SmootherDock
 from opengrid.app.tools import TOOLS, Tool, snap, snap_targets
 from opengrid.app.zoom_box import ZoomBox
+from opengrid.model.entities import SURFACE_KINDS
 from opengrid.validation import ValidationError
 
 log = logging.getLogger("opengrid")
@@ -60,28 +64,88 @@ def compute_summary() -> str:
 SNAP_PIXELS = 10.0
 PICK_PIXELS = 8.0
 CLICK_MOVE_PIXELS = 4.0
+HOVER_DELAY_MS = 30  # the highlight follows the pointer after it rests this long
 UPDATE_CHECK_MS = 30000  # how often to look for updated code
+SETTINGS_ORGANIZATION = "OpenGrid"
+SETTINGS_APPLICATION = "OpenGrid"
+RECENT_FILES = 8
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
+MESHED_KINDS = ("domain", "unstructured_domain", "block", "volume")
 INSERTABLE_FIELD = {"polyline": "points", "spline": "points", "nurbs": "control_points"}
 
 
-def set_navigation_style(iren) -> None:
-    """2D navigation: left-drag zooms to a window (app/zoom_box.py; View menu: or pans), Shift
-    + left-drag and middle-drag pan, wheel / two-finger scroll and right-drag zoom, Ctrl + left
-    / middle-drag spin, Ctrl + right-drag rotates in 3D."""
-    iren.enable_custom_trackball_style(
-        left="pan",
-        shift_left="pan",
-        control_left="spin",
-        middle="pan",
-        shift_middle="dolly",
-        control_middle="spin",
-        right="dolly",
-        shift_right="dolly",
-        control_right="rotate",
-    )
+# Mouse bindings of the two navigation modes (pyvista's custom trackball style). 2D: left-drag
+# zooms to a window (app/zoom_box.py; View menu: or pans), Shift + left-drag and middle-drag
+# pan, wheel / two-finger scroll and right-drag zoom, Ctrl + left / middle-drag spin, Ctrl +
+# right-drag rotates. 3D: left-drag rotates, Shift + left-drag and middle-drag pan, Alt + left-
+# drag zooms to a window, wheel and right-drag zoom, Ctrl + left-drag spins.
+NAVIGATION = {
+    "2d": {
+        "left": "pan",
+        "shift_left": "pan",
+        "control_left": "spin",
+        "middle": "pan",
+        "shift_middle": "dolly",
+        "control_middle": "spin",
+        "right": "dolly",
+        "shift_right": "dolly",
+        "control_right": "rotate",
+    },
+    "3d": {
+        "left": "rotate",
+        "shift_left": "pan",
+        "control_left": "spin",
+        "middle": "pan",
+        "shift_middle": "dolly",
+        "control_middle": "spin",
+        "right": "dolly",
+        "shift_right": "pan",
+        "control_right": "rotate",
+    },
+}
+NAVIGATION_HINTS = {
+    "2d": "2D navigation: left-drag zooms to a window or pans, Shift + drag pans, wheel zooms",
+    "3d": "3D navigation: left-drag rotates, Shift + drag pans, wheel zooms, Alt + drag zooms "
+    "to a window",
+}
+
+
+def set_navigation_style(iren, mode: str = "2d") -> None:
+    """Install the mouse bindings of a navigation mode (NAVIGATION) on an interactor."""
+    iren.enable_custom_trackball_style(**NAVIGATION[mode])
+
+
+def _setting_bool(value, default: bool) -> bool:
+    """A QSettings value as a bool (ini files hand strings back)."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def _tooltip(action: QAction) -> None:
+    """Tooltip from the action's text, shortcut and status tip."""
+    text = action.text().replace("&", "")
+    shortcut = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+    if shortcut:
+        text += f"  ({shortcut})"
+    tip = action.statusTip()
+    if tip:
+        text += f"\n{tip}"
+    action.setToolTip(text)
+
+
+class _Batched:
+    """The change of a batch of commands: the union of their entity ids."""
+
+    def __init__(self, ids):
+        self._ids = list(ids)
+
+    def ids(self) -> list[int]:
+        return self._ids
 
 
 def _left_button_down() -> bool:
@@ -122,18 +186,48 @@ def version_label() -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None, off_screen: bool = False, session: Session | None = None):
+    def __init__(
+        self,
+        parent=None,
+        off_screen: bool = False,
+        session: Session | None = None,
+        settings: QSettings | None = None,
+    ):
         super().__init__(parent)
         if session is None:
             session = Session()
         self.session = session
         self._off_screen = off_screen
+        # Window layout, view options, recent files and the last directory persist between
+        # runs (an off-screen window, i.e. the tests, writes a throw-away file).
+        if settings is None:
+            if off_screen:
+                import os
+                import tempfile
+
+                descriptor, name = tempfile.mkstemp(suffix=".ini", prefix="opengrid-")
+                os.close(descriptor)
+                settings = QSettings(name, QSettings.Format.IniFormat)
+            else:
+                settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+        self.settings = settings
+        self._last_dir = ""
+        self._recent: list[str] = []
         self.selected_ids: list[int] = []
         self.tool: Tool = TOOLS["select"](session)
         self._saved_journal_length = 0
         self._press_position: tuple[int, int] | None = None
         self._drag = None  # handle drag in progress (app.handles.Drag)
         self._stroke: list | None = None  # freehand stroke in progress
+        # Mouse bindings: "2d" or "3d" (NAVIGATION); the mode follows the model until the user
+        # picks one (View menu). Alt is tracked here: the Qt -> VTK adapter forwards Ctrl and
+        # Shift only.
+        self.navigation_mode = "2d"
+        self._navigation_chosen = False
+        self._alt_pressed = False
+        # Refreshes of the commands run inside batch_updates() are coalesced into one.
+        self._batch_depth = 0
+        self._batched: tuple[set[int], bool] | None = None  # (ids, whole model)
         self.resize(1400, 900)
 
         self.viewport = self._create_viewport(off_screen)
@@ -181,8 +275,24 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_toolbars()
         self._connect_viewport_events()
+        self._restore_settings()
 
         self.model_tree.selection_changed.connect(self.set_selection)
+        self.model_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.model_tree.customContextMenuRequested.connect(
+            lambda position: self.show_context_menu(
+                self.model_tree.viewport().mapToGlobal(position)
+            )
+        )
+        self.coordinates_label = QLabel("")
+        self.coordinates_label.setMinimumWidth(180)
+        self.statusBar().addPermanentWidget(self.coordinates_label)
+        self._last_pointer: tuple[float, float] | None = None
+        self._right_press_position: tuple[float, float] | None = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(HOVER_DELAY_MS)
+        self._hover_timer.timeout.connect(self._update_hover)
         self.property_panel.message.connect(self._on_panel_message)
         self.property_panel.smooth_requested.connect(self.run_smoother)
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
@@ -240,7 +350,47 @@ class MainWindow(QMainWindow):
         if tip:
             action.setStatusTip(tip)
         action.triggered.connect(slot)
+        _tooltip(action)
         return action
+
+    def _decorate(self) -> None:
+        """Icons and tooltips (text, shortcut, what it does) of the toolbar actions."""
+        icons = {
+            "select": self.tool_actions["select"],
+            "point": self.tool_actions["point"],
+            "line": self.tool_actions["line"],
+            "arc": self.tool_actions["arc"],
+            "polyline": self.tool_actions["polyline"],
+            "spline": self.tool_actions["spline"],
+            "nurbs": self.tool_actions["nurbs"],
+            "freehand": self.tool_actions["freehand"],
+            "sketch": self.tool_actions["sketch"],
+            "finish": self.finish_action,
+            "cancel": self.cancel_action,
+            "connectors": self.connectors_action,
+            "chain": self.chain_action,
+            "structured": self.domain_action,
+            "unstructured": self.unstructured_action,
+            "network": self.network_action,
+            "group": self.group_action,
+            "block": self.block_action,
+            "extrude": self.extrude_action,
+            "volume": self.volume_action,
+            "undo": self.undo_action,
+            "redo": self.redo_action,
+            "reset-camera": self.fit_action,
+            "zoom-selection": self.zoom_selection_action,
+            "view-xy": self.view_actions["xy"],
+            "view-xz": self.view_actions["xz"],
+            "view-yz": self.view_actions["yz"],
+            "view-iso": self.view_actions["iso"],
+            "navigation-3d": self.navigation_3d_action,
+            "perspective": self.perspective_action,
+            "zoom-window": self.zoom_window_action,
+        }
+        for name, action in icons.items():
+            action.setIcon(icon(name))
+            _tooltip(action)
 
     def _create_actions(self) -> None:
         self.new_action = self._action("&New", self.new_project, QKeySequence.StandardKey.New)
@@ -357,9 +507,55 @@ class MainWindow(QMainWindow):
             "Export high-order elements…", self.export_high_order
         )
 
-        self.fit_action = self._action("&Fit view", self.scene.fit, QKeySequence("F"))
-        self.fit_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self.viewport.addAction(self.fit_action)
+        self.fit_action = self._action(
+            "&Reset camera",
+            self.scene.reset_camera,
+            QKeySequence("F"),
+            "Centre the view on the whole model, keeping the viewing direction",
+        )
+        self.zoom_selection_action = self._action(
+            "&Zoom to selection",
+            self.zoom_to_selection,
+            QKeySequence("Z"),
+            "Centre the view on the selected entities (the whole model when nothing is selected)",
+        )
+        self.view_actions: dict[str, QAction] = {}
+        for key, label, shortcut, tip in (
+            ("xy", "View from +Z (top)", "1", "Look down the z axis at the x-y plane"),
+            ("xz", "View from -Y (front)", "2", "Look along the y axis at the x-z plane"),
+            ("yz", "View from +X (side)", "3", "Look along the x axis at the y-z plane"),
+            ("iso", "Isometric view", "7", "Look from the (1, 1, 1) corner"),
+        ):
+            action = self._action(
+                label,
+                lambda _checked=False, k=key: self.scene.view_preset(k),
+                QKeySequence(shortcut),
+                tip,
+            )
+            self.view_actions[key] = action
+        self.perspective_action = QAction("&Perspective projection", self)
+        self.perspective_action.setCheckable(True)
+        self.perspective_action.setShortcut(QKeySequence("V"))
+        self.perspective_action.setStatusTip(
+            "Perspective instead of parallel projection (the 2D tools need the parallel view)"
+        )
+        self.perspective_action.toggled.connect(self.set_perspective)
+        self.navigation_3d_action = QAction("&3D navigation (left-drag rotates)", self)
+        self.navigation_3d_action.setCheckable(True)
+        self.navigation_3d_action.setStatusTip(
+            "Left-drag rotates the view (Shift: pan, Alt: zoom to a window); off: the 2D "
+            "bindings. Follows the model (blocks, volumes, surfaces) until set here."
+        )
+        self.navigation_3d_action.toggled.connect(self._on_navigation_toggled)
+        for action in (
+            self.fit_action,
+            self.zoom_selection_action,
+            *self.view_actions.values(),
+            self.perspective_action,
+        ):
+            action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            self.viewport.addAction(action)
+            self.model_tree.addAction(action)
         self.high_order_action = QAction("Show high-order elements…", self)
         self.high_order_action.setCheckable(True)
         self.high_order_action.setStatusTip(
@@ -377,28 +573,50 @@ class MainWindow(QMainWindow):
 
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[str, QAction] = {}
-        labels = {
-            "select": "Select",
-            "point": "Point",
-            "line": "Line",
-            "arc": "Arc (3 points)",
-            "polyline": "Polyline",
-            "spline": "Spline",
-            "nurbs": "NURBS",
-            "freehand": "Freehand",
-            "sketch": "Sketch block",
+        tools = {
+            "select": (
+                "Select",
+                "S",
+                "Click to select, Shift + click to add; drag a handle to move it",
+            ),
+            "point": ("Point", "P", "Click to place a point"),
+            "line": ("Line", "L", "Click the two end points"),
+            "arc": ("Arc (3 points)", "A", "Click the start, a point on the arc and the end"),
+            "polyline": ("Polyline", "W", "Click the points; Enter finishes, Esc cancels"),
+            "spline": ("Spline", "B", "Click the points of a cubic spline; Enter finishes"),
+            "nurbs": ("NURBS", "N", "Click the control points; Enter finishes"),
+            "freehand": (
+                "Freehand",
+                "D",
+                "Press and draw; release to fit curves (near the start: a loop)",
+            ),
+            "sketch": (
+                "Sketch block",
+                "K",
+                "Click the four corners of a block of the sketch topology",
+            ),
         }
-        for name, label in labels.items():
+        for name, (label, key, tip) in tools.items():
             action = QAction(label, self)
             action.setCheckable(True)
+            action.setShortcut(QKeySequence(key))
+            action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            action.setStatusTip(tip)
             action.triggered.connect(lambda _checked=False, n=name: self.set_tool(n))
             self.tool_group.addAction(action)
             self.tool_actions[name] = action
+            self.viewport.addAction(action)
+            self.model_tree.addAction(action)
         self.tool_actions["select"].setChecked(True)
+        self._decorate()
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
-        for action in (self.new_action, self.open_action, self.save_action, self.save_as_action):
+        for action in (self.new_action, self.open_action):
+            file_menu.addAction(action)
+        self.recent_menu = file_menu.addMenu("Open &recent")
+        self._update_recent_menu()
+        for action in (self.save_action, self.save_as_action):
             file_menu.addAction(action)
         file_menu.addSeparator()
         file_menu.addAction(self.import_dat_action)
@@ -480,7 +698,13 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
+        view_menu.addAction(self.zoom_selection_action)
+        for action in self.view_actions.values():
+            view_menu.addAction(action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.navigation_3d_action)
         view_menu.addAction(self.zoom_window_action)
+        view_menu.addAction(self.perspective_action)
         view_menu.addSeparator()
         view_menu.addAction(self.color_action)
         view_menu.addAction(self.nodes_action)
@@ -495,6 +719,7 @@ class MainWindow(QMainWindow):
     def _create_toolbars(self) -> None:
         toolbar = QToolBar("Tools", self)
         toolbar.setObjectName("toolbar_tools")
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         for action in self.tool_actions.values():
             toolbar.addAction(action)
         toolbar.addSeparator()
@@ -517,8 +742,23 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
-        toolbar.addAction(self.fit_action)
         self.addToolBar(toolbar)
+        view_toolbar = QToolBar("View", self)
+        view_toolbar.setObjectName("toolbar_view")
+        view_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        view_toolbar.addAction(self.fit_action)
+        view_toolbar.addAction(self.zoom_selection_action)
+        for action in self.view_actions.values():
+            view_toolbar.addAction(action)
+        view_toolbar.addSeparator()
+        view_toolbar.addAction(self.navigation_3d_action)
+        view_toolbar.addAction(self.zoom_window_action)
+        view_toolbar.addAction(self.perspective_action)
+        view_toolbar.addSeparator()
+        view_toolbar.addAction(self.network_action)
+        view_toolbar.addAction(self.group_action)
+        self.addToolBar(view_toolbar)
+        self.view_toolbar = view_toolbar
 
     def _connect_viewport_events(self) -> None:
         # Double clicks come from Qt (VTK has no such event): add / remove curve points.
@@ -526,12 +766,22 @@ class MainWindow(QMainWindow):
         iren = self.viewport.iren
         if iren is None:
             return  # off-screen (tests): handlers are driven directly in world space
-        iren.add_observer("LeftButtonPressEvent", self._on_vtk_press)
-        iren.add_observer("LeftButtonReleaseEvent", self._on_vtk_release)
-        iren.add_observer("MouseMoveEvent", self._on_vtk_move)
+        set_navigation_style(iren, self.navigation_mode)
+        interactor = iren.interactor
+        # Clicks, moves and right clicks: passive observers, invoked even while the camera
+        # style holds the interactor's focus (it grabs it on every press it sees).
+        for event, handler in (
+            ("LeftButtonPressEvent", self._on_vtk_press),
+            ("LeftButtonReleaseEvent", self._on_vtk_release),
+            ("MouseMoveEvent", self._on_vtk_move),
+            ("RightButtonPressEvent", self._on_vtk_right_press),
+            ("RightButtonReleaseEvent", self._on_vtk_right_release),
+            ("LeaveEvent", self._on_vtk_leave),
+        ):
+            tag = interactor.AddObserver(event, handler)
+            interactor.GetCommand(tag).SetPassiveObserver(True)
         # Drags of handles and freehand strokes take the left button before the camera does:
         # high-priority observers that stop the event when they use it.
-        interactor = iren.interactor
         self._grab_tags = {}
         for event, handler in (
             ("LeftButtonPressEvent", self._grab_press),
@@ -549,10 +799,14 @@ class MainWindow(QMainWindow):
             self._zoom_tags[event] = interactor.AddObserver(event, handler, 5.0)
 
     def _zoom_press(self, interactor, event) -> None:
-        if not self.zoom_window_action.isChecked():
-            return
-        if interactor.GetShiftKey() or interactor.GetControlKey():
-            return  # Shift: pan, Ctrl: spin (the camera style)
+        if self.navigation_mode == "3d":
+            if not self._alt_pressed:
+                return  # left-drag rotates; Alt + left-drag is the zoom window
+        else:
+            if not self.zoom_window_action.isChecked():
+                return
+            if interactor.GetShiftKey() or interactor.GetControlKey():
+                return  # Shift: pan, Ctrl: spin (the camera style)
         x, y = interactor.GetEventPosition()
         self.zoom_box.start(x, y)
         # The press is used here: the camera style must not see it, or it starts a pan and
@@ -732,11 +986,126 @@ class MainWindow(QMainWindow):
             return  # a drag (pan), not a click
         interactor = self.viewport.iren.interactor
         additive = bool(interactor.GetShiftKey() or interactor.GetControlKey())
-        self.handle_click(self.scene.display_to_world(x, y), additive)
+        self.handle_click_at(x, y, additive)
 
     def _on_vtk_move(self, *_args) -> None:
         x, y = self._event_position()
+        self._last_pointer = (x, y)
         self.handle_move(self.scene.display_to_world(x, y))
+        self._update_coordinates(x, y)
+        if self._hover_wanted():
+            self._hover_timer.start()
+        elif self.scene.hovered is not None:
+            self.scene.set_hover(None)
+
+    def _on_vtk_leave(self, *_args) -> None:
+        self._hover_timer.stop()
+        self.scene.set_hover(None)
+        self.coordinates_label.setText("")
+
+    def _on_vtk_right_press(self, *_args) -> None:
+        self._right_press_position = self._event_position()
+
+    def _on_vtk_right_release(self, *_args) -> None:
+        """A right click (no drag: right-drag zooms) opens the context menu."""
+        if self._right_press_position is None:
+            return
+        x, y = self._event_position()
+        x0, y0 = self._right_press_position
+        self._right_press_position = None
+        if abs(x - x0) + abs(y - y0) > CLICK_MOVE_PIXELS:
+            return
+        from PySide6.QtGui import QCursor
+
+        self.show_context_menu(QCursor.pos())
+
+    # ------------------------------------------------------------ hover, coordinates
+    def _hover_wanted(self) -> bool:
+        return (
+            self.tool.name == "select"
+            and self._drag is None
+            and self._stroke is None
+            and not self.zoom_box.active
+            and not _left_button_down()
+        )
+
+    def _update_hover(self) -> None:
+        """Highlight the entity under the pointer (run shortly after the last move)."""
+        if not self._hover_wanted() or self._last_pointer is None:
+            self.scene.set_hover(None)
+            return
+        x, y = self._last_pointer
+        entity_id = self.pick_at(x, y)
+        self.scene.set_hover(entity_id)
+
+    def pick_at(self, x: float, y: float) -> int | None:
+        """The entity under display pixel (x, y): along the view ray in a 3D view, in the
+        z = 0 plane otherwise (Scene.pick_display / pick_entity)."""
+        if self._ray_picking():
+            entity_id, _point = self.scene.pick_display(x, y)
+            if entity_id is not None and entity_id not in self.session.store:
+                return None
+            return entity_id
+        tolerance = PICK_PIXELS * self.scene.world_per_pixel()
+        name = pick_entity(self.session, self.scene.display_to_world(x, y), tolerance)
+        if name is None:
+            return None
+        return self.session.store.get(name).id
+
+    def _update_coordinates(self, x: float, y: float) -> None:
+        """World coordinates of the pointer in the status bar (2D views: the z = 0 plane)."""
+        if self._ray_picking():
+            self.coordinates_label.setText("")
+            return
+        wx, wy, _wz = self.scene.display_to_world(x, y)
+        self.coordinates_label.setText(f"x {wx:.6g}   y {wy:.6g}")
+
+    # ------------------------------------------------------------- context menu
+    def context_menu(self) -> QMenu:
+        """The right-click menu: the actions that apply to the selection, topology edits,
+        zoom and delete, then the views."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        kinds = {self.session.store.get(i).kind for i in self.selected_ids}
+        curves = bool(kinds & set(CURVE_KINDS))
+        connectors = "connector" in kinds
+        domains = bool(kinds & {"domain", "unstructured_domain"})
+        structured = "domain" in kinds
+        groups = [
+            (self.connectors_action, curves),
+            (self.chain_action, curves),
+            (self.network_action, curves),
+            (self.unstructured_action, curves or connectors),
+            (self.domain_action, connectors),
+            (self.extrude_action, structured or "unstructured_domain" in kinds),
+            (self.group_action, structured),
+            (self.block_action, structured),
+            (self.volume_action, domains),
+        ]
+        for action, applies in groups:
+            if applies:
+                menu.addAction(action)
+        if any(applies for _action, applies in groups):
+            menu.addSeparator()
+        topology = menu.addMenu("Topology")
+        for action in self.topology_actions.values():
+            topology.addAction(action)
+        menu.addSeparator()
+        if self.selected_ids:
+            menu.addAction(self.zoom_selection_action)
+            menu.addAction(self.delete_action)
+            menu.addSeparator()
+        menu.addAction(self.fit_action)
+        views = menu.addMenu("View from")
+        for action in self.view_actions.values():
+            views.addAction(action)
+        menu.addAction(self.navigation_3d_action)
+        return menu
+
+    def show_context_menu(self, global_position) -> None:
+        menu = self.context_menu()
+        menu.exec(global_position)
 
     # ---------------------------------------------------- world-space handlers
     def snap_point(self, xyz):
@@ -744,6 +1113,12 @@ class MainWindow(QMainWindow):
         return snap(xyz, snap_targets(self.session), tolerance)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt virtual)
+        if watched is self.viewport and event.type() in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+            QEvent.Type.MouseMove,
+        ):
+            self._alt_pressed = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         if (
             watched is self.viewport
             and event.type() == QEvent.Type.MouseButtonDblClick
@@ -824,8 +1199,30 @@ class MainWindow(QMainWindow):
         self._show_handles()
         self.statusBar().showMessage(f"{message}; undo restores the curve", 5000)
 
+    def handle_click_at(self, x: float, y: float, additive: bool = False) -> None:
+        """A click at display pixel (x, y). Selection in a 3D view (3D navigation, or a view
+        not looking along z) picks what is drawn under the pointer (Scene.pick_display); the
+        2D tools and the 2D selection work in the z = 0 plane."""
+        if self.tool.name == "select" and self._ray_picking():
+            entity_id, _point = self.scene.pick_display(x, y)
+            name = None
+            if entity_id is not None and entity_id in self.session.store:
+                name = self.session.store.get(entity_id).name
+            self._select_picked(name, additive)
+            return
+        self.handle_click(self.scene.display_to_world(x, y), additive)
+
+    def _ray_picking(self) -> bool:
+        """Whether clicks pick along the view ray: in 3D navigation, or whenever the view does
+        not look along z (the 2D picker works in the z = 0 plane)."""
+        if self.navigation_mode == "3d":
+            return True
+        direction = self.viewport.renderer.GetActiveCamera().GetDirectionOfProjection()
+        return abs(direction[2]) < 0.999
+
     def handle_click(self, xyz, additive: bool = False) -> None:
-        """A click at world position ``xyz`` (from the viewport, or from tests)."""
+        """A click at world position ``xyz`` in the z = 0 plane (from the viewport in a 2D
+        view, or from tests)."""
         if self.tool.name == "select":
             tolerance = PICK_PIXELS * self.scene.world_per_pixel()
             name = pick_entity(self.session, xyz, tolerance)
@@ -921,6 +1318,8 @@ class MainWindow(QMainWindow):
         ids = [i for i in ids if i in self.session.store]
         self.selected_ids = list(ids)
         self.scene.set_selection(ids)
+        if self.scene.hovered in ids:
+            self.scene.set_hover(None)
         self._show_handles()
         self.model_tree.select_ids(ids)
         if len(ids) == 1:
@@ -944,8 +1343,33 @@ class MainWindow(QMainWindow):
     def selected_names(self) -> list[str]:
         return [self.session.store.get(i).name for i in self.selected_ids]
 
+    @contextmanager
+    def batch_updates(self):
+        """Coalesce the refreshes of the commands run inside into one (the actions that run
+        several commands: connectors on curves, imports, drags)."""
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            if self._batch_depth == 0 and self._batched is not None:
+                ids, whole = self._batched
+                self._batched = None
+                if whole:
+                    self._on_model_changed(None)
+                else:
+                    self._on_model_changed(_Batched(sorted(ids)))
+
     def _on_model_changed(self, change) -> None:
-        had_geometry = len(self.scene._actors) > 0
+        if self._batch_depth > 0:
+            ids, whole = self._batched or (set(), False)
+            if change is None:
+                whole = True
+            else:
+                ids.update(change.ids())
+            self._batched = (ids, whole)
+            return
+        had_geometry = self.scene.has_geometry()
         if change is None:
             self.scene.rebuild()
         else:
@@ -957,6 +1381,7 @@ class MainWindow(QMainWindow):
             self.scene.update_entities([])
         self.set_selection(self.selected_ids)
         self._update_edit_actions()
+        self._auto_navigation()
         if not had_geometry and len(self.session.store) > 0:
             self.scene.fit()
         if self.high_order_action.isChecked():
@@ -986,6 +1411,7 @@ class MainWindow(QMainWindow):
         self.set_selection([])
         self._update_edit_actions()
         self._update_tool_feedback(None)
+        self._auto_navigation()
         action = getattr(self, "high_order_action", None)
         if action is not None and action.isChecked():
             self.refresh_high_order()
@@ -1040,7 +1466,9 @@ class MainWindow(QMainWindow):
 
         order, curved = self._high_order_settings
         started = time.perf_counter()
-        mesh = self._run(lambda: self.session.high_order(order, curved))
+        mesh = self._run_long(
+            "Building the high-order elements…", lambda: self.session.high_order(order, curved)
+        )
         self._last_high_order = mesh
         if mesh is None:
             self.scene.show_high_order(None)
@@ -1062,6 +1490,58 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
         log.info("high-order overlay: %s", message)
         return mesh
+
+    # ------------------------------------------------------------- navigation
+    def _model_is_3d(self) -> bool:
+        if self.session.is_3d():
+            return True
+        return any(entity.kind in SURFACE_KINDS for entity in self.session.store)
+
+    def _auto_navigation(self) -> None:
+        """Follow the model with the navigation mode until the user chose one."""
+        if self._navigation_chosen:
+            return
+        wanted = "2d"
+        if self._model_is_3d():
+            wanted = "3d"
+        if wanted != self.navigation_mode:
+            self.set_navigation_mode(wanted)
+            if wanted == "3d" and self.scene.has_geometry():
+                self.scene.fit()
+
+    def _on_navigation_toggled(self, checked: bool) -> None:
+        mode = "2d"
+        if checked:
+            mode = "3d"
+        if mode != self.navigation_mode:
+            self.set_navigation_mode(mode, chosen=True)
+        else:
+            self._navigation_chosen = True
+
+    def set_navigation_mode(self, mode: str, chosen: bool = False) -> None:
+        """Mouse bindings "2d" or "3d" (NAVIGATION); ``chosen``: the user's pick, kept
+        whatever the model becomes."""
+        if mode not in NAVIGATION:
+            raise ValueError(f"unknown navigation mode {mode!r} (2d or 3d)")
+        self.navigation_mode = mode
+        if chosen:
+            self._navigation_chosen = True
+        iren = self.viewport.iren
+        if iren is not None:
+            set_navigation_style(iren, mode)
+        self.scene.default_view = {"2d": "xy", "3d": "iso"}[mode]
+        self.zoom_window_action.setEnabled(mode == "2d")
+        self.navigation_3d_action.blockSignals(True)
+        self.navigation_3d_action.setChecked(mode == "3d")
+        self.navigation_3d_action.blockSignals(False)
+        self.statusBar().showMessage(NAVIGATION_HINTS[mode], 8000)
+
+    def zoom_to_selection(self) -> None:
+        if not self.selected_ids or not self.scene.zoom_to(self.selected_ids):
+            self.scene.reset_camera()
+
+    def set_perspective(self, enabled: bool) -> None:
+        self.scene.set_perspective(enabled)
 
     def _update_edit_actions(self) -> None:
         commands = self.session.commands
@@ -1123,7 +1603,10 @@ class MainWindow(QMainWindow):
         if len(faces) < 2:
             self.statusBar().showMessage("Select the domains enclosing the volume", 5000)
             return None
-        name = self._run(lambda: self.session.create_volume(faces))
+        with self.batch_updates():
+            name = self._run(lambda: self.session.create_volume(faces))
+            if name:
+                self._run_long(f"Meshing {name}…", lambda: self._warm_caches([name]))
         if name:
             log.info("created %s: %s", name, self.session.volume_status(name))
             self.set_selection([self.session.store.get(name).id])
@@ -1166,7 +1649,7 @@ class MainWindow(QMainWindow):
         vector = tuple(float(v) for v in 0.25 * size * normal / np.linalg.norm(normal))
         dimension = self.dimension_box.value()
         if structured:
-            name = self._run(
+            name = self._run_meshed(
                 lambda: self.session.create_extruded_block(
                     domains[0], "translate", vector=vector, dimension=dimension
                 )
@@ -1174,7 +1657,7 @@ class MainWindow(QMainWindow):
             if name:
                 log.info("created %s: %s", name, self.session.block_status(name))
         else:
-            name = self._run(
+            name = self._run_meshed(
                 lambda: self.session.create_extruded_volume(
                     domains[0], "translate", vector=vector, dimension=dimension
                 )
@@ -1412,12 +1895,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No domains to export", 5000)
             return None
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(
-                self, "Export VTKHDF", "", "VTKHDF (*.vtkhdf *.hdf)"
-            )
+            path, _filter = self._save_dialog(self, "Export VTKHDF", "", "VTKHDF (*.vtkhdf *.hdf)")
             if not path:
                 return None
-        summary = self._run(lambda: self.session.export_vtkhdf(path))
+        summary = self._run_long("Exporting VTKHDF…", lambda: self.session.export_vtkhdf(path))
         if summary:
             log.info("exported %s: %s", path, summary)
         return summary
@@ -1449,7 +1930,7 @@ class MainWindow(QMainWindow):
                 return None
             curved = choice == choices[0]
         if path is None:
-            path, chosen = QFileDialog.getSaveFileName(
+            path, chosen = self._save_dialog(
                 self,
                 "Export high-order elements",
                 "",
@@ -1463,8 +1944,9 @@ class MainWindow(QMainWindow):
                 nodes = "gll"
             elif "Gauss nodes" in chosen:
                 nodes = "gauss"
-        summary = self._run(
-            lambda: self.session.export_high_order(path, order=order, nodes=nodes, curved=curved)
+        summary = self._run_long(
+            "Exporting the high-order elements…",
+            lambda: self.session.export_high_order(path, order=order, nodes=nodes, curved=curved),
         )
         if summary:
             log.info("exported %s: %s", path, summary)
@@ -1489,7 +1971,7 @@ class MainWindow(QMainWindow):
             if not ok:
                 return None
         if path is None:
-            path, chosen = QFileDialog.getSaveFileName(
+            path, chosen = self._save_dialog(
                 self,
                 "Export curved high-order elements",
                 "",
@@ -1502,8 +1984,9 @@ class MainWindow(QMainWindow):
                 nodes = "gll"
             elif "Gauss nodes" in chosen:
                 nodes = "gauss"
-        summary = self._run(
-            lambda: self.session.export_curved_high_order(path, order=order, nodes=nodes)
+        summary = self._run_long(
+            "Exporting the curved high-order elements…",
+            lambda: self.session.export_curved_high_order(path, order=order, nodes=nodes),
         )
         if summary:
             log.info("exported %s: %s", path, summary)
@@ -1514,12 +1997,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No domains to export", 5000)
             return False
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(
-                self, "Export Plot3D", "", "Plot3D (*.xyz *.x *.p3d)"
-            )
+            path, _filter = self._save_dialog(self, "Export Plot3D", "", "Plot3D (*.xyz *.x *.p3d)")
             if not path:
                 return False
-        self._run(lambda: self.session.export_plot3d(path, binary=binary))
+        self._run_long("Exporting Plot3D…", lambda: self.session.export_plot3d(path, binary=binary))
         log.info("exported %s", path)
         return True
 
@@ -1600,10 +2081,10 @@ class MainWindow(QMainWindow):
 
     def export_cgns(self, path: str | None = None) -> dict | None:
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(self, "Export CGNS", "", "CGNS (*.cgns)")
+            path, _filter = self._save_dialog(self, "Export CGNS", "", "CGNS (*.cgns)")
             if not path:
                 return None
-        summary = self._run(lambda: self.session.export_cgns(path))
+        summary = self._run_long("Exporting CGNS…", lambda: self.session.export_cgns(path))
         if summary:
             log.info("exported %s: %s", path, summary)
         self.validate_boundary()
@@ -1611,10 +2092,10 @@ class MainWindow(QMainWindow):
 
     def export_gmsh(self, path: str | None = None) -> dict | None:
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(self, "Export Gmsh", "", "Gmsh (*.msh)")
+            path, _filter = self._save_dialog(self, "Export Gmsh", "", "Gmsh (*.msh)")
             if not path:
                 return None
-        summary = self._run(lambda: self.session.export_gmsh(path))
+        summary = self._run_long("Exporting Gmsh…", lambda: self.session.export_gmsh(path))
         if summary:
             log.info("exported %s: %s", path, summary)
         self.validate_boundary()
@@ -1703,10 +2184,58 @@ class MainWindow(QMainWindow):
             shown.append(f"{len(names) - 3} more")
         return f"{', '.join(shown)}: select {needed}"
 
-    def _run(self, function):
-        """Run a model operation; report validation errors instead of raising."""
+    def _run_long(self, label: str, function, cancel=None):
+        """Run a long operation in a worker thread behind a busy dialog (app/worker.py), the
+        window refreshed once afterwards; errors reported as in _run."""
+        from opengrid.app.worker import run_blocking
+
+        self._hover_timer.stop()
+        self.scene.set_hover(None)
         try:
-            return function()
+            with self.batch_updates():
+                return run_blocking(self, label, function, cancel)
+        except (ValidationError, KeyError, ValueError, RuntimeError, OSError) as error:
+            text = str(error)
+            log.warning("%s", text)
+            self.statusBar().showMessage(text.splitlines()[0], 8000)
+            return None
+
+    def _run_meshed(self, function):
+        """A command that creates a meshed entity: the mesh is computed in a worker thread
+        before the window draws it."""
+        with self.batch_updates():
+            name = self._run(function)
+            if name:
+                self._run_long(f"Meshing {name}…", lambda: self._warm_caches([name]))
+        return name
+
+    def _warm_caches(self, names=None) -> None:
+        """Evaluate the meshes the scene will draw (worker thread): domains, blocks, volumes;
+        problems are left to the refresh, which reports them."""
+        if names is None:
+            names = [e.name for e in self.session.store if e.kind in MESHED_KINDS]
+        for name in names:
+            if name not in self.session.store:
+                continue
+            kind = self.session.store.get(name).kind
+            try:
+                if kind == "domain":
+                    self.session.domain_grid(name, compute=False)
+                elif kind == "unstructured_domain":
+                    self.session.unstructured_mesh(name)
+                elif kind == "block":
+                    self.session.block_grid(name)
+                elif kind == "volume":
+                    self.session.volume_mesh(name)
+            except (ValidationError, ValueError, RuntimeError):
+                continue
+
+    def _run(self, function):
+        """Run a model operation (its commands refresh the window once); report validation
+        errors instead of raising."""
+        try:
+            with self.batch_updates():
+                return function()
         except (ValidationError, KeyError, ValueError) as error:
             text = str(error)
             log.warning("%s", text)
@@ -1740,7 +2269,9 @@ class MainWindow(QMainWindow):
         if not geometry:
             self.statusBar().showMessage("Select curves or surfaces with the sketch", 5000)
             return None
-        name = self._run(lambda: self.session.assign_sketch_geometry(sketch, geometry))
+        name = self._run_long(
+            "Assigning the geometry…", lambda: self.session.assign_sketch_geometry(sketch, geometry)
+        )
         if name:
             log.info("%s: assigned %s", name, ", ".join(geometry))
             self._after_sketch(name)
@@ -1760,7 +2291,9 @@ class MainWindow(QMainWindow):
         key = "body"
         if kind == "butterfly":
             key = "boundary"
-        name = self._run(lambda: self.session.create_template(kind, **{key: curves}))
+        name = self._run_long(
+            "Building the template…", lambda: self.session.create_template(kind, **{key: curves})
+        )
         if name:
             log.info("template %s: %s", kind, name)
             self._after_sketch(name)
@@ -1771,7 +2304,7 @@ class MainWindow(QMainWindow):
         if not curves:
             self.statusBar().showMessage("Select the curves bounding the region first", 5000)
             return None
-        name = self._run(lambda: self.session.auto_topology(curves))
+        name = self._run_long("Computing the topology…", lambda: self.session.auto_topology(curves))
         if name:
             log.info("automatic topology: %s", name)
             self.scene.rebuild()
@@ -1782,7 +2315,9 @@ class MainWindow(QMainWindow):
         sketch = self._one("sketch", "sketch")
         if sketch is None:
             return None
-        name = self._run(lambda: self.session.regenerate_sketch(sketch))
+        name = self._run_long(
+            "Regenerating the sketch…", lambda: self.session.regenerate_sketch(sketch)
+        )
         if name:
             self._after_sketch(name)
         return name
@@ -1964,7 +2499,7 @@ class MainWindow(QMainWindow):
         if path is None:
             if not self._confirm_discard():
                 return False
-            path, _filter = QFileDialog.getOpenFileName(self, "Open project", "", PROJECT_FILTER)
+            path, _filter = self._open_dialog(self, "Open project", "", PROJECT_FILTER)
             if not path:
                 return False
         try:
@@ -1973,8 +2508,10 @@ class MainWindow(QMainWindow):
             self._report_error("Cannot open project", error)
             return False
         self._saved_journal_length = len(self.session.commands.journal.lines)
+        self._run_long("Loading the project's meshes…", self._warm_caches)
         self._refresh_all()
         self.scene.fit()
+        self._add_recent(path)
         log.info("opened %s", path)
         return True
 
@@ -1985,7 +2522,7 @@ class MainWindow(QMainWindow):
 
     def save_project_as(self, path: str | None = None) -> bool:
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(self, "Save project", "", PROJECT_FILTER)
+            path, _filter = self._save_dialog(self, "Save project", "", PROJECT_FILTER)
             if not path:
                 return False
             if not path.endswith(".ogp"):
@@ -2000,12 +2537,13 @@ class MainWindow(QMainWindow):
             return False
         self._saved_journal_length = len(self.session.commands.journal.lines)
         self._update_title()
+        self._add_recent(path)
         log.info("saved %s", path)
         return True
 
     def import_airfoil(self, path: str | None = None, mode: str | None = None) -> list[str]:
         if path is None:
-            path, _filter = QFileDialog.getOpenFileName(
+            path, _filter = self._open_dialog(
                 self, "Import airfoil", "", "Airfoil coordinates (*.dat *.txt);;All files (*)"
             )
             if not path:
@@ -2028,7 +2566,7 @@ class MainWindow(QMainWindow):
     def import_cad(self, path: str | None = None, domains: str | None = None):
         """Import a STEP / IGES file (Session.import_cad); the report goes to the log."""
         if path is None:
-            path, _filter = QFileDialog.getOpenFileName(
+            path, _filter = self._open_dialog(
                 self,
                 "Import CAD",
                 "",
@@ -2049,7 +2587,13 @@ class MainWindow(QMainWindow):
                 return None
             domains = domains.split(" ")[0]
         try:
-            result = self.session.import_cad(path, domains=domains)
+            with self.batch_updates():
+                from opengrid.app.worker import run_blocking
+
+                self._hover_timer.stop()
+                result = run_blocking(
+                    self, "Importing CAD…", lambda: self.session.import_cad(path, domains=domains)
+                )
         except (ValidationError, RuntimeError) as error:
             self._report_error("Cannot import CAD", error)
             return None
@@ -2060,7 +2604,7 @@ class MainWindow(QMainWindow):
 
     def import_csv(self, path: str | None = None, mode: str | None = None) -> list[str]:
         if path is None:
-            path, _filter = QFileDialog.getOpenFileName(
+            path, _filter = self._open_dialog(
                 self, "Import points", "", "Point lists (*.csv *.txt *.dat);;All files (*)"
             )
             if not path:
@@ -2082,7 +2626,7 @@ class MainWindow(QMainWindow):
 
     def save_journal(self, path: str | None = None) -> None:
         if path is None:
-            path, _filter = QFileDialog.getSaveFileName(
+            path, _filter = self._save_dialog(
                 self, "Save journal", "journal.py", "Python script (*.py)"
             )
             if not path:
@@ -2095,7 +2639,83 @@ class MainWindow(QMainWindow):
         if self.isVisible() and not self._off_screen:
             QMessageBox.critical(self, title, str(error))
 
+    # ----------------------------------------------------------------- settings
+    def _restore_settings(self) -> None:
+        s = self.settings
+        geometry = s.value("window/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        state = s.value("window/state")
+        if state is not None:
+            self.restoreState(state)
+        self.zoom_window_action.setChecked(_setting_bool(s.value("view/zoom_window"), True))
+        self.nodes_action.setChecked(_setting_bool(s.value("view/nodes"), True))
+        self.color_action.setChecked(_setting_bool(s.value("view/stretching"), True))
+        dimension = s.value("tools/dimension")
+        if dimension is not None:
+            self.dimension_box.setValue(int(dimension))
+        self._last_dir = str(s.value("files/last_dir", ""))
+        recent = s.value("files/recent", [])
+        if isinstance(recent, str):
+            recent = [recent]
+        self._recent = [str(p) for p in (recent or []) if p]
+        self._update_recent_menu()
+
+    def _save_settings(self) -> None:
+        s = self.settings
+        s.setValue("window/geometry", self.saveGeometry())
+        s.setValue("window/state", self.saveState())
+        s.setValue("view/zoom_window", self.zoom_window_action.isChecked())
+        s.setValue("view/nodes", self.nodes_action.isChecked())
+        s.setValue("view/stretching", self.color_action.isChecked())
+        s.setValue("tools/dimension", self.dimension_box.value())
+        s.setValue("files/last_dir", self._last_dir)
+        s.setValue("files/recent", self._recent)
+        s.sync()
+
+    def _add_recent(self, path) -> None:
+        path = str(Path(path).resolve())
+        self._recent = [path, *[p for p in self._recent if p != path]][:RECENT_FILES]
+        self._update_recent_menu()
+
+    def _update_recent_menu(self) -> None:
+        menu = getattr(self, "recent_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        for path in self._recent:
+            action = menu.addAction(Path(path).name)
+            action.setStatusTip(path)
+            action.setToolTip(path)
+            action.triggered.connect(lambda _checked=False, p=path: self.open_document(p))
+        menu.setEnabled(bool(self._recent))
+
+    def _open_dialog(
+        self, _parent, title: str, _directory: str = "", filter: str = "", *args, **kwargs
+    ):
+        """QFileDialog.getOpenFileName from the last directory used, which it remembers."""
+        path, chosen = QFileDialog.getOpenFileName(
+            self, title, self._last_dir, filter, *args, **kwargs
+        )
+        if path:
+            self._last_dir = str(Path(path).parent)
+        return path, chosen
+
+    def _save_dialog(
+        self, _parent, title: str, suggested: str = "", filter: str = "", *args, **kwargs
+    ):
+        """QFileDialog.getSaveFileName in the last directory used (``suggested``: a file name
+        there), which it remembers."""
+        start = self._last_dir
+        if suggested:
+            start = str(Path(self._last_dir) / Path(suggested).name)
+        path, chosen = QFileDialog.getSaveFileName(self, title, start, filter, *args, **kwargs)
+        if path:
+            self._last_dir = str(Path(path).parent)
+        return path, chosen
+
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._save_settings()
         logging.getLogger("opengrid").removeHandler(self.log_panel.handler)
         if self._on_model_changed in self.session.commands._listeners:
             self.session.commands.remove_listener(self._on_model_changed)

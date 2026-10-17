@@ -33,6 +33,12 @@ history). Phase tags show where each item came from.
     lists them).
   - Because of that, a connector shared by two boundary types must be split by hand.
 - **GUI property panel** [5b]: the status label is clipped.
+- **GUI** [2026-10-17 round]: the 2D tools draw in the z = 0 plane whatever the view; 3D
+  picking hits drawn lines and faces (a wireframe block is picked on its grid lines, not in
+  the open middle of a face); a drag preview rebuilds the merged curve / connector layers on
+  its first frame (a noticeable pause on models with thousands of connectors); the busy
+  dialog of long operations has no Cancel button except where the operation can stop (the
+  smoother); the model tree is rebuilt on every command (fine to a few thousand entities).
 - **3D cut plane** [7a]: fixed normal (x) at the model centre.
 
 ## Structured 2D
@@ -298,10 +304,10 @@ history). Phase tags show where each item came from.
   edge without patches. Pyramids' curved edges are drawn (VTK files write them linear).
 - **Viewport picking** [12a]: a click picks connectors before curves and domains; curves under
   a connector are edited through the connector's handles or the model tree.
-- **Trackpad gestures** [GUI]: the zoom window is a left-drag; a three-finger drag is one only
-  with macOS's "Three Finger Drag" (System Settings -> Accessibility -> Pointer Control ->
-  Trackpad Options). Two-finger scroll zooms (as a wheel); pinch gestures are not mapped by
-  OpenGrid. The launcher app depends on the `opengrid` conda environment (moving or removing
+- **Trackpad gestures** [GUI]: in 2D navigation the zoom window is a left-drag; a three-finger
+  drag is one only with macOS's "Three Finger Drag" (System Settings -> Accessibility ->
+  Pointer Control -> Trackpad Options); in 3D navigation it is Alt + drag and a plain drag
+  rotates. Two-finger scroll zooms (as a wheel); pinch gestures are not mapped by OpenGrid. The launcher app depends on the `opengrid` conda environment (moving or removing
   it breaks the app; rerun the installer). A running OpenGrid keeps the code it started with
   (the status bar says when it changed: restart); the self-contained bundle in packaging/dist
   is not rebuilt with the code (build_app.sh, on request).

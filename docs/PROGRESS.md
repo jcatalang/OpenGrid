@@ -848,6 +848,22 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Selecting inside a box: lines first, hide selected (2026-10-18) — requested by the user
+
+The user could not select a wing inside its far-field box: the box's faces took every click.
+
+### Built
+- `Scene.pick_display` picks in two passes: the line and point layers and the sketches
+  first (a curve seen through a surface is what the click means), then everything.
+- `Scene.hidden` / `set_hidden`: hidden entities are neither drawn (layers and per-entity
+  actors) nor picked, through rebuilds; View > Hide selected (H) and Show all (Shift+H),
+  `MainWindow.hide_selected` / `show_all`, with the count in the status bar.
+
+### Verified
+- pytest +2 (`tests/python/test_gui_hide_pick.py`): a root spline of a wing picked and
+  clicked through the box's faces, the box face picked beside it; hiding the box (actors
+  gone, clicks land on nothing, hidden through a model change), showing all, the H key.
+
 ## Standard shapes (2026-10-18) — requested by the user
 
 The user asked for default shapes: circles, NACA 0012, cylinder, sphere, wing.

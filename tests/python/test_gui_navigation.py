@@ -301,17 +301,21 @@ def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
     block = og.create_extruded_block(domain, "translate", vector=(0, 0, 1), dimension=11)
     assert window.navigation_mode == "3d"
     live.widget.render()
-    live.click((2.0, 0.5, 0.5))  # a grid line on the block's x = 2 face: only the block is there
+    # (2, 0.7, 0.3) on the block's x = 2 face: the view ray behind it meets no base line
+    # (lines seen through a face are picked first: a body inside its far-field box).
+    live.click((2.0, 0.7, 0.3))
     assert window.selected_names() == [block]
     live.click((1.0, 0.5, 1.0))  # the top face
     assert window.selected_names() == [block]
     live.click((6.0, -4.0, 0.0))  # empty space (off the block's projection)
     assert window.selected_names() == []
-    live.click((2.0, 0.5, 0.5))
+    live.click((2.0, 0.7, 0.3))
     live.click((6.0, -4.0, 0.0), shift=True)  # Shift + empty: the selection stays
     assert window.selected_names() == [block]
+    live.click((2.0, 0.5, 0.5))  # the ray through this point runs on through line-1 (y = z = 0)
+    assert window.selected_names() == ["line-1"]
     # Picking what is under the pointer also works from the API (display coordinates).
-    point = live.display((2.0, 0.5, 0.5))
+    point = live.display((2.0, 0.7, 0.3))
     x = point.x()
     y = live.widget.height() - 1 - point.y()
     entity_id, picked = window.scene.pick_display(x, y)

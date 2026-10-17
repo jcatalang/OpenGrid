@@ -90,6 +90,7 @@ class Scene:
         self._overlays: dict[str, object] = {}  # tool preview, snap marker, handles, ...
         self._hidden: list = []  # per-entity actors hidden by a drag preview
         self._previewing: set[int] = set()  # entities left out of the layers during a drag
+        self.hidden: set[int] = set()  # entities not drawn (View > Hide selected)
         self.color_by_stretching = True
         self.show_nodes = True
         self.quality_metric: str | None = None  # colour domains by this metric when set
@@ -207,7 +208,7 @@ class Scene:
         selected_ids = []
         ends = []
         for entity in self.session.store:
-            if entity.kind not in CURVE_KINDS or entity.id in self._previewing:
+            if entity.kind not in CURVE_KINDS or self._skipped(entity.id):
                 continue
             curve = self.session.geometry(entity.name)
             points = np.asarray(curve.tessellate_points(TESSELLATION_TOLERANCE), dtype=float)
@@ -241,7 +242,7 @@ class Scene:
         selected = []
         selected_ids = []
         for entity in self.session.store:
-            if entity.kind != "point" or entity.id in self._previewing:
+            if entity.kind != "point" or self._skipped(entity.id):
                 continue
             if entity.id in self.selected_ids:
                 selected.append(entity.params["xyz"])
@@ -271,7 +272,7 @@ class Scene:
         nodes_all = []
         by_stretching = self.color_by_stretching and self.patch_colors is None
         for entity in self.session.store:
-            if entity.kind != "connector" or entity.id in self._previewing:
+            if entity.kind != "connector" or self._skipped(entity.id):
                 continue
             nodes = self.session.display_connector_nodes(entity.name)
             points = np.asarray(nodes.points, dtype=float)
@@ -636,8 +637,19 @@ class Scene:
         return None
 
     # ----------------------------------------------------------- entity actors
+    def _skipped(self, entity_id: int) -> bool:
+        """Left out of the drawing: hidden, or taken by a drag preview."""
+        return entity_id in self.hidden or entity_id in self._previewing
+
+    def set_hidden(self, ids) -> None:
+        """Hide these entities (an empty set shows everything again); redraws."""
+        self.hidden = {int(i) for i in ids}
+        self.rebuild()
+
     def _draw_entity(self, entity_id: int) -> None:
         self._remove_entity(entity_id)
+        if entity_id in self.hidden:
+            return
         entity = self.session.store.get(entity_id)
         if entity.kind in ("domain", "unstructured_domain"):
             self._add_domain_actor(entity)
@@ -803,7 +815,22 @@ class Scene:
         width, height = renderer.GetSize()
         picker = vtk.vtkCellPicker()
         picker.SetTolerance(PICK_PIXELS / max(math.hypot(width, height), 1.0))
-        if not picker.Pick(x, y, 0.0, renderer):
+        # Lines and points first (the layers and the sketches): a curve seen through a
+        # surface, a wing inside its far-field box, is what a click on it means.
+        picker.PickFromListOn()
+        for layer in self._layers.values():
+            picker.AddPickList(layer)
+        store = self.session.store
+        for entity_id, actors in self._entity_actors.items():
+            if entity_id in store and store.get(entity_id).kind == "sketch":
+                for actor in actors:
+                    picker.AddPickList(actor)
+        hit = picker.Pick(x, y, 0.0, renderer)
+        if not hit:
+            picker.PickFromListOff()
+            picker.InitializePickList()
+            hit = picker.Pick(x, y, 0.0, renderer)
+        if not hit:
             return None, None
         actor = picker.GetProp3D()
         cell = picker.GetCellId()

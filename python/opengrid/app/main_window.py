@@ -583,6 +583,19 @@ class MainWindow(QMainWindow):
             "view along z, the coordinates along the edges"
         )
         self.grid_action.toggled.connect(self.set_grid)
+        self.hide_action = self._action(
+            "&Hide selected",
+            self.hide_selected,
+            QKeySequence("H"),
+            tip="Take the selected entities out of the view (a far-field box around a body); "
+            "Shift+H shows everything again",
+        )
+        self.show_all_action = self._action(
+            "Show &all",
+            self.show_all,
+            QKeySequence("Shift+H"),
+            tip="Show the hidden entities again",
+        )
         self.navigation_3d_action = QAction("&3D navigation (left-drag rotates)", self)
         self.navigation_3d_action.setCheckable(True)
         self.navigation_3d_action.setStatusTip(
@@ -776,6 +789,9 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.perspective_action)
         view_menu.addAction(self.grid_action)
         view_menu.addSeparator()
+        view_menu.addAction(self.hide_action)
+        view_menu.addAction(self.show_all_action)
+        view_menu.addSeparator()
         view_menu.addAction(self.color_action)
         view_menu.addAction(self.nodes_action)
         view_menu.addAction(self.threshold_action)
@@ -931,6 +947,25 @@ class MainWindow(QMainWindow):
     def _on_camera_moved(self, *_args) -> None:
         if self.scene.grid.enabled:
             self.scene.grid.update()
+
+    def hide_selected(self) -> None:
+        """View > Hide selected (H): the selection leaves the view until Show all (Shift+H);
+        hidden entities are neither drawn nor picked, so what they enclosed can be clicked."""
+        ids = [i for i in self.selected_ids if i in self.session.store]
+        if not ids:
+            self.statusBar().showMessage(self._selection_hint("the entities to hide"), 5000)
+            return
+        self.set_selection([])
+        self.scene.set_hidden(self.scene.hidden | set(ids))
+        self.statusBar().showMessage(
+            f"{len(ids)} hidden ({len(self.scene.hidden)} in all): Shift+H shows everything", 6000
+        )
+
+    def show_all(self) -> None:
+        count = len(self.scene.hidden)
+        if count:
+            self.scene.set_hidden(set())
+        self.statusBar().showMessage(f"{count} entities shown again", 4000)
 
     def set_grid(self, enabled: bool) -> None:
         self.scene.grid.set_enabled(enabled)
@@ -1692,6 +1727,7 @@ class MainWindow(QMainWindow):
             self.zoom_selection_action,
             *self.view_actions.values(),
             self.perspective_action,
+            self.hide_action,
         ):
             sequence = action.shortcut()
             if (

@@ -34,19 +34,17 @@ def channel_with_dome(og):
 def test_make_periodic_pair_from_two_sides():
     og = channel_with_dome(opengrid.Session())
     names = og.make_periodic_pair(["cl"], ["cr"])
-    assert names == ["periodic", "periodic-2"]
-    source = og.entity("periodic").params
-    assert (
-        source["patch_type"] == "periodic"
-        and og.entity("periodic-2").params["patch_type"] == "periodic"
-    )
-    assert og.store.get(source["periodic"]["partner"]).name == "periodic-2"
+    assert names == ["periodic-1a", "periodic-1b"]
+    source = og.entity("periodic-1a").params
+    assert source["patch_type"] == "periodic"
+    assert og.entity("periodic-1b").params["patch_type"] == "periodic"
+    assert og.store.get(source["periodic"]["partner"]).name == "periodic-1b"
     assert source["periodic"]["translation"] == pytest.approx((2.0, 0.0, 0.0))
     report = og.boundary_report()
     assert report.ok, report.issues
     assert len(report.periodic) == 1
     og.undo()
-    assert "periodic" not in og.store and "periodic-2" not in og.store
+    assert "periodic-1a" not in og.store and "periodic-1b" not in og.store
     og.redo()
     assert og.boundary_report().ok
     with pytest.raises(ValueError, match="give the translation"):
@@ -69,9 +67,9 @@ def test_extrude_model_one_cell_thick_with_periodic_ends(tmp_path):
     # stay connectors; the periodic pairing of the sides is kept.
     assert og.entity("wall").params["members"] == ({"block": block, "face": "jmin"},)
     assert og.entity("farfield").params["members"] == ({"connector": og.entity("ca").id},)
-    side = og.entity("side").params
+    side = og.entity("side-a").params
     assert side["members"] == ({"block": block, "face": "imin"},)
-    assert og.entity("side-2").params["members"] == ({"block": block, "face": "imax"},)
+    assert og.entity("side-b").params["members"] == ({"block": block, "face": "imax"},)
     assert side["periodic"]["translation"] == pytest.approx((2.0, 0.0, 0.0))
     front = og.entity("front").params
     back = og.entity("back").params

@@ -428,6 +428,11 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Boundary panel** [2026-10-17]: a 2D model's report is recomputed at every change (the
+  connector nodes are cached, so it is cheap); a 3D model's report meshes every block and
+  volume, so the panel only marks itself stale and waits for Refresh. Empty patches are kept
+  (listed as such) rather than deleted when their last member leaves. Grid snapping of
+  clicks is 2D only (a 3D click has no depth on a grid plane).
 - **Extruded 2D model** [2026-10-17]: along z only, one thickness, the end patches are named
   front / back (refused when those names are taken); a structured domain's edge must lie in
   one patch (a block face carries one patch: split the domain where the type changes);

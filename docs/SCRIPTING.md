@@ -182,11 +182,15 @@ A structured domain extrudes to a block (``create_extruded_block``).
     og.set_boundary_type(["c-left"], "inlet", name="in")   # a named patch of that type
     og.convert_domain("d")   # structured <-> unstructured on the same connectors (name kept)
 
-A member belongs to one patch: `set_boundary_type` takes it out of any other. Conversion
-needs a single loop of four edges for the structured direction and is refused for sketch
-domains (set the sketch's unstructured blocks), group members and faces of blocks or volumes.
+A member belongs to one patch: `set_boundary_type` takes it out of any other, and
+`clear_boundary_type(members)` takes members out of every patch. A connector shared by two
+domains is an interface, found automatically: putting it in a patch is refused, saying so.
+Conversion needs a single loop of four edges for the structured direction and is refused
+for sketch domains (set the sketch's unstructured blocks), group members and faces of
+blocks or volumes.
 
-    og.make_periodic_pair(["c-left"], ["c-right"])        # two periodic patches, paired (GUI: Pair as periodic)
+    og.make_periodic_pair(["c-left"], ["c-right"])        # patches periodic-1a / periodic-1b, paired (GUI: Pair as periodic)
+    og.make_periodic_pair(["c-bottom"], ["c-top"], name="span")   # span-a / span-b
     og.extrude_model(0.05)                                 # the 2D model one cell thick along z:
     # blocks and volumes "<domain>-ext", the 2D patches on their sides (pairings kept), zones
     # extended, and the patches "front" / "back" as a periodic pair (ends="symmetry": planes)

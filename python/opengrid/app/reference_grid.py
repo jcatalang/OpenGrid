@@ -57,6 +57,7 @@ class ReferenceGrid:
         self.plotter = plotter
         self.enabled = False
         self.step = 1.0
+        self.divisions = 10  # minor lines per major step: the snapping step is step / divisions
         self.origin = np.zeros(3)  # where the planes meet (round coordinates)
         self._actors: list = []
         self._labels: list = []  # vtkTextActor (edges) or vtkBillboardTextActor3D (axes)
@@ -107,6 +108,7 @@ class ReferenceGrid:
         focal, extent, direction = self.view()
         step, divisions = grid_step(extent)
         self.step = step
+        self.divisions = divisions
         origin = np.round(focal / step) * step
         self.origin = origin
         dominant = int(np.argmax(np.abs(direction)))

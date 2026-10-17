@@ -848,6 +848,46 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## The Boundary panel made plain (2026-10-17) — requested by the user
+
+The user found setting boundary conditions confusing: the panel's report was a list of
+raw messages (cut off, "3 problem(s)"), the four periodic patches were named periodic,
+periodic-2, periodic-3, periodic-4 with no sign of which paired with which, an "interface"
+patch on a shared connector was reported as an error, and a mismatched pair said only
+"closest target is 0.012 away".
+
+### Built
+- `app/boundary_dock.py` rewritten: a status line (green "All 6 boundaries have a type,
+  2 periodic pair(s) match: ready to export", red "2 of 6 boundaries have no type; 1
+  periodic pair(s) do not match"), then groups of rows - Boundaries (boundary, patch, type,
+  status), Periodic pairs (a ↔ b, the transform, match or why not), Interfaces (shared by
+  two domains: no type needed), Empty patches, Other problems; a row click selects the
+  entity. Actions on the selection: Set type (type combo, optional patch name), Pair as
+  periodic, Clear type; New zone; Refresh. The panel follows a 2D model at every change
+  (`MainWindow._refresh_boundary`, coalesced by a timer); a 3D model marks it stale and
+  Refresh recomputes. Setting a type or pairing raises the panel and switches the patch
+  colouring on. `BoundaryReport` gained `assignment` (label -> patch) and `ids` (label ->
+  entity to select), filled in 2D and 3D.
+- `model/periodic.py`: a connector without an image says why: the point counts differ
+  (both counts given), the ends land off the target ("not images of each other under the
+  translation: snap to the reference grid or correct the transform"), or the ends coincide
+  and the distributions differ.
+- `patches.make_periodic_pair` names a pair `periodic-1a` / `periodic-1b` (`<name>-a` /
+  `<name>-b` with a name; `pair_names`); the model tree shows "periodic ↔ periodic-1b, 1
+  connector" or "periodic, NOT PAIRED" (`model_tree.patch_summary`, `patches.partner_of`).
+- `patches.refuse_shared_connectors`: a connector used by two domains (an interface) is
+  refused as a patch member by `set_boundary_type`, `make_periodic_pair`, `create_patch` and
+  `add_to_patch`, with the two domains named; `Session.clear_boundary_type(members)`.
+- Grid snapping: with the reference grid shown (G), 2D clicks snap to its minor lines when
+  no entity point is near (`MainWindow.snap_point`; `ReferenceGrid.divisions`), so sketched
+  blocks have exact, equal sides.
+
+### Verified
+- pytest +6 (`tests/python/test_boundary_panel.py`): the three mismatch reasons, pair
+  names, the refusals (four entry points), clear + tree labels, the live panel (rows, named
+  and typed patches, pair row, clicks, clear, mismatch, 3D stale + Refresh), grid snapping;
+  the dock tests in `test_gui_events.py` / `test_gui_patches.py` moved to the new widgets.
+
 ## Periodic pairs in one step; the 2D model extruded one cell thick (2026-10-17) — requested by the user
 
 The user asked how to set periodic pairs, found the patch-first route a detour in 2D (the

@@ -155,6 +155,8 @@ class BoundaryReport:
     issues: list[Issue]
     # (source patch, target patch, [ConnectorPair]) for every consistent periodic pair
     periodic: list = field(default_factory=list)
+    assignment: dict = field(default_factory=dict)  # boundary label -> patch name or None
+    ids: dict = field(default_factory=dict)  # boundary label -> entity id to select
 
     @property
     def ok(self) -> bool:
@@ -292,4 +294,15 @@ def validate_patches(store, topology: Topology, session=None) -> BoundaryReport:
     unused = [store.get(c).name for c, u in sorted(topology.uses.items()) if not u]
     boundary_names = [store.get(c).name for c in sorted(boundary)]
     periodic = check_periodic(store, session, issues)
-    return BoundaryReport(boundary_names, interfaces, unused, unassigned, issues, periodic)
+    assignment = {}
+    ids = {}
+    for connector_id in sorted(boundary):
+        name = store.get(connector_id).name
+        patches = membership.get(connector_id, [])
+        assignment[name] = None
+        if patches:
+            assignment[name] = patches[0]
+        ids[name] = connector_id
+    return BoundaryReport(
+        boundary_names, interfaces, unused, unassigned, issues, periodic, assignment, ids
+    )

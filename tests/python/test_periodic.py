@@ -88,7 +88,8 @@ def test_pairing_errors():
     og = channel()
     og.pair_periodic("left", "right", translation=(2.1, 0, 0))
     assert any(
-        "has no periodic image in right (closest target connector is 0.1 away)" in str(i)
+        "c-l0 has no periodic image in right: its ends land 0.1 away from the ends of c-r0: "
+        "the two sides are not images of each other under the translation" in str(i)
         for i in og.boundary_report().issues
     )
     og.pair_periodic("left", "right")

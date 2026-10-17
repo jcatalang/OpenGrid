@@ -128,10 +128,7 @@ class ModelTree(QTreeWidget):
                 info = f"sketch, {len(entity.params['blocks'])} blocks"
                 item = QTreeWidgetItem(blocks, [entity.name, info])
             elif entity.kind == "patch":
-                count = len(entity.params["members"])
-                item = QTreeWidgetItem(
-                    patches, [entity.name, f"{entity.params['patch_type']}, {count}"]
-                )
+                item = QTreeWidgetItem(patches, [entity.name, patch_summary(entity, session.store)])
             elif entity.kind == "zone":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(zones, [entity.name, f"{count} domain(s)"])
@@ -165,3 +162,24 @@ class ModelTree(QTreeWidget):
             if entity_id is not None:
                 ids.append(int(entity_id))
         self.selection_changed.emit(sorted(ids))
+
+
+def patch_summary(entity, store) -> str:
+    """The tree's text for a patch: its type, the partner of a periodic one (or NOT PAIRED),
+    and what it holds ("wall, 2 connectors"; 3D: faces)."""
+    from opengrid.model.patches import partner_of
+
+    members = entity.params["members"]
+    unit = "connector"
+    if any("connector" not in m for m in members):
+        unit = "face"
+    if len(members) != 1:
+        unit += "s"
+    kind = entity.params["patch_type"]
+    if kind == "periodic":
+        partner = partner_of(entity, store)
+        if partner is None:
+            kind = "periodic, NOT PAIRED"
+        else:
+            kind = f"periodic \u2194 {partner}"
+    return f"{kind}, {len(members)} {unit}"

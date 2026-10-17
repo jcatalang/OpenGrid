@@ -112,17 +112,24 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
             continue
         a = item["connector"]
         image = apply(nodes[a], periodic)
-        best = math.inf
+        best = (math.inf, None, True)  # (max node offset, target connector, same direction)
+        counts = []
         found = None
         for candidate in target.params["members"]:
             if "connector" not in candidate:
                 continue
             b = candidate["connector"]
-            if b in used or len(nodes[b]) != len(image):
+            if b in used:
+                continue
+            counts.append(len(nodes[b]))
+            if len(nodes[b]) != len(image):
                 continue
             forward = float(np.max(np.linalg.norm(nodes[b] - image, axis=1)))
             backward = float(np.max(np.linalg.norm(nodes[b][::-1] - image, axis=1)))
-            best = min(best, forward, backward)
+            if forward < best[0]:
+                best = (forward, b, True)
+            if backward < best[0]:
+                best = (backward, b, False)
             if forward <= tolerance:
                 found = ConnectorPair(a, b, True)
                 break
@@ -131,13 +138,11 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
                 break
         name = session.store.get(a).name
         if found is None:
-            detail = "no target connector with the same number of points"
-            if math.isfinite(best):
-                detail = f"closest target connector is {best:.3g} away"
             issues.append(
                 Issue(
                     source.name,
-                    f"connector {name} has no periodic image in {target.name} ({detail})",
+                    f"connector {name} has no periodic image in {target.name}: "
+                    + _mismatch_reason(session, image, nodes, best, counts, periodic),
                 )
             )
             continue
@@ -155,6 +160,41 @@ def match(session, source, target) -> tuple[list[ConnectorPair], list[Issue]]:
                 )
             )
     return pairs, issues
+
+
+def _mismatch_reason(session, image, nodes, best, counts, periodic) -> str:
+    """Why a source connector's image matches no target connector: the point counts differ,
+    the sides are not images of each other (the ends are off), or the ends coincide and the
+    node distributions differ."""
+    offset, b, same_direction = best
+    if b is None:
+        have = ", ".join(str(c) for c in sorted(set(counts)))
+        if not counts:
+            return "the other side has no connector left to match"
+        return (
+            f"it has {len(image)} points and the other side's connectors have {have}: give "
+            "both sides the same number of points"
+        )
+    other = nodes[b]
+    if not same_direction:
+        other = other[::-1]
+    ends = max(
+        float(np.linalg.norm(other[0] - image[0])), float(np.linalg.norm(other[-1] - image[-1]))
+    )
+    target_name = session.store.get(b).name
+    transform = "translation"
+    if periodic["rotation_angle"] != 0.0:
+        transform = "rotation"
+    if ends > 0.01 * offset + 1e-300 and ends >= offset * 0.5:
+        return (
+            f"its ends land {ends:.3g} away from the ends of {target_name}: the two sides are "
+            f"not images of each other under the {transform} (draw them equal: snap to the "
+            "reference grid, or correct the translation / rotation in the patch's panel)"
+        )
+    return (
+        f"its ends coincide with those of {target_name} but the nodes differ by up to "
+        f"{offset:.3g}: give both connectors the same distribution"
+    )
 
 
 def automatic_translation(session, source, target) -> tuple[float, float, float]:

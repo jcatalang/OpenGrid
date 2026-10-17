@@ -577,6 +577,11 @@ else a new patch named after the type - leaving the patches they were in (a memb
 belongs to one patch). The GUI's "Boundary type" menu. One undo step; returns the
 patch name.
 
+### `clear_boundary_type(members) -> list[str]`
+
+Take boundary members out of every patch: they are unassigned again (the GUI's
+"Clear type"). Returns the patches that changed; one undo step.
+
 ### `pair_periodic(source: str, target: str, translation=None, rotation_angle: float = 0.0, rotation_center=(0.0, 0.0, 0.0), rotation_axis=(0.0, 0.0, 1.0)) -> str`
 
 Pair two periodic patches: target = R(axis, angle)(source - center) + center +
@@ -593,7 +598,8 @@ and face by face. The boundary report names what does not match.
 
 Two periodic patches from the two sides (connectors in 2D; domains, block faces or
 extruded-volume ends in 3D) and their pairing, in one step (the GUI's "Pair as
-periodic"): patches ``name`` and ``name-2`` ("periodic" by default). Without a
+periodic"): patches ``<name>-a`` and ``<name>-b`` (``periodic-1``, ``periodic-2``, ...
+when no name is given). Without a
 translation and no rotation, the translation maps the centroid of the source side
 onto the target's. Returns [source patch, target patch]; one undo step.
 

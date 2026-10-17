@@ -302,6 +302,10 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.coordinates_label)
         self._last_pointer: tuple[float, float] | None = None
         self._right_press_position: tuple[float, float] | None = None
+        self._boundary_timer = QTimer(self)  # the Boundary panel follows the model (coalesced)
+        self._boundary_timer.setSingleShot(True)
+        self._boundary_timer.setInterval(100)
+        self._boundary_timer.timeout.connect(self._refresh_boundary)
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
         self._hover_timer.setInterval(HOVER_DELAY_MS)
@@ -311,11 +315,12 @@ class MainWindow(QMainWindow):
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
         self.quality_dock.metric_changed.connect(self._on_metric_changed)
         self.quality_dock.locate_requested.connect(self.show_worst_cell)
-        self.boundary_dock.patch_requested.connect(self.create_patch_from_selection)
-        self.boundary_dock.add_requested.connect(self.add_selection_to_patch)
-        self.boundary_dock.remove_requested.connect(self.remove_selection_from_patch)
+        self.boundary_dock.type_requested.connect(self._set_type_from_dock)
+        self.boundary_dock.pair_requested.connect(self.pair_selection_as_periodic)
+        self.boundary_dock.clear_requested.connect(self.clear_boundary_type_on_selection)
         self.boundary_dock.zone_requested.connect(self.create_zone_from_selection)
-        self.boundary_dock.validate_requested.connect(self.validate_boundary)
+        self.boundary_dock.refresh_requested.connect(self.validate_boundary)
+        self.boundary_dock.entity_chosen.connect(lambda entity_id: self.set_selection([entity_id]))
         session.commands.add_listener(self._on_model_changed)
 
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
@@ -930,7 +935,9 @@ class MainWindow(QMainWindow):
         self.scene.grid.set_enabled(enabled)
         if enabled:
             self.statusBar().showMessage(
-                f"Reference grid: major lines every {self.scene.grid.step:g} (G toggles it)", 6000
+                f"Reference grid: major lines every {self.scene.grid.step:g}; in 2D, clicks "
+                "snap to its minor lines (G toggles it)",
+                6000,
             )
 
     def cancel_zoom_box(self) -> None:
@@ -1214,8 +1221,23 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------- world-space handlers
     def snap_point(self, xyz):
+        """Nearest point, curve end or sketch vertex within a few pixels; otherwise, with the
+        reference grid shown in 2D, the nearest grid point (minor lines), so drawn blocks
+        have exact, equal sides (periodic sides must be images of each other)."""
+        from opengrid.app.tools import SnapTarget
+
         tolerance = SNAP_PIXELS * self.scene.world_per_pixel()
-        return snap(xyz, snap_targets(self.session), tolerance)
+        snapped, target = snap(xyz, snap_targets(self.session), tolerance)
+        grid = self.scene.grid
+        if target is None and grid.enabled and self.navigation_mode == "2d":
+            step = grid.step / max(grid.divisions, 1)
+            point = (
+                float(round(xyz[0] / step) * step),
+                float(round(xyz[1] / step) * step),
+                float(xyz[2]),
+            )
+            return point, SnapTarget(point, f"grid ({step:g})")
+        return snapped, target
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt virtual)
         if watched is self.viewport and event.type() in (
@@ -1498,6 +1520,18 @@ class MainWindow(QMainWindow):
             self.scene.fit()
         if self.high_order_action.isChecked():
             self.refresh_high_order()
+        self._boundary_timer.start()
+
+    def _refresh_boundary(self) -> None:
+        """The Boundary panel after a change: recomputed for a 2D model (cheap), marked stale
+        for a 3D one (its report meshes every block and volume: Refresh runs it)."""
+        if self.session.is_3d():
+            self.boundary_dock.mark_stale()
+            return
+        try:
+            self.validate_boundary()
+        except (ValidationError, ValueError, RuntimeError) as error:
+            log.warning("boundary check: %s", error)
 
     def _report_connector_warnings(self, ids) -> None:
         for entity_id in ids:
@@ -2206,8 +2240,7 @@ class MainWindow(QMainWindow):
         transform = entity.params["periodic"]
         t = transform["translation"]
         log.info("%s paired with %s", source, self.session.store.get(transform["partner"]).name)
-        if not self.patch_color_action.isChecked():
-            self.patch_color_action.setChecked(True)
+        self._show_boundary_result()
         self.set_selection([entity.id])  # the panel shows the pairing (axis, angle, ...)
         self.statusBar().showMessage(
             f"{source}: periodic with translation ({t[0]:.4g}, {t[1]:.4g}, {t[2]:.4g}); the "
@@ -2279,9 +2312,12 @@ class MainWindow(QMainWindow):
             )
         return menu
 
-    def set_boundary_type_on_selection(self, patch_type: str) -> str | None:
+    def set_boundary_type_on_selection(
+        self, patch_type: str, name: str | None = None
+    ) -> str | None:
         """The selected connectors (3D: domains, extruded volumes) join a patch of
-        ``patch_type``; the patch colouring is switched on to show it."""
+        ``patch_type`` (the one called ``name`` when given); the patch colouring is switched
+        on and the Boundary panel raised to show it."""
         members = self._patch_members_from_selection()
         if not members:
             self.statusBar().showMessage(
@@ -2291,17 +2327,41 @@ class MainWindow(QMainWindow):
                 5000,
             )
             return None
-        name = self._run(lambda: self.session.set_boundary_type(members, patch_type))
+        name = self._run(lambda: self.session.set_boundary_type(members, patch_type, name=name))
         if not name:
             return None
         count = len(members)
         log.info("%s: %d boundary member(s) now %s", name, count, patch_type)
-        if not self.patch_color_action.isChecked():
-            self.patch_color_action.setChecked(True)
+        self._show_boundary_result()
         self.statusBar().showMessage(
             f"{count} boundary member(s) in patch {name} ({patch_type})", 6000
         )
         return name
+
+    def _set_type_from_dock(self, patch_type: str, name: str) -> None:
+        if not name:
+            name = None
+        self.set_boundary_type_on_selection(patch_type, name)
+
+    def clear_boundary_type_on_selection(self) -> list[str] | None:
+        """The selected boundaries leave their patches (the Boundary panel's Clear type)."""
+        members = self._patch_members_from_selection()
+        if not members:
+            self.statusBar().showMessage(
+                self._selection_hint("the boundaries to clear (connectors; 3D: faces)"), 5000
+            )
+            return None
+        changed = self._run(lambda: self.session.clear_boundary_type(members))
+        if changed is None:
+            return None
+        self.statusBar().showMessage(f"{len(members)} boundary member(s) now have no type", 6000)
+        return changed
+
+    def _show_boundary_result(self) -> None:
+        """Patch colouring on and the Boundary panel in front, after a boundary edit."""
+        if not self.patch_color_action.isChecked():
+            self.patch_color_action.setChecked(True)
+        self.boundary_dock_widget.raise_()
 
     def create_patch_from_selection(self, name: str, patch_type: str = "wall") -> str | None:
         connectors = self._patch_members_from_selection()
@@ -2346,7 +2406,7 @@ class MainWindow(QMainWindow):
 
     def validate_boundary(self):
         report = self.session.boundary_report()
-        self.boundary_dock.show_report(report)
+        self.boundary_dock.show_report(report, self.session.store)
         if self.scene.patch_colors is not None:
             self.scene.patch_colors = self._patch_colors(report)
             self.scene.rebuild()

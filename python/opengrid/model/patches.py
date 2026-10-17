@@ -280,6 +280,7 @@ def set_boundary_type(store, members, patch_type: str, name: str | None = None) 
         raise ValidationError(issues)
     if not wanted:
         raise ValidationError([Issue("set_boundary_type", "no boundary members given")])
+    refuse_shared_connectors(store, wanted)
     target = None
     if name is not None and name in store:
         target = store.get(name)
@@ -327,6 +328,96 @@ def set_boundary_type(store, members, patch_type: str, name: str | None = None) 
     return [target.name]
 
 
+def partner_of(patch, store) -> str | None:
+    """The name of a periodic patch's partner, paired from either side; None when unpaired."""
+    pairing = patch.params.get("periodic")
+    if pairing is not None:
+        return store.get(pairing["partner"]).name
+    for other in store.entities("patch"):
+        other_pairing = other.params.get("periodic")
+        if other_pairing is not None and other_pairing["partner"] == patch.id:
+            return other.name
+    return None
+
+
+def shared_connectors(store) -> dict[int, list[str]]:
+    """{connector id: [domain names]} for the connectors used by two domains of a 2D model:
+    interfaces, found automatically, that take no boundary type. Empty for 3D models (there a
+    connector is the side wall of an extruded volume)."""
+    if store.entities("block") or store.entities("volume"):
+        return {}
+    uses: dict[int, list[str]] = {}
+    for domain in store:
+        if domain.kind == "domain":
+            loops = domain.params["edges"]
+        elif domain.kind == "unstructured_domain":
+            loops = domain.params["loops"]
+        else:
+            continue
+        for loop in loops:
+            for item in loop:
+                uses.setdefault(item["connector"], []).append(domain.name)
+    return {c: names for c, names in uses.items() if len(names) >= 2}
+
+
+def refuse_shared_connectors(store, members) -> None:
+    """A connector shared by two domains is an interface, not a boundary: refuse to put it in
+    a patch, saying so."""
+    shared = shared_connectors(store)
+    issues = []
+    for member in members:
+        if "connector" in member and member["connector"] in shared:
+            domains = " and ".join(shared[member["connector"]])
+            issues.append(
+                Issue(
+                    store.get(member["connector"]).name,
+                    f"is shared by {domains}: it is an interface between them, found "
+                    "automatically, and takes no boundary type",
+                )
+            )
+    if issues:
+        raise ValidationError(issues)
+
+
+def clear_boundary_type(store, members) -> list[str]:
+    """Take boundary members out of every patch (they are then unassigned). Returns the names
+    of the patches that changed."""
+    issues: list[Issue] = []
+    if isinstance(members, (str, int, dict)):
+        members = [members]
+    wanted = _patch_members(members, store, "clear_boundary_type", issues)
+    if issues:
+        raise ValidationError(issues)
+    changed = []
+    for patch in store.entities("patch"):
+        kept = tuple(m for m in patch.params["members"] if m not in wanted)
+        if len(kept) != len(patch.params["members"]):
+            params = dict(patch.params)
+            params["members"] = kept
+            store.update(patch.id, params=params)
+            changed.append(patch.name)
+    return changed
+
+
+def pair_names(store, name: str | None = None) -> tuple[str, str]:
+    """The names of a new periodic pair: ``<name>-a`` / ``<name>-b`` (``periodic-1a`` /
+    ``periodic-1b``, ``periodic-2a`` / ``-2b``, ... by default), both unused."""
+    number = 0
+    while True:
+        number += 1
+        base = name
+        if base is None:
+            base = f"periodic-{number}"
+        elif number > 1:
+            base = f"{name}-{number}"
+        joint = "-"
+        if base[-1].isdigit():
+            joint = ""  # periodic-1a / periodic-1b, span-2a / span-2b
+        candidates = (f"{base}{joint}a", f"{base}{joint}b")
+        if not any(c in store for c in candidates):
+            return candidates
+
+
 def make_periodic_pair(
     store,
     source_members,
@@ -337,21 +428,13 @@ def make_periodic_pair(
     rotation_axis=(0.0, 0.0, 1.0),
     name: str | None = None,
 ) -> list[str]:
-    """Two periodic patches (``name`` / ``name-2``, "periodic" by default, unique) from the
-    two sides' members, paired source -> target with the transform. The members leave the
-    patches they were in. Returns [source patch, target patch]."""
-    base = name
-    if base is None:
-        base = "periodic"
+    """Two periodic patches (``<name>-a`` / ``<name>-b``, ``periodic-1`` and up by default, see
+    ``pair_names``) from the two sides' members, paired source -> target with the transform.
+    The members leave the patches they were in. Returns [source patch, target patch]."""
     names = []
-    for members in (source_members, target_members):
-        candidate = base
-        if names:
-            candidate = f"{base}-2"
-        number = 1
-        while candidate in store:
-            number += 1
-            candidate = f"{base}-{number}"
+    for members, candidate in zip(
+        (source_members, target_members), pair_names(store, name), strict=True
+    ):
         names.append(set_boundary_type(store, members, "periodic", candidate)[0])
     source = store.get(names[0])
     params = dict(source.params)

@@ -1125,7 +1125,12 @@ class Session:
     ) -> str:
         """Named boundary-condition group of connectors; ``patch_type`` in PATCH_TYPES
         (opengrid.model.patches). ``periodic`` is normally set with :meth:`pair_periodic`."""
+        from opengrid.model.patches import normalize_patch, refuse_shared_connectors
+
         params = {"patch_type": patch_type, "members": members, "periodic": periodic}
+        refuse_shared_connectors(
+            self.store, normalize_patch(params, self.store, "patch")["members"]
+        )
         return self._create("patch", params, name)
 
     def pair_periodic(
@@ -1174,7 +1179,8 @@ class Session:
     ) -> list[str]:
         """Two periodic patches from the two sides (connectors in 2D; domains, block faces or
         extruded-volume ends in 3D) and their pairing, in one step (the GUI's "Pair as
-        periodic"): patches ``name`` and ``name-2`` ("periodic" by default). Without a
+        periodic"): patches ``<name>-a`` and ``<name>-b`` (``periodic-1``, ``periodic-2``, ...
+        when no name is given). Without a
         translation and no rotation, the translation maps the centroid of the source side
         onto the target's. Returns [source patch, target patch]; one undo step."""
         if isinstance(source, (str, int, dict)):
@@ -1263,6 +1269,11 @@ class Session:
             "set_boundary_type", f"Boundary type {patch_type}", members, patch_type, name=name
         )[0]
 
+    def clear_boundary_type(self, members) -> list[str]:
+        """Take boundary members out of every patch: they are unassigned again (the GUI's
+        "Clear type"). Returns the patches that changed; one undo step."""
+        return self._topology("clear_boundary_type", "Clear boundary type", members)
+
     def unpair_periodic(self, source: str) -> str:
         """Remove the periodic pairing of a patch."""
         return self.modify(source, periodic=None)
@@ -1296,9 +1307,15 @@ class Session:
     def _change_members(self, name: str, key: str, refs, add: bool) -> str:
         if isinstance(refs, (str, int)):
             refs = [refs]
-        from opengrid.model.patches import member_label, member_script
+        from opengrid.model.patches import member_label, member_script, refuse_shared_connectors
 
         entity = self.entity(name)
+        if add and entity.kind == "patch":
+            members = []
+            for ref in refs:
+                if isinstance(ref, (str, int)) and self.store.get(ref).kind == "connector":
+                    members.append({"connector": self.store.get(ref).id})
+            refuse_shared_connectors(self.store, members)
         current = [member_script(item, self.store) for item in entity.params["members"]]
         labels = [member_label(item, self.store) for item in entity.params["members"]]
         given = []
@@ -1369,8 +1386,19 @@ class Session:
                     issues.append(issue)
             boundary = [e["label"] for e in result["entries"]]
             unassigned = [e["label"] for e in result["entries"] if e["patch"] is None]
+            assignment = {e["label"]: e["patch"] for e in result["entries"]}
+            ids = {}
+            for entry in result["entries"]:
+                ids[entry["label"]] = sorted(key[1] for key in entry["keys"])[0]
             return BoundaryReport(
-                boundary, result["interfaces"], [], unassigned, issues, result["periodic"]
+                boundary,
+                result["interfaces"],
+                [],
+                unassigned,
+                issues,
+                result["periodic"],
+                assignment,
+                ids,
             )
         from opengrid.model.topology import validate_patches
 

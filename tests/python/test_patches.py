@@ -66,14 +66,12 @@ def test_boundary_report_and_interfaces():
 def test_validator_messages():
     og = step_session()
     og.remove_from_patch("walls", "c-step")
-    og.add_to_patch("inflow", "c-mid")
+    with pytest.raises(opengrid.ValidationError, match="shared by lower-block and upper-block"):
+        og.add_to_patch("inflow", "c-mid")  # an interface: refused up front
     og.add_to_patch("outflow", "c-out-up")  # already there: no-op
     og.add_to_patch("walls", "c-out-lo")  # now in two patches
     messages = [str(i) for i in og.boundary_report().issues]
     assert "c-step: lies on the boundary of lower-block but belongs to no patch" in messages
-    assert any(
-        m.startswith("c-mid: is an interface (lower-block and upper-block)") for m in messages
-    )
     assert "c-out-lo: belongs to several patches: walls, outflow" in messages
     assert og.unassigned_boundary_connectors() == ["c-step"]
     with pytest.raises(opengrid.ValidationError, match="belongs to no patch"):

@@ -272,14 +272,16 @@ def test_boundary_dock_buttons(live):
     live.click((2.0, 0.5, 0.0))
     dock.name.setText("walls")
     dock.patch_type.setCurrentText("wall")
-    live.qtbot.mouseClick(dock.new_patch, Qt.MouseButton.LeftButton)
+    live.qtbot.mouseClick(dock.set_type, Qt.MouseButton.LeftButton)
     cr, ct = live.og.entity("cr").id, live.og.entity("ct").id
     assert [m["connector"] for m in live.og.entity("walls").params["members"]] == [cr]
     live.click((1.0, 1.0, 0.0))
-    live.qtbot.mouseClick(dock.add, Qt.MouseButton.LeftButton)
+    live.qtbot.mouseClick(dock.set_type, Qt.MouseButton.LeftButton)  # the same named patch
     assert [m["connector"] for m in live.og.entity("walls").params["members"]] == [cr, ct]
-    live.qtbot.mouseClick(dock.validate, Qt.MouseButton.LeftButton)
-    assert "unassigned" in dock.summary.text()
+    live.qtbot.waitUntil(lambda: "have no type" in dock.status.text(), timeout=3000)
+    assert "2 of 4" in dock.status.text()
+    live.qtbot.mouseClick(dock.refresh, Qt.MouseButton.LeftButton)
+    assert [row[1] for row in dock.rows("Boundaries")].count("walls") == 2
 
 
 def test_delete_key_in_the_viewport(live):

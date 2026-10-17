@@ -34,7 +34,7 @@ def _ids(window, *names):
 def test_patch_workflow_and_validation(window, tmp_path):
     report = window.validate_boundary()
     assert len(report.unassigned) == 8
-    assert "8 unassigned" in window.boundary_dock.summary.text()
+    assert "8 of 8 boundaries have no type" in window.boundary_dock.status.text()
     window.set_selection(_ids(window, "c-in-bottom", "c-in-top", "c-step", "c-lo-bottom"))
     assert window.create_patch_from_selection("walls", "wall") == "walls"
     window.set_selection(_ids(window, "c-up-top"))
@@ -45,7 +45,7 @@ def test_patch_workflow_and_validation(window, tmp_path):
     window.create_patch_from_selection("outflow", "outlet")
     report = window.validate_boundary()
     assert report.ok
-    assert "OK" in window.boundary_dock.summary.text()
+    assert "ready to export" in window.boundary_dock.status.text()
     assert window.model_tree.entity_names("Patches") == ["walls", "inflow", "outflow"]
     window.set_selection(_ids(window, "lower-block", "upper-block"))
     assert window.create_zone_from_selection("expansion") == "expansion"
@@ -141,12 +141,12 @@ def test_pair_as_periodic_and_extrude_model_from_the_gui(window):
     assert window.pair_selection_as_periodic() is None  # one side: a hint
     window.set_selection(_ids(window, "c-in-top", "c-lo-bottom"))
     names = window.pair_selection_as_periodic()
-    assert names == ["periodic", "periodic-2"]
-    assert window.selected_names() == ["periodic"]  # the panel shows the pairing
+    assert names == ["periodic-1a", "periodic-1b"]
+    assert window.selected_names() == ["periodic-1a"]  # the panel shows the pairing
     assert window.patch_color_action.isChecked()
     assert "periodic" in window.property_panel._editors
     assert "Pair as periodic" not in [a.text() for a in window.context_menu().actions()]
-    window.set_selection(_ids(window, "periodic", "periodic-2"))
+    window.set_selection(_ids(window, "periodic-1a", "periodic-1b"))
     assert "Pair as periodic" in [a.text() for a in window.context_menu().actions()]
     og.undo()
     # The whole 2D model, one cell thick, with periodic front and back.

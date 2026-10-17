@@ -1453,6 +1453,13 @@ def convert_domain(store, name: str):
     return [new.name], []
 
 
+def clear_boundary_type(store, members):
+    """Boundary members out of every patch (opengrid.model.patches)."""
+    from opengrid.model.patches import clear_boundary_type as clear
+
+    return clear(store, members), []
+
+
 def make_periodic_pair(store, source_members, target_members, **transform):
     """Two periodic patches from the two sides, paired (opengrid.model.patches)."""
     from opengrid.model.patches import make_periodic_pair as make
@@ -1587,14 +1594,13 @@ def extrude_model(store, thickness: float, layers: int = 1, ends: str = "periodi
     if ends == "periodic":
         from opengrid.model.patches import make_periodic_pair
 
-        names += make_periodic_pair(
+        made_names = make_periodic_pair(
             store, fronts, backs, translation=(0.0, 0.0, float(thickness)), name="front"
         )
         # The pair is called front / back.
-        back = store.get(names[-1])
-        if back.name != "back":
-            store.update(back.id, name="back")
-            names[-1] = "back"
+        for made_name, wanted in zip(made_names, ("front", "back"), strict=True):
+            store.update(store.get(made_name).id, name=wanted)
+        names += ["front", "back"]
     else:
         from opengrid.model.patches import set_boundary_type
 

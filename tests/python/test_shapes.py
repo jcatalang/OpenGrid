@@ -86,17 +86,26 @@ def test_session_shapes_and_replay():
     ]
     names = og.create_cylinder((0, 0, 1), 0.5, 2.0, name="cy")
     assert names == [
-        "cy-generatrix",
-        "cy-side",
+        "cy-seam-a",
+        "cy-seam-b",
+        "cy-bottom-rim-a",
+        "cy-bottom-rim-b",
+        "cy-top-rim-a",
+        "cy-top-rim-b",
+        "cy-side-a",
+        "cy-side-b",
         "cy-bottom-radius",
         "cy-bottom",
         "cy-top-radius",
         "cy-top",
     ]
-    assert og.entity("cy-generatrix").params["p1"] == (0.5, 0.0, 3.0)
-    assert og.create_cylinder(caps=False, axis=(1, 0, 0)) == [
-        "cylinder-1-generatrix",
-        "cylinder-1-side",
+    assert og.entity("cy-seam-a").params["p1"] == (0.5, 0.0, 3.0)
+    assert og.entity("cy-seam-b").params["p0"] == (-0.5, 0.0, 1.0)
+    assert og.geometry("cy-side-a").eval(0.5, 0.5)[1] > 0.4  # the +y half
+    assert og.geometry("cy-side-b").eval(0.5, 0.5)[1] < -0.4  # the -y half
+    assert og.create_cylinder(caps=False, axis=(1, 0, 0))[-2:] == [
+        "cylinder-1-side-a",
+        "cylinder-1-side-b",
     ]
     assert og.create_sphere((1, 2, 3), 2.0, name="sp") == ["sp-meridian", "sp"]
     meridian = og.geometry("sp-meridian")
@@ -164,6 +173,6 @@ def test_shapes_from_the_gui(qtbot):
     dialog.edits["name"].setText("drum")
     values = dialog.values()
     assert values["axis"] == (1.0, 0.0, 0.0) and values["name"] == "drum"
-    assert window.create_shape("cylinder", values)[1] == "drum-side"
+    assert "drum-side-a" in window.create_shape("cylinder", values)
     assert parse_values(SHAPES["wing"], {})["tip_chord"] == 0.5
     window.close()

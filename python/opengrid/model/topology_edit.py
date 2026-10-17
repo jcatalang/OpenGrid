@@ -1813,3 +1813,10 @@ def set_unstructured_generator(store, name, generator):
     settings["inflation"] = None
     _names, warnings = edit_sketch(store, sketch.name, generator=settings, walls=tuple(walls))
     return [name], list(warnings)
+
+
+def mesh_surfaces(store, names, spacing=None, points=None, generator=None):
+    """Surface meshes of database surfaces (opengrid.model.surface_mesh)."""
+    from opengrid.model.surface_mesh import mesh_surfaces as mesh
+
+    return mesh(store, names, spacing=spacing, points=points, generator=generator)

@@ -145,6 +145,9 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - **2D model extruded one cell thick** (`extrude_model`): blocks and volumes with the 2D
   patches on their sides and the front / back as a periodic pair or symmetry planes, for
   solvers that want 3D meshes of 2D cases.
+- **Surface meshes of 3D shapes** (Create > Mesh surfaces, `mesh_surfaces`): domains on
+  planes, ruled, extruded and revolved surfaces with their edge curves found or made and the
+  connectors shared, a watertight shell for Volume from faces (a cylinder or a wing in a box).
 - **Picking through surfaces and hiding**: a click picks lines and points before surfaces,
   so a body inside its far-field box is selected directly; View > Hide selected (H) takes
   entities out of the view and out of picking, Shift+H shows all.

@@ -234,9 +234,12 @@ class Session:
         name=None,
     ) -> list[str]:
         """A cylinder of revolution: ``center`` is the middle of the bottom face, the axis
-        points up through the top. Surfaces ``<name>-side`` and, with ``caps``, ``-bottom``
-        and ``-top`` (discs, degenerate at their centre), from the generating lines
-        ``<name>-generatrix``, ``-bottom-radius``, ``-top-radius``. One undo step."""
+        points up through the top. The side is two half surfaces ``<name>-side-a`` and
+        ``-side-b`` (one domain cannot wrap around a full turn) between the seam lines
+        ``-seam-a`` and ``-seam-b`` and the rim arcs ``-bottom-rim-a`` / ``-b``,
+        ``-top-rim-a`` / ``-b``; with ``caps``, the discs ``-bottom`` and ``-top``
+        (degenerate at their centre, from the lines ``-bottom-radius``, ``-top-radius``).
+        One undo step; :meth:`mesh_surfaces` meshes all of it."""
         from opengrid.model.shapes import along, frame
 
         base = self._shape_name(name, "cylinder")
@@ -245,11 +248,33 @@ class Session:
         top = along(bottom, w, height)
         rim_bottom = along(bottom, u, radius)
         rim_top = along(top, u, radius)
-        revolve = {"axis_point": bottom, "axis": w, "end_angle": math.tau}
+        far_bottom = along(bottom, u, -radius)
+        far_top = along(top, u, -radius)
         items = [
-            ("line", {"p0": rim_bottom, "p1": rim_top}, f"{base}-generatrix"),
-            ("revolved_surface", {"curve": f"{base}-generatrix", **revolve}, f"{base}-side"),
+            ("line", {"p0": rim_bottom, "p1": rim_top}, f"{base}-seam-a"),
+            ("line", {"p0": far_bottom, "p1": far_top}, f"{base}-seam-b"),
         ]
+        for suffix, centre in (("bottom", bottom), ("top", top)):
+            for half, (a0, a1) in (("a", (0.0, math.pi)), ("b", (math.pi, math.tau))):
+                arc = {
+                    "center": centre,
+                    "radius": radius,
+                    "normal": w,
+                    "x_axis": u,
+                    "start_angle": a0,
+                    "end_angle": a1,
+                }
+                items.append(("arc", arc, f"{base}-{suffix}-rim-{half}"))
+        for half, (a0, a1) in (("a", (0.0, math.pi)), ("b", (math.pi, math.tau))):
+            surface = {
+                "curve": f"{base}-seam-a",
+                "axis_point": bottom,
+                "axis": w,
+                "start_angle": a0,
+                "end_angle": a1,
+            }
+            items.append(("revolved_surface", surface, f"{base}-side-{half}"))
+        revolve = {"axis_point": bottom, "axis": w, "end_angle": math.tau}
         if caps:
             for suffix, centre, rim in (("bottom", bottom, rim_bottom), ("top", top, rim_top)):
                 items.append(("line", {"p0": centre, "p1": rim}, f"{base}-{suffix}-radius"))
@@ -1180,6 +1205,27 @@ class Session:
         used by this volume only (those faces are re-meshed around the layers)."""
         params = {"faces": faces, "extrusion": extrusion, "generator": generator}
         return self._create("volume", params, name)
+
+    def mesh_surfaces(self, surfaces, spacing=None, points=None, generator=None) -> list[str]:
+        """Unstructured domains ``<surface>-mesh`` on database surfaces (planes, ruled,
+        extruded and revolved surfaces: a box, a cylinder, a wing), their boundary curves
+        found or made and the connectors on them shared between neighbouring surfaces, so
+        the domains of a closed set of surfaces form a watertight shell for
+        :meth:`create_volume`. ``spacing`` sets the connectors' points (``points`` instead
+        gives every connector that many) and the generator's max size. Flat surfaces are
+        meshed as planar domains, curved ones on the surface. A full turn of a curved
+        surface of revolution is refused (``create_cylinder`` makes two halves), as is a
+        sphere (its poles). One undo step; returns the domain names."""
+        if isinstance(surfaces, str):
+            surfaces = [surfaces]
+        return self._topology(
+            "mesh_surfaces",
+            f"Mesh {len(surfaces)} surface(s)",
+            list(surfaces),
+            spacing=spacing,
+            points=points,
+            generator=generator,
+        )
 
     def create_extruded_volume(
         self,

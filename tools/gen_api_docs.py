@@ -124,6 +124,7 @@ GROUPS = [
         "Volumes (unstructured / hybrid 3D)",
         [
             "create_volume",
+            "mesh_surfaces",
             "create_extruded_volume",
             "set_volume_generator",
             "volume_mesh",

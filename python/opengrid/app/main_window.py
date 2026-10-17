@@ -504,6 +504,12 @@ class MainWindow(QMainWindow):
             self.create_volume_on_selection,
             tip="Unstructured volume (tetrahedra) enclosed by the selected domains",
         )
+        self.mesh_surfaces_action = self._action(
+            "&Mesh surfaces…",
+            self.mesh_selected_surfaces,
+            tip="Surface meshes (unstructured domains) on the selected surfaces, their edges "
+            "and connectors shared, ready for Volume from faces",
+        )
         self.periodic_pair_action = self._action(
             "Pair as periodic",
             self.pair_selection_as_periodic,
@@ -720,6 +726,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.group_action)
         create_menu.addAction(self.block_action)
         create_menu.addAction(self.extrude_action)
+        create_menu.addAction(self.mesh_surfaces_action)
         create_menu.addAction(self.volume_action)
         create_menu.addSeparator()
         create_menu.addMenu(self.boundary_type_menu(create_menu))
@@ -1818,6 +1825,51 @@ class MainWindow(QMainWindow):
             log.info("created %s: %s", name, self.session.block_status(name))
             self.set_selection([self.session.store.get(name).id])
         return name
+
+    def mesh_selected_surfaces(self, spacing: float | None = None) -> list[str] | None:
+        """Create > Mesh surfaces: domains on the selected surfaces (a box, a cylinder, a
+        wing), the spacing asked (a thirtieth of the selection's size suggested)."""
+        surfaces = [
+            n for n in self.selected_names() if self.session.store.get(n).kind in SURFACE_KINDS
+        ]
+        if not surfaces:
+            self.statusBar().showMessage(
+                self._selection_hint("the surfaces to mesh (a box's faces, a cylinder, a wing)"),
+                6000,
+            )
+            return None
+        if spacing is None:
+            points = []
+            for name in surfaces:
+                geometry = self.session.geometry(name)
+                points.extend(geometry.eval(u, v) for u in (0.0, 0.5, 1.0) for v in (0.0, 0.5, 1.0))
+            extent = float(np.max(np.ptp(np.asarray(points, dtype=float), axis=0)))
+            suggested = max(extent / 30.0, 1e-6)
+            spacing, ok = QInputDialog.getDouble(
+                self,
+                "Mesh surfaces",
+                f"Spacing along the edges and in the mesh ({len(surfaces)} surface(s)):",
+                suggested,
+                1e-12,
+                1e12,
+                6,
+            )
+            if not ok:
+                return None
+        with self.batch_updates():
+            names = self._run(lambda: self.session.mesh_surfaces(surfaces, spacing=spacing))
+            if names:
+                self._run_long("Meshing the surfaces…", lambda: self._warm_caches(names))
+        if not names:
+            return None
+        self.set_selection([self.session.store.get(n).id for n in names])
+        log.info("surface meshes: %s", ", ".join(names))
+        self.statusBar().showMessage(
+            f"{len(names)} surface mesh(es) at spacing {spacing:g}, selected: Volume from faces "
+            "encloses them",
+            8000,
+        )
+        return names
 
     def create_volume_on_selection(self) -> str | None:
         faces = self._selected_of_kind("domain") + self._selected_of_kind("unstructured_domain")

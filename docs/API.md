@@ -95,9 +95,12 @@ The six faces of an axis-aligned box as plane patches ``<name>-xmin`` ...
 ### `create_cylinder(center=(0.0, 0.0, 0.0), radius: float = 0.5, height: float = 1.0, axis=(0.0, 0.0, 1.0), caps: bool = True, name=None) -> list[str]`
 
 A cylinder of revolution: ``center`` is the middle of the bottom face, the axis
-points up through the top. Surfaces ``<name>-side`` and, with ``caps``, ``-bottom``
-and ``-top`` (discs, degenerate at their centre), from the generating lines
-``<name>-generatrix``, ``-bottom-radius``, ``-top-radius``. One undo step.
+points up through the top. The side is two half surfaces ``<name>-side-a`` and
+``-side-b`` (one domain cannot wrap around a full turn) between the seam lines
+``-seam-a`` and ``-seam-b`` and the rim arcs ``-bottom-rim-a`` / ``-b``,
+``-top-rim-a`` / ``-b``; with ``caps``, the discs ``-bottom`` and ``-top``
+(degenerate at their centre, from the lines ``-bottom-radius``, ``-top-radius``).
+One undo step; :meth:`mesh_surfaces` meshes all of it.
 
 ### `create_sphere(center=(0.0, 0.0, 0.0), radius: float = 0.5, name=None) -> list[str]`
 
@@ -526,6 +529,18 @@ wall faces, ``{"faces": [domains], "first_height", "growth_rate": 1.2,
 "layers": 30, "total_thickness": None, "transition": True, "slide": True}``; with
 ``slide`` the layers slide along planar unstructured faces that meet the walls and are
 used by this volume only (those faces are re-meshed around the layers).
+
+### `mesh_surfaces(surfaces, spacing=None, points=None, generator=None) -> list[str]`
+
+Unstructured domains ``<surface>-mesh`` on database surfaces (planes, ruled,
+extruded and revolved surfaces: a box, a cylinder, a wing), their boundary curves
+found or made and the connectors on them shared between neighbouring surfaces, so
+the domains of a closed set of surfaces form a watertight shell for
+:meth:`create_volume`. ``spacing`` sets the connectors' points (``points`` instead
+gives every connector that many) and the generator's max size. Flat surfaces are
+meshed as planar domains, curved ones on the surface. A full turn of a curved
+surface of revolution is refused (``create_cylinder`` makes two halves), as is a
+sphere (its poles). One undo step; returns the domain names.
 
 ### `create_extruded_volume(domain, mode: str = 'translate', name: str | None = None, generator=None, **settings) -> str`
 

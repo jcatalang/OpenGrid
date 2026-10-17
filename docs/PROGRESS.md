@@ -848,6 +848,34 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Surface meshes of the 3D shapes (2026-10-18) — requested by the user
+
+The user tried "Unstructured domain" on a cylinder's generating lines, which are no loop;
+the 3D shapes had no way to be meshed.
+
+### Built
+- `model/surface_mesh.py` (method in its header): a surface's four parametric sides as curve
+  specs (plane lines; ruled curves and their joining lines; an extruded curve, its translate
+  and the extrusion lines; a revolved curve at the start / end angles as rotated copies and
+  the arcs swept by its ends), zero-length sides dropped; sides matched to existing curves by
+  sampling (a full circle by arcs tiling it) or made; connectors on them reused or made from
+  a spacing / point count; flat surfaces as planar domains, curved ones as domains on the
+  surface (loop reversed when clockwise). `Session.mesh_surfaces(surfaces, spacing=None,
+  points=None, generator=None)` (one undo step), GUI Create > Mesh surfaces (spacing asked,
+  a thirtieth of the selection's size suggested; the domains selected for Volume from faces).
+- `create_cylinder` makes the side as two half surfaces between seam lines and rim arcs (a
+  domain cannot wrap a full turn); the discs stay, meshed as planar domains on the rim arcs.
+- Refusals with the reason: a full turn of a curved surface, a sphere (poles), NURBS
+  surfaces, non-surface entities.
+
+### Verified
+- pytest +4 (`tests/python/test_surface_mesh.py`): a box (12 shared lines and connectors,
+  planar domains, undo, reuse with ``points``, replay), a cylinder in a box (rims found, the
+  disc's loop on the rim halves, the half sides on the surface, a volume with two shells of
+  over a thousand tetrahedra, the full-turn refusal), a wing (leading / trailing edge lines
+  shared, flat caps as two-curve loops, a volume of the wing alone), an extruded surface
+  (the translated arc made), the sphere refusal, the GUI action feeding Volume from faces.
+
 ## Predefined shapes are closed bodies (2026-10-18) — requested by the user
 
 The wing had an open tip. `create_wing(caps=True)` now adds the flat ``<name>-root`` and

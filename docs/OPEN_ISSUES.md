@@ -428,6 +428,13 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Surface meshes** [2026-10-18]: `mesh_surfaces` takes planes, ruled, extruded and
+  revolved surfaces (no NURBS surfaces); a curved surface of revolution must be less than a
+  full turn (the cylinder is made as two halves) and must not close on its axis at both ends
+  (a sphere cannot be surface-meshed yet: its poles leave no boundary); a connector already on
+  an edge curve is reused whatever its points (the neighbours must agree); existing arcs are
+  only matched to a full circle when they tile it exactly; the domains inherit no boundary
+  type (set wall / farfield on them afterwards).
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a

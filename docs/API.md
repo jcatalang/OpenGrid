@@ -185,9 +185,13 @@ settings; ``elliptic=None`` switches smoothing off). Elliptic keys: ``control``
 ("line_sor", "point_sor"), ``omega``, ``max_iterations``, ``tolerance`` and
 ``acceleration`` (Anderson depth, default 5; 0: plain relaxation).
 
-### `set_unstructured_generator(name: str, **changes) -> str`
+### `set_unstructured_generator(name: str, generator=None, **changes) -> str`
 
-Change some generator settings of an unstructured domain.
+Change generator settings of an unstructured domain (``generator``, a dict, and
+``changes`` merged into the current ones). For a sketch's block the settings go to
+the sketch: the triangulation settings to its ``generator`` (shared by its
+unstructured blocks) and ``inflation`` to walls on the block's edges (first height,
+layers, growth), which is what the property panel does there. One undo step.
 
 ### `rotate_domain(name: str, steps: int = 1) -> str`
 

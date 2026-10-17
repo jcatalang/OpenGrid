@@ -1191,6 +1191,17 @@ class PropertyPanel(QWidget):
         )
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
+        from opengrid.model.sketch import output_owner
+
+        owner = output_owner(self.session.store).get(entity.id)
+        if owner is not None:
+            hint = QLabel(
+                f"a block of sketch {owner[0].name}: these settings go to the sketch (the "
+                "triangulation settings are shared by its unstructured blocks; the inflation "
+                "walls become sketch walls, stopping at the core cell size)"
+            )
+            hint.setWordWrap(True)
+            self._form.addRow("", hint)
 
     def _volume_rows(self, entity) -> None:
         try:
@@ -1728,7 +1739,11 @@ class PropertyPanel(QWidget):
             if chosen != self._boundary_before:
                 boundary = chosen
         dimension = None
+        generator = None
         entity = self.session.store.get(self.entity_id)
+        if entity.kind == "unstructured_domain" and "generator" in changes:
+            # Through set_unstructured_generator: a sketch's block sends it to the sketch.
+            generator = changes.pop("generator")
         if entity.kind == "connector":
             from opengrid.model.sketch import output_owner
 
@@ -1738,6 +1753,10 @@ class PropertyPanel(QWidget):
                 # its points and distribution from the sketch, so its edits go there.
                 dimension = changes.pop("dimension", entity.params["dimension"])
         try:
+            if generator is not None:
+                self.session.set_unstructured_generator(name, generator)
+                for warning in self.session.last_warnings:
+                    self.message.emit(warning, False)
             if dimension is not None:
                 # The connector's other edits go in the same step.
                 followed = self.session.set_dimension(name, dimension, **changes)
@@ -1759,7 +1778,13 @@ class PropertyPanel(QWidget):
         except ValidationError as error:
             self._show_error(str(error))
             return False
-        if not changes and new_name is None and boundary is None and dimension is None:
+        if (
+            not changes
+            and new_name is None
+            and boundary is None
+            and dimension is None
+            and generator is None
+        ):
             self.message.emit("No changes", False)
             return False
         self.message.emit(f"Updated {self.session.store.get(self.entity_id).name}", False)

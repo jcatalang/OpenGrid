@@ -428,6 +428,10 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Sketch block generators** [2026-10-17]: a sketch has one generator for all its
+  unstructured blocks (editing one block's settings changes them all); its inflation layers
+  are sketch walls, which stop at the core cell size (no total thickness, no transition
+  off). Build the domain outside the sketch for per-domain settings.
 - **Re-dimensioning** [2026-10-17]: when the opposite edge of a structured domain is a
   chain of connectors, the longest one takes the change (a warning names it); a connector
   with explicit breakpoints past the new count is refused by its own validation; a change

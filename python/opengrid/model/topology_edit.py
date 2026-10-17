@@ -1704,3 +1704,101 @@ def set_dimension(store, name, dimension: int, **changes):
     if issues:
         raise ValidationError(issues)
     return [store.get(c).name for c in assigned], warnings
+
+
+def set_unstructured_generator(store, name, generator):
+    """An unstructured domain's generator settings. For a sketch's block they go to the
+    sketch: the triangulation settings to its ``generator`` (shared by its unstructured
+    blocks) and the inflation to walls on the block's edges (first height, layers, growth;
+    the block's walls not listed any more are dropped, those on edges shared with another
+    block kept). A total thickness or layers past the core size are not available there.
+    Returns ([domain name], warnings)."""
+    from opengrid.model.entities import normalize_params
+    from opengrid.model.sketch import edge_key, edit_sketch, output_owner
+    from opengrid.model.unstructured import normalize_generator
+
+    entity = store.get(name)
+    if entity.kind != "unstructured_domain":
+        raise ValidationError([Issue(name, f"is a {entity.kind}, not an unstructured domain")])
+    generator = normalize_generator(generator, name, store)
+    owner = output_owner(store).get(entity.id)
+    if owner is None:
+        params = dict(entity.params)
+        params["generator"] = generator
+        store.update(entity.id, params=normalize_params("unstructured_domain", params, name, store))
+        return [name], []
+    sketch, role = owner
+    index = int(role[1:])
+    blocks = sketch.params["blocks"]
+    edges = {edge_key(blocks[index][k], blocks[index][(k + 1) % 4]) for k in range(4)}
+    shared = set()
+    for other, block in enumerate(blocks):
+        if other != index:
+            shared.update(edge_key(block[k], block[(k + 1) % 4]) for k in range(4))
+    owners = output_owner(store)
+    inflation = generator["inflation"]
+    wanted = []
+    issues = []
+    if inflation is not None:
+        if inflation["total_thickness"] is not None:
+            issues.append(
+                Issue(
+                    name,
+                    f"is a block of sketch {sketch.name!r}: its layers stop at the core cell "
+                    "size, a total thickness is not available (leave it empty)",
+                )
+            )
+        if not inflation["transition"]:
+            issues.append(
+                Issue(
+                    name,
+                    f"is a block of sketch {sketch.name!r}: its layers always stop at the core "
+                    "cell size (keep 'stop at core size' on)",
+                )
+            )
+        for connector_id in inflation["connectors"]:
+            edge = None
+            owner_c = owners.get(connector_id)
+            if owner_c is not None and owner_c[0].id == sketch.id and owner_c[1][:1] == "c":
+                a, b = (int(v) for v in owner_c[1][1:].split("-"))
+                edge = edge_key(a, b)
+            if edge is None or edge not in edges:
+                issues.append(
+                    Issue(
+                        store.get(connector_id).name,
+                        f"is not an edge of block {index} of sketch {sketch.name!r} (the "
+                        "domain's own connectors are its walls)",
+                    )
+                )
+                continue
+            wanted.append(edge)
+    if issues:
+        raise ValidationError(issues)
+    walls = []
+    existing = {}
+    for wall in sketch.params["walls"]:
+        if "edge" not in wall:
+            walls.append(wall)
+            continue
+        edge = tuple(wall["edge"])
+        existing[edge] = wall
+        if edge in edges and edge not in shared:
+            continue  # this block's own walls are rewritten from the inflation
+        if edge in wanted:
+            continue
+        walls.append(wall)
+    for edge in wanted:
+        wall = dict(existing.get(edge, {}))
+        wall.update(
+            {
+                "edge": edge,
+                "spacing": inflation["first_height"],
+                "layers": inflation["layers"],
+                "growth": inflation["growth_rate"],
+            }
+        )
+        walls.append(wall)
+    settings = dict(generator)
+    settings["inflation"] = None
+    _names, warnings = edit_sketch(store, sketch.name, generator=settings, walls=tuple(walls))
+    return [name], list(warnings)

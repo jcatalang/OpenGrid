@@ -194,6 +194,9 @@ says which). A sketch's connector sets its edge family in the sketch, and
 `og.set_dimension("s-c0-1", 41, distribution={"type": "tanh", "begin_spacing": 1e-3})` that
 edge's distribution there too (the sketch owns the rest of its parameters). `og.modify("c",
 dimension=41)` changes that connector alone and is refused when a domain would become invalid.
+Likewise `og.set_unstructured_generator("s-d1", smoothing="laplacian", inflation={...})` on a
+sketch's block sends the settings to the sketch: the triangulation settings to its `generator`
+(shared by its unstructured blocks), the inflation to walls on the block's edges.
 
 ### Boundary types in one step, and changing a domain's kind
     og.set_boundary_type(["c-bottom", "c-top"], "wall")   # they join the "wall" patch (made if absent)

@@ -486,11 +486,24 @@ class Session:
         label = f"Unstructured domain from {len(curves)} curves"
         return self.commands.run(CreateEntities(items, label=label))[-1]
 
-    def set_unstructured_generator(self, name: str, **changes) -> str:
-        """Change some generator settings of an unstructured domain."""
-        generator = dict(self.entity(name).params["generator"])
-        generator.update(changes)
-        return self.modify(name, generator=generator)
+    def set_unstructured_generator(self, name: str, generator=None, **changes) -> str:
+        """Change generator settings of an unstructured domain (``generator``, a dict, and
+        ``changes`` merged into the current ones). For a sketch's block the settings go to
+        the sketch: the triangulation settings to its ``generator`` (shared by its
+        unstructured blocks) and ``inflation`` to walls on the block's edges (first height,
+        layers, growth), which is what the property panel does there. One undo step."""
+        from opengrid.model.unstructured import normalize_generator
+
+        merged = dict(self.entity(name).params["generator"])
+        if generator is not None:
+            merged.update(generator)
+        merged.update(changes)
+        merged = normalize_generator(merged, name, self.store)
+        if merged["inflation"] is not None:  # names in the journal, not ids
+            inflation = dict(merged["inflation"])
+            inflation["connectors"] = tuple(self.store.get(c).name for c in inflation["connectors"])
+            merged["inflation"] = inflation
+        return self._topology("set_unstructured_generator", f"Generator of {name}", name, merged)[0]
 
     def unstructured_mesh(self, name: str) -> dict:
         """``{"points" (n, 3), "triangles" (m, 3), "rejected", "warnings"}`` of an unstructured

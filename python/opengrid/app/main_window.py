@@ -41,6 +41,7 @@ from opengrid.app.smoother_dock import SmootherDock
 from opengrid.app.tools import TOOLS, Tool, snap, snap_targets
 from opengrid.app.zoom_box import ZoomBox
 from opengrid.model.entities import SURFACE_KINDS
+from opengrid.model.patches import PATCH_TYPES
 from opengrid.validation import ValidationError
 
 log = logging.getLogger("opengrid")
@@ -690,6 +691,8 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.extrude_action)
         create_menu.addAction(self.volume_action)
         create_menu.addSeparator()
+        create_menu.addMenu(self.boundary_type_menu(create_menu))
+        create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
 
@@ -699,6 +702,12 @@ class MainWindow(QMainWindow):
             "join_connectors": self._action("Join two connectors", self.join_connectors),
             "split_domain": self._action("Split structured domain…", self.split_domain),
             "join_domains": self._action("Join two structured domains", self.join_domains),
+            "convert_domain": self._action(
+                "Convert domain (structured <-> unstructured)",
+                self.convert_selected_domain,
+                tip="The selected domain changes kind on the same connectors (an unstructured "
+                "one needs a single loop of four edges)",
+            ),
             "split_block": self._action("Split block…", self.split_block),
             "join_blocks": self._action("Join two blocks", self.join_blocks),
             "ogrid": self._action("O-grid (butterfly) domain or block…", self.ogrid),
@@ -1149,11 +1158,15 @@ class MainWindow(QMainWindow):
             (self.group_action, structured),
             (self.block_action, structured),
             (self.volume_action, domains),
+            (self.topology_actions["convert_domain"], domains and len(self.selected_ids) == 1),
         ]
         for action, applies in groups:
             if applies:
                 menu.addAction(action)
         if any(applies for _action, applies in groups):
+            menu.addSeparator()
+        if self._patch_members_from_selection():
+            menu.addMenu(self.boundary_type_menu(menu))
             menu.addSeparator()
         topology = menu.addMenu("Topology")
         for action in self.topology_actions.values():
@@ -1338,7 +1351,9 @@ class MainWindow(QMainWindow):
         self.tool = TOOLS[name](self.session)
         if name == "sketch":
             sketches = self._selected_of_kind("sketch")
-            if sketches:
+            if not sketches:
+                sketches = self.session.names("sketch")  # one sketch: blocks go to it
+            if len(sketches) == 1:
                 self.tool.sketch = sketches[0]
             self.tool.points_per_edge = self.dimension_box.value()
             self.tool.unstructured = self.sketch_unstructured_action.isChecked()
@@ -2119,6 +2134,56 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------- patches and zones
     def _selected_of_kind(self, kind: str) -> list[str]:
         return [n for n in self.selected_names() if self.session.store.get(n).kind == kind]
+
+    def convert_selected_domain(self) -> str | None:
+        domains = self._selected_of_kind("domain") + self._selected_of_kind("unstructured_domain")
+        if len(domains) != 1:
+            self.statusBar().showMessage(self._selection_hint("one domain to convert"), 5000)
+            return None
+        name = self._run(lambda: self.session.convert_domain(domains[0]))
+        if name:
+            kind = self.session.store.get(name).kind.replace("_", " ")
+            log.info("%s is now a %s", name, kind)
+            self.set_selection([self.session.store.get(name).id])
+            self.statusBar().showMessage(f"{name} is now a {kind}", 5000)
+        return name
+
+    def boundary_type_menu(self, parent=None) -> QMenu:
+        """A submenu with one entry per patch type: the selection joins a patch of it."""
+        menu = QMenu("Boundary type", parent)
+        for patch_type in PATCH_TYPES:
+            action = menu.addAction(patch_type)
+            action.setStatusTip(
+                f"The selected boundaries join a {patch_type} patch (made when there is none)"
+            )
+            action.triggered.connect(
+                lambda _checked=False, t=patch_type: self.set_boundary_type_on_selection(t)
+            )
+        return menu
+
+    def set_boundary_type_on_selection(self, patch_type: str) -> str | None:
+        """The selected connectors (3D: domains, extruded volumes) join a patch of
+        ``patch_type``; the patch colouring is switched on to show it."""
+        members = self._patch_members_from_selection()
+        if not members:
+            self.statusBar().showMessage(
+                self._selection_hint(
+                    "the boundary connectors (3D: domains, block faces or volumes)"
+                ),
+                5000,
+            )
+            return None
+        name = self._run(lambda: self.session.set_boundary_type(members, patch_type))
+        if not name:
+            return None
+        count = len(members)
+        log.info("%s: %d boundary member(s) now %s", name, count, patch_type)
+        if not self.patch_color_action.isChecked():
+            self.patch_color_action.setChecked(True)
+        self.statusBar().showMessage(
+            f"{count} boundary member(s) in patch {name} ({patch_type})", 6000
+        )
+        return name
 
     def create_patch_from_selection(self, name: str, patch_type: str = "wall") -> str | None:
         connectors = self._patch_members_from_selection()

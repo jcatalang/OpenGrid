@@ -848,6 +848,43 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Boundary types from the selection, suggested values, sketch attachment, domain conversion (2026-10-17) — requested by the user
+
+The user asked which distribution types cluster and for suggested spacings, how to give a
+selected line a boundary type (the Boundary dock was not found), why two sketch blocks did
+not share their edge (they had become two sketches: the tool starts a new sketch when none
+is selected, and a sketch never adopts another sketch's connectors), why a domain cannot
+change kind, and for suggested first layer heights.
+
+### Built
+- `Session.set_boundary_type(members, patch_type, name=None)` (`model/patches.py`): the
+  members join the patch called ``name`` (made when absent), else the first patch of that
+  type, else a new patch named after the type, leaving the patches they were in. GUI: a
+  "Boundary type" submenu in the right-click and Create menus (the patch colouring switches
+  on), and a "boundary" row in a connector's property panel (the patch it is in and a combo).
+- Distribution editor suggestions: the uniform spacing from the connector's length and point
+  count (following the dim box), and on a type change the fields filled with a clustering to
+  start from (tanh / sine: a quarter of the uniform spacing at the clustered ends; geometric:
+  growth 1.2), placeholders naming the suggestion; extrusion editors in fractions.
+- Inflation suggestions: the unstructured and volume editors take the mean boundary spacing
+  and suggest a first height of a twentieth of it (placeholder and hint; used when the field
+  is empty); the sketch panel says the same for wall first-cell heights.
+- Sketch tool: a block drawn onto the vertices of an existing sketch extends that sketch
+  (`attached_sketch`), and with one sketch in the model new blocks go to it; so the shared
+  edge is one connector.
+- `Session.convert_domain(name)` (`topology_edit.convert_domain`): structured <->
+  unstructured on the same connectors, name kept, zones and 3D patches follow; refusals for
+  sketch domains, group members, faces of blocks / volumes and holes. Topology menu and the
+  context menu.
+
+### Verified
+- pytest +6: the panel's suggestions and boundary row (tanh / sine / uniform fills, the hint
+  following the dim box, wall -> inlet -> none moves), the selection's boundary types (new,
+  existing and named patches, a member moving, the unique name when "inlet" is a curve, the
+  menus, replay), the sketch block attached without a selection (one sketch, seven
+  connectors), conversion both ways with zone and patch following, undo / redo, replay and
+  project round trip, and every refusal.
+
 ## Unstructured sketch blocks (2026-10-17) — requested by the user
 
 The user asked why sketch blocks are limited to structured grids and whether wall layers

@@ -261,6 +261,10 @@ class SketchTool(Tool):
 
         store = self.session.store
         if self.sketch is None or self.sketch not in store:
+            # A block drawn onto the vertices of an existing sketch extends that sketch (its
+            # edges are then shared); otherwise it starts a new one.
+            self.sketch = attached_sketch(store, points)
+        if self.sketch is None:
             mean = sum(math.dist(points[k], points[(k + 1) % 4]) for k in range(4)) / 4.0
             spacing = mean / max(self.points_per_edge - 1, 1)
             block = (0, 1, 2, 3)
@@ -305,6 +309,25 @@ class SketchTool(Tool):
         if not self.points:
             return []
         return [*self.points, tuple(cursor), self.points[0]]
+
+
+def attached_sketch(store, points, tolerance: float | None = None) -> str | None:
+    """The sketch with most vertices among ``points`` (within ``tolerance``, by default
+    1e-9 of the model size), or None when the points touch no sketch vertex."""
+    scale = max(1.0, max(abs(c) for point in points for c in point))
+    if tolerance is None:
+        tolerance = 1e-9 * scale
+    best = None
+    for sketch in store.entities("sketch"):
+        hits = 0
+        for point in points:
+            if any(math.dist(vertex, point) <= tolerance for vertex in sketch.params["vertices"]):
+                hits += 1
+        if hits and (best is None or hits > best[1]):
+            best = (sketch.name, hits)
+    if best is None:
+        return None
+    return best[0]
 
 
 def _block_edges(block) -> list[tuple[int, int]]:

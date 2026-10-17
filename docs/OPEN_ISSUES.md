@@ -428,6 +428,18 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Suggested values** [2026-10-17]: the clustering spacings (a quarter of the uniform
+  spacing), the growth ratio (1.2) and the first layer height (a twentieth of the boundary
+  spacing) are starting points, not y+ estimates: no flow data is known; the inflation hint
+  takes the mean boundary spacing of the whole domain (volume: of its faces), not of the
+  wall connectors alone.
+- **Domain conversion** [2026-10-17]: structured -> unstructured keeps no generator settings;
+  unstructured -> structured needs one loop whose connectors assemble into four edges with
+  matching counts (the usual edge assembly), holes are refused; the entity id changes
+  (zones and 3D patches follow, blocks and volumes using the domain refuse the conversion).
+- **Sketch tool attachment** [2026-10-17]: a block drawn onto an existing sketch's vertices
+  joins that sketch; two separate sketches never share connectors (a sketch adopts only
+  connectors made by hand).
 - **Reference grid** [2026-10-17]: an axis view shows the plane facing it, a tilted view the
   three axis planes through the round point nearest the view centre (the lines on the world
   axes are coloured only when that point lies on them); the step follows the view's extent

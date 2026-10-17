@@ -512,6 +512,14 @@ Split a structured domain along grid line i (or j). The cut becomes a connector 
 polyline through the grid line; edge connectors crossing it are split. Returns [name
 (part with the lower index), new domain, cut connector].
 
+### `convert_domain(name: str) -> str`
+
+Turn a structured domain into an unstructured one on the same connectors, or an
+unstructured domain (one loop that assembles into four edges) into a structured one;
+the name stays and zones and 3D patches follow. Refused for a sketch's domains (set
+the sketch's unstructured blocks), members of a smoothing group and faces of blocks or
+volumes. One undo step.
+
 ### `join_domains(first: str, second: str) -> str`
 
 Join two structured domains sharing a whole edge into ``first``; connectors only
@@ -559,6 +567,15 @@ to a patch.
 ### `remove_from_patch(name: str, connectors) -> str`
 
 Remove members from a patch.
+
+### `set_boundary_type(members, patch_type: str, name: str | None = None) -> str`
+
+Give boundary members (connectors in 2D; domains, ``{"block", "face"}``,
+``{"volume", "face"}`` and side-wall connectors in 3D) a boundary type: they join
+the patch called ``name`` (created when absent), else the first patch of that type,
+else a new patch named after the type - leaving the patches they were in (a member
+belongs to one patch). The GUI's "Boundary type" menu. One undo step; returns the
+patch name.
 
 ### `pair_periodic(source: str, target: str, translation=None, rotation_angle: float = 0.0, rotation_center=(0.0, 0.0, 0.0), rotation_axis=(0.0, 0.0, 1.0)) -> str`
 

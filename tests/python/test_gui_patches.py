@@ -3,11 +3,14 @@ from pathlib import Path
 
 import pytest
 
+import opengrid
+
 pytest.importorskip("PySide6")
 pytest.importorskip("pyvistaqt")
 
 from opengrid.app.boundary_dock import INTERFACE_COLOR, PATCH_PALETTE, UNASSIGNED_COLOR
 from opengrid.app.main_window import MainWindow
+from opengrid.validation import ValidationError
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
@@ -87,3 +90,46 @@ def test_property_panel_edits_patch(window):
     members_editor.setPlainText("nope")
     assert not window.property_panel.apply()
     assert "no entity 'nope'" in window.property_panel._error.text()
+
+
+def test_boundary_type_from_the_selection_and_the_menus(window):
+    og = window.session
+    window.set_selection(_ids(window, "c-in-bottom", "c-in-top"))
+    assert window.set_boundary_type_on_selection("wall") == "wall"
+    assert window.patch_color_action.isChecked()  # the colouring shows the result
+    walls = og.entity("wall").params
+    assert walls["patch_type"] == "wall" and len(walls["members"]) == 2
+    window.set_selection(_ids(window, "c-step"))
+    assert window.set_boundary_type_on_selection("wall") == "wall"  # joins the existing one
+    assert len(og.entity("wall").params["members"]) == 3
+    window.set_selection(_ids(window, "c-inlet"))
+    inlet = window.set_boundary_type_on_selection("inlet")
+    assert inlet == "inlet-2"  # "inlet" is a curve of this model: names are unique
+    assert og.entity(inlet).params["patch_type"] == "inlet"
+    # A member moves between patches: one patch per boundary.
+    window.set_selection(_ids(window, "c-step"))
+    assert window.set_boundary_type_on_selection("inlet") == inlet
+    assert len(og.entity("wall").params["members"]) == 2
+    assert len(og.entity(inlet).params["members"]) == 2
+    # Named patches of the type are used or made; the type is checked.
+    assert og.set_boundary_type(["c-up-top"], "outlet", name="exit") == "exit"
+    assert og.entity("exit").params["patch_type"] == "outlet"
+    with pytest.raises(ValidationError, match="not wall"):
+        og.set_boundary_type(["c-up-top"], "wall", name="exit")
+    assert og.set_boundary_type(["c-up-top"], "wall") == "wall"
+    assert og.entity("exit").params["members"] == ()
+    # The menus carry it: the context menu (with a selection) and the Create menu.
+    window.set_selection(_ids(window, "c-lo-bottom"))
+    menu = window.context_menu()
+    names = [a.text() for a in menu.actions() if a.menu() is not None]
+    assert "Boundary type" in names
+    submenu = next(a.menu() for a in menu.actions() if a.text() == "Boundary type")
+    assert [a.text() for a in submenu.actions()][:3] == ["wall", "inlet", "outlet"]
+    submenu.actions()[3].trigger()  # symmetry
+    assert og.entity("symmetry").params["patch_type"] == "symmetry"
+    window.set_selection([])
+    assert "Boundary type" not in [a.text() for a in window.context_menu().actions()]
+    assert window.set_boundary_type_on_selection("wall") is None  # a hint, no patch
+    from opengrid.project.ogp import to_json
+
+    assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)

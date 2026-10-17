@@ -24,7 +24,7 @@ referring to the one below:
 | Connectors | `connector`: a curve (or chain of curves) with a number of points and a distribution | `create_connector`, `create_chain_connector`, `split_connector`, `join_connectors` |
 | Domains | `domain` (structured, 4 edges), `unstructured_domain` (loops; triangles / quads, boundary layers) | `create_structured_domain`, `create_domain`, `create_unstructured_domain` |
 | 3D | `block` (structured: six faces or an extrusion), `volume` (closed shell of domains: tetrahedra, boundary layers, pyramids) | `create_block`, `create_extruded_block`, `create_volume` |
-| Boundary conditions | `patch` (typed group of boundary connectors / faces), `zone` | `create_patch`, `create_zone`, `pair_periodic` |
+| Boundary conditions | `patch` (typed group of boundary connectors / faces), `zone` | `create_patch`, `set_boundary_type`, `create_zone`, `pair_periodic` |
 
 Meshes are not stored: they are computed from the parameters when asked for (`domain_grid`,
 `unstructured_mesh`, `block_grid`, `volume_mesh`) and cached until something they depend on
@@ -176,6 +176,15 @@ while it is in a group.
 Modes: "translate" (``vector``), "rotate" (axis ``vector`` through ``axis_point``, ``angle``
 in radians) and "normal" (``distance``, planar domains); ``distribution`` as for connectors.
 A structured domain extrudes to a block (``create_extruded_block``).
+
+### Boundary types in one step, and changing a domain's kind
+    og.set_boundary_type(["c-bottom", "c-top"], "wall")   # they join the "wall" patch (made if absent)
+    og.set_boundary_type(["c-left"], "inlet", name="in")   # a named patch of that type
+    og.convert_domain("d")   # structured <-> unstructured on the same connectors (name kept)
+
+A member belongs to one patch: `set_boundary_type` takes it out of any other. Conversion
+needs a single loop of four edges for the structured direction and is refused for sketch
+domains (set the sketch's unstructured blocks), group members and faces of blocks or volumes.
 
 ### Periodic pairs in 3D
     og.create_patch("back", "periodic", ["disc"])

@@ -1162,6 +1162,25 @@ class Session:
         }
         return self.modify(source, periodic=periodic)
 
+    def convert_domain(self, name: str) -> str:
+        """Turn a structured domain into an unstructured one on the same connectors, or an
+        unstructured domain (one loop that assembles into four edges) into a structured one;
+        the name stays and zones and 3D patches follow. Refused for a sketch's domains (set
+        the sketch's unstructured blocks), members of a smoothing group and faces of blocks or
+        volumes. One undo step."""
+        return self._topology("convert_domain", f"Convert {name}", name)[0]
+
+    def set_boundary_type(self, members, patch_type: str, name: str | None = None) -> str:
+        """Give boundary members (connectors in 2D; domains, ``{"block", "face"}``,
+        ``{"volume", "face"}`` and side-wall connectors in 3D) a boundary type: they join
+        the patch called ``name`` (created when absent), else the first patch of that type,
+        else a new patch named after the type - leaving the patches they were in (a member
+        belongs to one patch). The GUI's "Boundary type" menu. One undo step; returns the
+        patch name."""
+        return self._topology(
+            "set_boundary_type", f"Boundary type {patch_type}", members, patch_type, name=name
+        )[0]
+
     def unpair_periodic(self, source: str) -> str:
         """Remove the periodic pairing of a patch."""
         return self.modify(source, periodic=None)

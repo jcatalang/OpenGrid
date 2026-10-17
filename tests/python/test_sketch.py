@@ -484,3 +484,34 @@ def test_gui_unstructured_sketch_blocks_toggle(qtbot):
     assert window.property_panel.apply()
     assert og.entity(f"{sketch}-d1").kind == "unstructured_domain"
     window.close()
+
+
+def test_gui_sketch_block_drawn_onto_a_sketch_extends_it(qtbot):
+    """A second block drawn onto the first sketch's vertices joins that sketch (one shared
+    edge, one connector) even when nothing is selected."""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyvistaqt")
+    from opengrid.app.main_window import MainWindow
+    from opengrid.app.tools import attached_sketch
+
+    window = MainWindow(off_screen=True)
+    qtbot.addWidget(window)
+    window.resize(1200, 800)
+    window.show()
+    og = window.session
+    window.viewport.ren_win.SetSize(1000, 700)
+    window.set_tool("sketch")
+    window.dimension_box.setValue(9)
+    for xyz in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)):
+        window.handle_click(xyz)
+    window.set_selection([])
+    window.set_tool("select")
+    window.set_tool("sketch")  # no selection: the one sketch of the model
+    for xyz in ((1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)):
+        window.handle_click(xyz)
+    (sketch,) = og.names("sketch")
+    assert len(og.entity(sketch).params["blocks"]) == 2
+    assert len(og.names("connector")) == 7  # the shared edge is one connector
+    assert attached_sketch(og.store, [(2, 1, 0), (3, 1, 0), (3, 2, 0), (2, 2, 0)]) == sketch
+    assert attached_sketch(og.store, [(5, 5, 0), (6, 5, 0), (6, 6, 0), (5, 6, 0)]) is None
+    window.close()

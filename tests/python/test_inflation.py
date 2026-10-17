@@ -135,7 +135,18 @@ def test_gui_inflation_fields(qtbot):
     window.set_selection([session.entity("flow").id])
     assert window.property_panel.read_changes() == (None, {})
     _kind, editor = window.property_panel._editors["generator"]
-    editor.first_height.setText("")
-    assert not window.property_panel.apply()
-    assert "first height" in window.property_panel._error.text()
+    editor.first_height.setText("")  # empty: the suggested first height (the hint's) is used
+    suggested = editor.suggested_first_height()
+    assert suggested is not None and "suggested" in editor.first_height.placeholderText()
+    assert window.property_panel.apply()
+    stored = session.entity("flow").params["generator"]["inflation"]
+    assert stored["first_height"] == pytest.approx(suggested)
+    # Without a boundary spacing to suggest from, an empty first height is an error.
+    from opengrid.app.property_panel import ParseError, UnstructuredEditor
+    from opengrid.model.unstructured import DEFAULT_GENERATOR
+
+    bare = UnstructuredEditor(dict(DEFAULT_GENERATOR), session.store)
+    bare.walls.setText("c-wall")
+    with pytest.raises(ParseError, match="first height"):
+        bare.value()
     window.close()

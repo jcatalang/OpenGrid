@@ -96,9 +96,57 @@ def test_property_panel_connector_errors(window):
     assert "not an integer" in panel._error.text()
     breakpoints.setPlainText("")
     _kind, dist = panel._editors["distribution"]
-    dist.type.setCurrentText("geometric")
+    dist.type.setCurrentText("geometric")  # suggests a growth ratio of 1.2
+    assert dist.ratio.text() == "1.2"
+    dist.ratio.setText("")  # nothing given: the model says what geometric needs
     assert not panel.apply()
     assert "exactly one" in panel._error.text()
+
+
+def test_distribution_suggestions_and_boundary_type_in_the_panel(window):
+    og = window.session
+    og.create_connector("a", 11, name="ca")
+    window.set_selection(_ids(window, "ca"))
+    panel = window.property_panel
+    _kind, dist = panel._editors["distribution"]
+    length = og.connector_nodes("ca").length
+    h = length / 10
+    assert f"uniform spacing {h:.4g}" in dist.hint.text()
+    assert dist.begin.placeholderText() == "none"
+    dist.type.setCurrentText("tanh")  # clustered at both ends: a quarter of the uniform spacing
+    assert float(dist.begin.text()) == pytest.approx(0.25 * h)
+    assert float(dist.end.text()) == pytest.approx(0.25 * h)
+    assert "clusters at the ends" in dist.hint.text()
+    _kind, dimension = panel._editors["dimension"]
+    dimension.setValue(21)  # the hint follows the point count
+    assert f"uniform spacing {length / 20:.4g}" in dist.hint.text()
+    assert "suggested" in dist.begin.placeholderText()
+    assert panel.apply()
+    params = og.entity("ca").params
+    assert params["dimension"] == 21 and params["distribution"]["type"] == "tanh"
+    assert params["distribution"]["begin_spacing"] == pytest.approx(0.25 * h)
+    _kind, dist = panel._editors["distribution"]  # the panel rebuilt its editors
+    dist.type.setCurrentText("sine")
+    assert dist.end.text() == "" and float(dist.begin.text()) > 0
+    dist.type.setCurrentText("uniform")
+    assert dist.begin.text() == "" and dist.ratio.text() == ""
+    # The boundary row: the connector joins a patch of the chosen type.
+    _kind, boundary = panel._editors["boundary"]
+    assert boundary.currentText() == "(none)"
+    boundary.setCurrentText("wall")
+    assert panel.apply()
+    assert og.entity("wall").params["patch_type"] == "wall"
+    assert og.store.get(og.entity("wall").params["members"][0]["connector"]).name == "ca"
+    window.set_selection(_ids(window, "ca"))
+    _kind, boundary = panel._editors["boundary"]
+    assert boundary.currentText() == "wall"
+    boundary.setCurrentText("inlet")
+    assert panel.apply()
+    assert og.entity("inlet").params["members"] and og.entity("wall").params["members"] == ()
+    window.set_selection(_ids(window, "ca"))
+    panel._editors["boundary"][1].setCurrentText("(none)")
+    assert panel.apply()
+    assert og.entity("inlet").params["members"] == ()
 
 
 def test_stretching_warning_and_threshold(window):

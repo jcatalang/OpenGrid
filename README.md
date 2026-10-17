@@ -278,7 +278,12 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   text fields.
 - Selection by click in any view (3D picks along the view ray), hover highlight, the
   pointer's coordinates in the status bar, and a right-click menu with what applies to the
-  selection.
+  selection, including "Boundary type" (the selection joins a wall, inlet, outlet, symmetry,
+  farfield, periodic, interface or user patch) and domain conversion.
+- The property panel suggests values: clustering spacings when a distribution type is
+  chosen (a quarter of the uniform spacing at the clustered ends, growth 1.2), the first
+  layer height of inflation layers (a twentieth of the boundary spacing, used when the field
+  is left empty), and a connector's boundary type.
 - Long operations (volume meshing, templates, CAD import, high-order elements, exports) run in
   a worker thread behind a busy dialog; the window keeps repainting.
 - Undo / redo of every action (an edit plus a rename in the property panel is one step; Enter

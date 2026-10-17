@@ -260,3 +260,68 @@ def normalize_zone(raw: dict, store, where: str) -> dict:
 
 def member_names(params: dict, key: str, store) -> tuple:
     return tuple(member_label(item, store) for item in params["members"])
+
+
+def set_boundary_type(store, members, patch_type: str, name: str | None = None) -> list[str]:
+    """Put boundary members (connector names, domains, ``{"block", "face"}``, ``{"volume",
+    "face"}``) into one patch of ``patch_type``: the patch called ``name`` (created when
+    absent), else the first existing patch of that type (one named after the type first),
+    else a new patch named after the type. The members leave whatever patches they were in
+    (a member belongs to one patch). Returns [patch name]."""
+    issues: list[Issue] = []
+    if patch_type not in PATCH_TYPES:
+        issues.append(
+            Issue("patch_type", f"must be one of {', '.join(PATCH_TYPES)}, got {patch_type!r}")
+        )
+    if isinstance(members, (str, int, dict)):
+        members = [members]
+    wanted = _patch_members(members, store, "set_boundary_type", issues)
+    if issues:
+        raise ValidationError(issues)
+    if not wanted:
+        raise ValidationError([Issue("set_boundary_type", "no boundary members given")])
+    target = None
+    if name is not None and name in store:
+        target = store.get(name)
+        if target.kind != "patch":
+            raise ValidationError([Issue(name, f"is a {target.kind}, not a patch")])
+        if target.params["patch_type"] != patch_type:
+            raise ValidationError(
+                [Issue(name, f"is a {target.params['patch_type']} patch, not {patch_type}")]
+            )
+    elif name is None:
+        candidates = [p for p in store.entities("patch") if p.params["patch_type"] == patch_type]
+        named = [p for p in candidates if p.name == patch_type]
+        if named:
+            target = named[0]
+        elif candidates:
+            target = candidates[0]
+    for patch in store.entities("patch"):
+        if target is not None and patch.id == target.id:
+            continue
+        kept = tuple(m for m in patch.params["members"] if m not in wanted)
+        if len(kept) != len(patch.params["members"]):
+            params = dict(patch.params)
+            params["members"] = kept
+            store.update(patch.id, params=params)
+    if target is None:
+        new_name = name
+        if new_name is None:
+            new_name = patch_type
+            number = 1
+            while new_name in store:
+                number += 1
+                new_name = f"{patch_type}-{number}"
+        params = normalize_patch(
+            {"patch_type": patch_type, "members": wanted, "periodic": None}, store, new_name
+        )
+        target = store.add("patch", params, new_name)
+        return [target.name]
+    existing = list(target.params["members"])
+    for member in wanted:
+        if member not in existing:
+            existing.append(member)
+    params = dict(target.params)
+    params["members"] = tuple(existing)
+    store.update(target.id, params=params)
+    return [target.name]

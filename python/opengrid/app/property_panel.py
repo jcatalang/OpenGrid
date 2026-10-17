@@ -104,7 +104,9 @@ class ExtrusionEditor(QWidget):
         self.dimension = QSpinBox()
         self.dimension.setRange(2, 100000)
         self.dimension.setValue(value["dimension"])
-        self.distribution = DistributionEditor(value["distribution"])
+        self.distribution = DistributionEditor(
+            value["distribution"], length=1.0, dimension=value["dimension"], unit=" of the length"
+        )
         self.edges = QLineEdit(", ".join(value["edges"]))
         self.edges.setToolTip(
             "hyperbolic: conditions of the base edges imin, imax, jmin, jmax "
@@ -213,12 +215,59 @@ class PeriodicEditor(QWidget):
         }
 
 
+FIRST_HEIGHT_FRACTION = 0.05  # suggested first layer: a twentieth of the boundary spacing
+
+
+def mean_connector_spacing(session, connector_ids) -> float | None:
+    """Mean node interval of the given connectors (None without any)."""
+    import numpy as np
+
+    lengths = []
+    for connector_id in connector_ids:
+        if connector_id not in session.store:
+            continue
+        points = np.asarray(session.connector_nodes(session.store.get(connector_id).name).points)
+        if len(points) >= 2:
+            lengths.extend(np.linalg.norm(np.diff(points, axis=0), axis=1).tolist())
+    if not lengths:
+        return None
+    return float(sum(lengths) / len(lengths))
+
+
+def _first_height_placeholder(boundary_spacing) -> str:
+    if boundary_spacing is None:
+        return "required with walls"
+    return f"suggested {FIRST_HEIGHT_FRACTION * boundary_spacing:.3g}"
+
+
+def _inflation_hint(boundary_spacing) -> QLabel:
+    if boundary_spacing is None:
+        text = "first height: a fraction of the boundary spacing (1/20 is a usual start)"
+    else:
+        first = FIRST_HEIGHT_FRACTION * boundary_spacing
+        text = (
+            f"boundary spacing is {boundary_spacing:.3g}: first height {first:.3g} suggested "
+            f"(used when empty); the layers stop at the core cell size unless a total "
+            "thickness is given"
+        )
+    label = QLabel(text)
+    label.setWordWrap(True)
+    return label
+
+
+def _suggested_first_height(editor) -> float | None:
+    if editor._boundary_spacing is None:
+        return None
+    return FIRST_HEIGHT_FRACTION * editor._boundary_spacing
+
+
 class VolumeEditor(QWidget):
     """Volume generator: backend, max size (empty: none), grading, pyramids, quality
     optimisation and floor, and boundary layers (wall faces; empty: none)."""
 
-    def __init__(self, value: dict, store=None, parent=None):
+    def __init__(self, value: dict, store=None, parent=None, boundary_spacing=None):
         super().__init__(parent)
+        self._boundary_spacing = boundary_spacing  # mean boundary node spacing: suggestions
         self.store = store
         layout = QFormLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -264,7 +313,9 @@ class VolumeEditor(QWidget):
         self.slide = QCheckBox("slide on planar faces")
         self.slide.setChecked(inflation["slide"])
         layout.addRow("inflation walls", self.walls)
+        self.first_height.setPlaceholderText(_first_height_placeholder(boundary_spacing))
         layout.addRow("first height", self.first_height)
+        layout.addRow("", _inflation_hint(boundary_spacing))
         layout.addRow("layer growth", self.layer_growth)
         layout.addRow("max layers", self.layers)
         layout.addRow("total thickness", self.thickness)
@@ -295,6 +346,9 @@ class VolumeEditor(QWidget):
             raise ParseError(f"{label}: expected one number")
         return values[0]
 
+    def suggested_first_height(self) -> float | None:
+        return _suggested_first_height(self)
+
     def _inflation(self):
         names = [n.strip() for n in self.walls.text().replace(";", ",").split(",") if n.strip()]
         if not names:
@@ -305,6 +359,8 @@ class VolumeEditor(QWidget):
                 raise ParseError(f"inflation walls: no domain {name!r}")
             ids.append(self.store.get(name).id)
         first = parse_optional(self.first_height.text(), "first height")
+        if first is None:
+            first = self.suggested_first_height()  # the hint's value when the field is empty
         if first is None:
             raise ParseError("first height: required when inflation walls are given")
         growth = parse_numbers(self.layer_growth.text(), "layer growth")
@@ -721,8 +777,9 @@ def parse_sources(text: str) -> tuple:
 class UnstructuredEditor(QWidget):
     """Triangulation settings of an unstructured domain."""
 
-    def __init__(self, value: dict, store=None, parent=None):
+    def __init__(self, value: dict, store=None, parent=None, boundary_spacing=None):
         super().__init__(parent)
+        self._boundary_spacing = boundary_spacing  # mean boundary node spacing: suggestions
         self.store = store
         layout = QFormLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -791,7 +848,9 @@ class UnstructuredEditor(QWidget):
         self.transition = QCheckBox("stop at core size")
         self.transition.setChecked(inflation["transition"])
         layout.addRow("inflation walls", self.walls)
+        self.first_height.setPlaceholderText(_first_height_placeholder(boundary_spacing))
         layout.addRow("first height", self.first_height)
+        layout.addRow("", _inflation_hint(boundary_spacing))
         layout.addRow("layer growth", self.layer_growth)
         layout.addRow("max layers", self.layers)
         layout.addRow("total thickness", self.thickness)
@@ -827,6 +886,9 @@ class UnstructuredEditor(QWidget):
             "inflation": self._inflation(),
         }
 
+    def suggested_first_height(self) -> float | None:
+        return _suggested_first_height(self)
+
     def _inflation(self):
         names = [n.strip() for n in self.walls.text().replace(";", ",").split(",") if n.strip()]
         if not names:
@@ -837,6 +899,8 @@ class UnstructuredEditor(QWidget):
                 raise ParseError(f"inflation walls: no connector {name!r}")
             ids.append(self.store.get(name).id)
         first = parse_optional(self.first_height.text(), "first height")
+        if first is None:
+            first = self.suggested_first_height()  # the hint's value when the field is empty
         if first is None:
             raise ParseError("first height: required when inflation walls are given")
         growth = parse_numbers(self.layer_growth.text(), "layer growth")
@@ -854,9 +918,15 @@ class UnstructuredEditor(QWidget):
 
 class DistributionEditor(QWidget):
     """Type + begin/end spacing + growth ratio (empty fields mean 'not specified'). Explicit
-    positions (from split / join) are kept while the type stays 'explicit'."""
+    positions (from split / join) are kept while the type stays 'explicit'. With a length and
+    a point count it says the uniform spacing and, when the type changes, fills the fields
+    with a clustering to start from: tanh and sine a quarter of the uniform spacing at the
+    ends they cluster, geometric a growth ratio of 1.2."""
 
-    def __init__(self, value: dict, parent=None):
+    CLUSTER_FRACTION = 0.25
+    GROWTH_RATIO = 1.2
+
+    def __init__(self, value: dict, parent=None, length=None, dimension=None, unit: str = ""):
         super().__init__(parent)
         layout = QFormLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -871,10 +941,73 @@ class DistributionEditor(QWidget):
         self.ratio = QLineEdit(format_optional(value["growth_ratio"]))
         for edit in (self.begin, self.end, self.ratio):
             edit.setPlaceholderText("none")
+        self.hint = QLabel("")
+        self.hint.setWordWrap(True)
         layout.addRow("type", self.type)
+        layout.addRow("", self.hint)
         layout.addRow("begin spacing", self.begin)
         layout.addRow("end spacing", self.end)
         layout.addRow("growth ratio", self.ratio)
+        self._length = None
+        self._dimension = None
+        self._unit = unit
+        self.set_context(length, dimension)
+        self.type.currentTextChanged.connect(self._on_type_changed)
+
+    def set_context(self, length, dimension) -> None:
+        """The curve length and point count the suggestions are made from."""
+        self._length = length
+        self._dimension = dimension
+        self._update_hint()
+
+    def uniform_spacing(self) -> float | None:
+        if self._length is None or self._dimension is None or self._dimension < 2:
+            return None
+        return float(self._length) / (int(self._dimension) - 1)
+
+    def suggestions(self) -> dict:
+        """Suggested begin / end spacing and growth ratio for the current type."""
+        kind = self.type.currentText()
+        h = self.uniform_spacing()
+        out = {"begin": None, "end": None, "ratio": None}
+        if kind == "geometric":
+            out["ratio"] = self.GROWTH_RATIO
+        elif kind in ("tanh", "sine") and h is not None:
+            out["begin"] = self.CLUSTER_FRACTION * h
+            if kind == "tanh":
+                out["end"] = self.CLUSTER_FRACTION * h
+        return out
+
+    def _update_hint(self) -> None:
+        h = self.uniform_spacing()
+        kind = self.type.currentText()
+        text = ""
+        if h is not None:
+            text = f"uniform spacing {h:.4g}{self._unit}"
+        if kind == "tanh":
+            text += "; clusters at the ends that have a spacing (leave one empty for one side)"
+        elif kind == "sine":
+            text += "; clusters at the beginning (begin spacing)"
+        elif kind == "geometric":
+            text += "; grows from the beginning by the ratio (or give one spacing)"
+        elif kind == "uniform":
+            text += "; no clustering"
+        self.hint.setText(text.lstrip("; "))
+        for edit, key in ((self.begin, "begin"), (self.end, "end"), (self.ratio, "ratio")):
+            suggested = self.suggestions()[key]
+            placeholder = "none"
+            if suggested is not None:
+                placeholder = f"suggested {suggested:.4g}"
+            edit.setPlaceholderText(placeholder)
+
+    def _on_type_changed(self, _kind: str) -> None:
+        """A new type starts from its suggested clustering (the old fields rarely apply)."""
+        for edit, key in ((self.begin, "begin"), (self.end, "end"), (self.ratio, "ratio")):
+            suggested = self.suggestions()[key]
+            edit.setText("")
+            if suggested is not None:
+                edit.setText(format_number(suggested))
+        self._update_hint()
 
     def value(self) -> dict:
         result = {
@@ -1050,7 +1183,12 @@ class PropertyPanel(QWidget):
         status = QLabel(self.session.domain_status(entity.name))
         status.setWordWrap(True)
         self._form.addRow("status", status)
-        editor = UnstructuredEditor(entity.params["generator"], self.session.store)
+        loop_connectors = [item["connector"] for loop in entity.params["loops"] for item in loop]
+        editor = UnstructuredEditor(
+            entity.params["generator"],
+            self.session.store,
+            boundary_spacing=mean_connector_spacing(self.session, loop_connectors),
+        )
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 
@@ -1072,7 +1210,18 @@ class PropertyPanel(QWidget):
         faces = QLabel(", ".join(self.session.store.get(f).name for f in entity.params["faces"]))
         faces.setWordWrap(True)
         self._form.addRow("faces", faces)
-        editor = VolumeEditor(entity.params["generator"], self.session.store)
+        face_connectors = []
+        for face in entity.params["faces"] or ():
+            face_params = self.session.store.get(face).params
+            for edge in face_params.get("edges", ()):
+                face_connectors.extend(item["connector"] for item in edge)
+            for loop in face_params.get("loops", ()):
+                face_connectors.extend(item["connector"] for item in loop)
+        editor = VolumeEditor(
+            entity.params["generator"],
+            self.session.store,
+            boundary_spacing=mean_connector_spacing(self.session, face_connectors),
+        )
         self._form.addRow("generator", editor)
         self._editors["generator"] = ("generator", editor)
 
@@ -1179,6 +1328,20 @@ class PropertyPanel(QWidget):
         walls.setMinimumHeight(50)
         self._form.addRow("walls", walls)
         self._editors["walls"] = ("sketch_walls", walls)
+        own = [
+            entity_id
+            for _role, entity_id in params["outputs"]
+            if entity_id in self.session.store
+            and self.session.store.get(entity_id).kind == "connector"
+        ]
+        spacing = mean_connector_spacing(self.session, own)
+        if spacing is not None:
+            hint = QLabel(
+                f"edge spacing is {spacing:.3g}: a first-cell height of "
+                f"{FIRST_HEIGHT_FRACTION * spacing:.3g} is a usual start for a wall"
+            )
+            hint.setWordWrap(True)
+            self._form.addRow("", hint)
         relax = QCheckBox("vertices on curves slide (2D)")
         relax.setChecked(params["relax"])
         self._form.addRow("relax", relax)
@@ -1191,7 +1354,17 @@ class PropertyPanel(QWidget):
             generator = params["generator"]
             if generator is None:
                 generator = dict(DEFAULT_GENERATOR)
-            editor = UnstructuredEditor(generator, self.session.store)
+            sketch_connectors = [
+                entity_id
+                for _role, entity_id in params["outputs"]
+                if entity_id in self.session.store
+                and self.session.store.get(entity_id).kind == "connector"
+            ]
+            editor = UnstructuredEditor(
+                generator,
+                self.session.store,
+                boundary_spacing=mean_connector_spacing(self.session, sketch_connectors),
+            )
             editor.walls.setEnabled(False)
             editor.walls.setPlaceholderText("from the sketch's walls")
             self._form.addRow("unstructured generator", editor)
@@ -1277,11 +1450,20 @@ class PropertyPanel(QWidget):
         segments = QLabel("\n".join(pieces))
         segments.setWordWrap(True)
         self._form.addRow("segments", segments)
+        nodes = self.session.connector_nodes(entity.name)
         for field, kind in CONNECTOR_FIELDS:
-            editor = self._make_editor(kind, params[field])
+            context = None
+            if kind == "distribution":
+                context = (nodes.length, params["dimension"], "")
+            editor = self._make_editor(kind, params[field], context)
             self._form.addRow(field.replace("_", " "), editor)
             self._editors[field] = (kind, editor)
-        nodes = self.session.connector_nodes(entity.name)
+        dimension_editor = self._editors["dimension"][1]
+        distribution_editor = self._editors["distribution"][1]
+        dimension_editor.valueChanged.connect(
+            lambda n: distribution_editor.set_context(nodes.length, n)
+        )
+        self._boundary_rows(entity, "connector")
         self._form.addRow("length", QLabel(f"{nodes.length:.10g}"))
         self._form.addRow(
             "begin / end spacing", QLabel(f"{nodes.begin_spacing:.6g} / {nodes.end_spacing:.6g}")
@@ -1301,7 +1483,31 @@ class PropertyPanel(QWidget):
             warnings.setStyleSheet("color: #ff6b6b;")
             self._form.addRow("warnings", warnings)
 
-    def _make_editor(self, kind: str, value) -> QWidget:
+    def _boundary_rows(self, entity, key: str) -> None:
+        """The patch the entity is in, and a combo to give it a boundary type (it then joins
+        a patch of that type: Session.set_boundary_type)."""
+        current = None
+        for patch in self.session.store.entities("patch"):
+            if {key: entity.id} in patch.params["members"]:
+                current = patch
+                break
+        combo = QComboBox()
+        combo.addItem("(none)")
+        combo.addItems(list(PATCH_TYPES))
+        label = QLabel("in no patch")
+        if current is not None:
+            combo.setCurrentText(current.params["patch_type"])
+            label.setText(f"patch {current.name}")
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(combo)
+        row.addWidget(label, 1)
+        self._form.addRow("boundary", box)
+        self._editors["boundary"] = ("boundary", combo)
+        self._boundary_before = combo.currentText()
+
+    def _make_editor(self, kind: str, value, context=None) -> QWidget:
         if kind == "dimension":
             editor = QSpinBox()
             editor.setRange(2, 10_000_000)
@@ -1313,6 +1519,9 @@ class PropertyPanel(QWidget):
             editor.setCurrentText(value)
             return editor
         if kind == "distribution":
+            if context is not None:
+                length, dimension, unit = context
+                return DistributionEditor(value, length=length, dimension=dimension, unit=unit)
             return DistributionEditor(value)
         if kind == "flag":
             editor = QCheckBox()
@@ -1361,6 +1570,8 @@ class PropertyPanel(QWidget):
                 if text != entity.name:
                     new_name = text
                 continue
+            if kind == "boundary":
+                continue  # applied as its own command (apply)
             value = self._read_editor(field, kind, editor)
             if value != entity.params[field]:
                 changes[field] = value
@@ -1511,17 +1722,35 @@ class PropertyPanel(QWidget):
             self._show_error(str(error))
             return False
         name = self.session.store.get(self.entity_id).name
+        boundary = None
+        if "boundary" in self._editors:
+            chosen = self._editors["boundary"][1].currentText()
+            if chosen != self._boundary_before:
+                boundary = chosen
         try:
             if changes or new_name is not None:
                 self.session.modify(name, new_name=new_name, **changes)  # one undo step
+                if new_name is not None:
+                    name = new_name
+            if boundary is not None:
+                self._apply_boundary(name, boundary)
         except ValidationError as error:
             self._show_error(str(error))
             return False
-        if not changes and new_name is None:
+        if not changes and new_name is None and boundary is None:
             self.message.emit("No changes", False)
             return False
         self.message.emit(f"Updated {self.session.store.get(self.entity_id).name}", False)
         return True
+
+    def _apply_boundary(self, name: str, chosen: str) -> None:
+        if chosen == "(none)":
+            entity_id = self.session.store.get(name).id
+            for patch in self.session.store.entities("patch"):
+                if any(entity_id in item.values() for item in patch.params["members"]):
+                    self.session.remove_from_patch(patch.name, [name])
+            return
+        self.session.set_boundary_type([name], chosen)
 
     def _show_error(self, text: str) -> None:
         self._error.setText(text)

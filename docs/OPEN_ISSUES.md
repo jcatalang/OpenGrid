@@ -434,13 +434,15 @@ history). Phase tags show where each item came from.
   edge curve is reused whatever its points (the neighbours must agree); existing arcs are
   only matched to a full circle when they tile it exactly; the domains inherit no boundary
   type (set wall / farfield on them afterwards).
-- **Poles** [2026-10-18]: a surface domain whose loop passes a pole (the surface closes on
-  itself there) is meshed by opening the pole into its degenerate side in parameter space
-  and folding the duplicates back; the parametrisation crowds the triangles near a pole, so
-  such meshes get a cleanup on the surface (short interior edges collapsed, Laplacian
-  smoothing projected back, edge flips) that other surface domains do not; quads touching a
-  pole become triangles or go; inflation layers are not taken along the degenerate side. CAD
-  faces with degenerate edges are still skipped by the importer (they could use this now).
+- **Poles** [2026-10-18]: a domain on a surface of revolution with a pole is meshed in a
+  conformal plane (`RevolutionFrame`: isothermal coordinate along the curve, a Mobius map
+  bringing both poles to finite points), so the triangle count is about right and the shapes
+  are kept; the 3D size still varies by the conformal factor (up to about 2x over a
+  hemisphere, smaller near the poles). Any other surface with a pole (a NURBS face from CAD,
+  a ruled surface closing at a point) falls back to opening the pole in parameter space plus
+  a cleanup on the surface (edge collapses, smoothing, flips) that is written in Python and
+  slow beyond a few thousand triangles; quads touching such a pole become triangles or go.
+  CAD faces with degenerate edges are still skipped by the importer.
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a

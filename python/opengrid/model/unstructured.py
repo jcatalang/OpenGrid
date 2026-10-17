@@ -306,9 +306,11 @@ def domain_frame(params, store, loops, where: str = ""):
     from opengrid.model.frames import make_frame
 
     surface = None
+    entity = None
     if params.get("surface") is not None:
-        surface = store.geometry(params["surface"])
-    return make_frame(loops, surface, where)
+        entity = store.get(params["surface"])
+        surface = store.geometry(entity.name)
+    return make_frame(loops, surface, where, surface_entity=entity, store=store)
 
 
 def check_loops(params, store, connectors, where) -> None:

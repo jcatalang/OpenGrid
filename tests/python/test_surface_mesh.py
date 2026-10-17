@@ -111,9 +111,11 @@ def test_mesh_surfaces_from_the_gui(qtbot):
 
 
 def test_sphere_meshes_with_fans_at_the_poles():
-    """A sphere's halves are meshed on the surface: the pole nodes are opened into their
-    degenerate side so the triangles fan around them, and the mesh is cleaned up where the
-    parametrisation crowds (collapses, smoothing on the surface, flips)."""
+    """A sphere's halves are meshed in their conformal plane (RevolutionFrame): the poles are
+    ordinary boundary points there, so the triangles fan around them with their shape kept
+    and about the expected count, in a fraction of a second."""
+    import time
+
     import numpy as np
 
     from opengrid.model.unstructured import _min_angles
@@ -125,6 +127,7 @@ def test_sphere_meshes_with_fans_at_the_poles():
         "sp-a",
         "sp-b",
     ]
+    started = time.time()
     domains = og.mesh_surfaces(["sp-a", "sp-b"], spacing=0.15)
     assert domains == ["sp-a-mesh", "sp-b-mesh"]
     assert og.names("connector") == ["c-sp-meridian-b", "c-sp-meridian-a"]  # shared by both
@@ -133,7 +136,7 @@ def test_sphere_meshes_with_fans_at_the_poles():
         points = np.asarray(mesh["points"])
         triangles = np.asarray(mesh["triangles"])
         assert np.max(np.abs(np.linalg.norm(points, axis=1) - 1.0)) < 1e-9  # on the sphere
-        assert 350 < len(triangles) < 700  # about the spacing's worth, not crowded at the poles
+        assert 600 < len(triangles) < 1100  # ~645 for equilateral triangles of the spacing
         assert _min_angles(points, triangles).min() > 15.0
         edges = np.sort(
             np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]]),
@@ -148,9 +151,41 @@ def test_sphere_meshes_with_fans_at_the_poles():
         assert np.allclose(points[:boundary, 1], 0.0, atol=1e-9)  # the meridian nodes come first
         north = int(np.argmin(np.linalg.norm(points - np.asarray([0.0, 0.0, 1.0]), axis=1)))
         assert np.sum(np.any(triangles == north, axis=1)) >= 3  # a fan at the pole
+    assert time.time() - started < 5.0  # the conformal plane: no crowding, no cleanup
     og.create_box(size=(6, 6, 6), name="box")
     outer = og.mesh_surfaces([f"box-{s}" for s in BOX_FACES], spacing=0.8)
     volume = og.create_volume(outer + domains, name="flow")
     status = og.volume_status(volume)
     assert "2 shell(s)" in status and "miss the quality floor" not in status
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
+
+
+def test_revolution_frame_round_trip():
+    """The conformal frame maps the surface to the plane and back exactly: the poles to the
+    ends of the lens, the patch's middle to its centre, random points round trip."""
+    import numpy as np
+
+    from opengrid.model.frames import RevolutionFrame, revolution_frame
+
+    og = opengrid.Session()
+    og.create_sphere(radius=2.0, name="sp")
+    entity = og.entity("sp-a")
+    frame = revolution_frame(og.store, entity, og.geometry("sp-a"))
+    assert isinstance(frame, RevolutionFrame) and frame.pole0 and frame.pole1
+    north = frame.to2d([(0.0, 0.0, 2.0)])[0]
+    south = frame.to2d([(0.0, 0.0, -2.0)])[0]
+    assert north[1] == pytest.approx(0.0) and south[1] == pytest.approx(0.0)
+    assert north[0] == pytest.approx(-frame.length) and south[0] == pytest.approx(frame.length)
+    middle = frame.to2d([(0.0, 2.0, 0.0)])[0]  # the +y point: the middle of the +y half
+    assert np.allclose(middle, 0.0, atol=1e-9)
+    rng = np.random.default_rng(3)
+    for _ in range(20):
+        u, v = rng.uniform(0.05, 0.95, 2)
+        point = np.asarray(og.geometry("sp-a").eval(float(u), float(v)))
+        back = frame.to3d(frame.to2d([point]))[0]
+        assert np.linalg.norm(back - point) < 1e-6 * 2.0
+    frame.flip()
+    assert frame.to2d([(0.0, 2.0, 0.0)])[0][1] == pytest.approx(0.0)
+    # No pole, or a full turn: the plain surface frame is used instead.
+    og.create_cylinder(name="cy")
+    assert revolution_frame(og.store, og.entity("cy-side-a"), og.geometry("cy-side-a")) is None

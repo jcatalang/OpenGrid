@@ -848,6 +848,28 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Spheres mesh in a conformal plane (2026-10-18) — the user: "stuck here, too slow"
+
+Meshing the sphere at the suggested spacing (about 4 000 triangles per half) hung: the
+parameter-space mesh crowds the poles (3x the triangles needed), and the cleanup added the
+day before is Python with quadratic cost.
+
+### Built
+- `frames.RevolutionFrame` (method in the module docstring): for a surface of revolution
+  whose generating curve meets the axis, the isothermal coordinate sigma = integral ds / r
+  tabulated along the curve, w = exp(sigma + i theta) and the Mobius map z = (w - 1) /
+  (w + 1), scaled to 3D length units on average; exact both ways (the far pole handled by
+  its 1 / (1 - t) asymptote). `make_frame(..., surface_entity, store)` picks it for such
+  surfaces of less than a full turn; `domain_frame` passes the entity.
+- The pole opening and the on-surface cleanup remain as the fallback for other frames.
+
+### Verified
+- A unit sphere at spacing 0.15: about 850 triangles per half (645 ideal; 2 870 crowded, 490
+  after the slow cleanup), smallest angle 19 degrees, in under 0.1 s; the user's case
+  (radius 0.5, spacing 0.033): 4 200 per half in 0.1 s instead of minutes; the sphere in a
+  box meshes to a volume with no cell under the quality floor; the frame's round trip,
+  poles and middle, flip, and the plain frame for a cylinder half (`test_surface_mesh.py`).
+
 ## Menu actions no longer pass Qt's "checked" flag into their slots (2026-10-18) — bug reported by the user
 
 Create > Mesh surfaces did nothing: `QAction.triggered` emits a ``checked`` bool, and the

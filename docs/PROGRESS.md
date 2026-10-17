@@ -848,6 +848,43 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Extruded volumes: prisms and hexahedra from unstructured domains (2026-10-17) — requested by the user
+
+"Extrude domain" only took structured domains (it builds a block). The user asked why; the
+answer was that the sweep of an unstructured domain is a different kind of volume, which had
+no entity, and the user asked for it.
+
+### Built
+- A volume may be given an ``extrusion`` instead of ``faces`` (`model/volumes.py`,
+  `Session.create_extruded_volume(domain, mode, ...)`): the same schema as a block's
+  extrusion (`blocks._normalize_extrusion`, now parametrised by the domain kinds and modes
+  allowed) with translate / rotate / normal (no hyperbolic marching) and a connector-style
+  distribution of the layers. `model/extrusion.py` sweeps the domain's mesh points layer by
+  layer (Rodrigues' formula for rotations; the plane normal of a planar domain for "normal")
+  and stacks a prism on every triangle and a hexahedron on every quad; the base is mirrored
+  when the sweep runs against its normal, so cells are positive; folded sweeps (an axis
+  through the domain) are reported, never hidden. Quality, the quality floor, the cut plane
+  and the exports (VTKHDF, CGNS, Gmsh) work unchanged on the prisms and hexahedra.
+- Boundary for patches: the domain is the bottom, ``{"volume": name, "face": "top"}`` (or
+  "bottom") the ends, and the domain's connectors the side walls (one quad strip each, built
+  from the mesh's boundary nodes, which come first in loop order). `analyze_3d` reports them
+  (`volume.top`, `volume.connector`), treats a side shared by two extruded volumes as an
+  interface, and now accepts connector members in 3D patches when they are such side walls.
+  So a 2D model's connector patches carry over to the one-cell-thick 3D mesh some solvers want
+  (an open issue since Phase 4). CGNS boundary sections are named by the face (`face_name`).
+- GUI: "Extrude domain" accepts an unstructured domain (a quarter of its size along its mesh
+  normal, "dim" box layers); the property panel edits the extrusion; "Create patch" / "Add
+  to patch" take the selected extruded volume as both its ends and connectors as its sides.
+
+### Verified
+- pytest +3: a quad-dominant disc extruded (5 x the 2D cells, volume = area x height to
+  1e-12, faces and side strips on the connector's nodes in order, outward orientation of
+  bottom / top / sides, patches on all three with a clean boundary report, CGNS 3
+  boundaries, Gmsh wedge / hexahedron / quad / triangle counts, VTKHDF cell count, replay and
+  project round trip); mirrored, rotated (Pappus with straight sides, 1e-9) and normal
+  extrusions, a folded rotation reported, refusals (hyperbolic, a structured domain, faces and
+  extrusion together, inflation); the GUI action, the property-panel edit and the patches
+  from the selection.
 ## Curve points added and removed in the GUI (2026-10-17) — requested by the user
 
 ### Built

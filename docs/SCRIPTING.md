@@ -166,6 +166,17 @@ while it is in a group.
     og.insert_handle("h1", (1.4, 0.9, 0))            # a point (control point) added there
     og.remove_handle("h1", 6)                        # ... and taken away; one undo step each
 
+### Extruded volumes (a 2D unstructured mesh, one or more cells thick)
+    v = og.create_extruded_volume("disc", "translate", vector=(0, 0, 0.1), dimension=2)
+    og.create_patch("front", "symmetry", [{"volume": v, "face": "top"}])
+    og.create_patch("back", "symmetry", ["disc"])        # the domain is the bottom
+    og.create_patch("wall", "wall", ["cc"])              # a connector: its side wall
+    og.export_cgns("slab.cgns")                          # prisms / hexahedra, 3 boundaries
+
+Modes: "translate" (``vector``), "rotate" (axis ``vector`` through ``axis_point``, ``angle``
+in radians) and "normal" (``distance``, planar domains); ``distribution`` as for connectors.
+A structured domain extrudes to a block (``create_extruded_block``).
+
 A double-click on a polyline, spline or NURBS curve (or on a connector lying on it) adds a
 point there; a double-click on a handle removes it. NURBS control points are added by knot
 insertion (the curve is unchanged) and removed by knot removal (exact when the curve allows

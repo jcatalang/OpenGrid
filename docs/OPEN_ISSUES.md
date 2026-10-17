@@ -47,7 +47,14 @@ history). Phase tags show where each item came from.
 
 ## Exports
 - **2D CGNS** [4]: written with PhysicalDimension 2 (x, y). Some solvers expect 3D data with
-  one cell in z; extrude with a block (Phase 7) for that.
+  one cell in z; extrude for that (a block from a structured domain, Phase 7; a volume of
+  prisms and hexahedra from an unstructured domain, 2026-10-17, with the connectors as side
+  walls and ``{"volume", "face": "top" | "bottom"}`` as the ends).
+- **Extruded volumes** [2026-10-17]: translate, rotate and normal sweeps only (no hyperbolic
+  marching, no smoothing, no inflation layers: the layers are the distribution's); "normal"
+  needs a planar domain; a rotation axis through the domain folds it (reported, cells flat or
+  inverted); the ends of a periodic pair (front / back) are not paired as periodic faces in
+  3D (3D periodic pairing is not supported, see Periodicity).
 - **Plot3D** [5c, 8a]: structured only; it refuses unstructured domains and volumes.
 - **Periodicity** [4, 7a]:
   - 2D periodic pairs support translation only in CGNS.

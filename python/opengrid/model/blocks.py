@@ -120,13 +120,19 @@ def _number(value, label, issues, optional=False):
     return float(value)
 
 
-def _domain_ref(ref, label, store, issues):
+def _domain_ref(ref, label, store, issues, kinds=("domain",)):
     if isinstance(ref, bool) or not isinstance(ref, (str, int)) or ref not in store:
         issues.append(Issue(label, f"no domain {ref!r}"))
         return None
     entity = store.get(ref)
-    if entity.kind != "domain":
-        issues.append(Issue(label, f"{entity.name!r} is a {entity.kind}, not a structured domain"))
+    if entity.kind not in kinds:
+        wanted = " or ".join(k.replace("_", " ") for k in kinds)
+        if kinds == ("domain",):
+            wanted = "structured domain"
+        article = "a"
+        if wanted[0] in "aeiou":
+            article = "an"
+        issues.append(Issue(label, f"{entity.name!r} is a {entity.kind}, not {article} {wanted}"))
         return None
     return entity.id
 
@@ -222,7 +228,11 @@ def _normalize_smoothing(raw, label, issues) -> dict | None:
     }
 
 
-def _normalize_extrusion(raw, label, store, issues) -> dict | None:
+def _normalize_extrusion(
+    raw, label, store, issues, kinds=("domain",), modes=EXTRUSION_MODES
+) -> dict | None:
+    """The extrusion of a block (a structured domain, every mode) or of a volume
+    (opengrid.model.volumes: an unstructured domain, no hyperbolic marching)."""
     if not isinstance(raw, dict):
         issues.append(Issue(label, f"expected a dict, got {raw!r}"))
         return None
@@ -230,12 +240,10 @@ def _normalize_extrusion(raw, label, store, issues) -> dict | None:
         issues.append(Issue(f"{label}.{key}", "unexpected key"))
     merged = dict(DEFAULT_EXTRUSION)
     merged.update(raw)
-    domain = _domain_ref(merged["domain"], f"{label}.domain", store, issues)
+    domain = _domain_ref(merged["domain"], f"{label}.domain", store, issues, kinds)
     mode = merged["mode"]
-    if mode not in EXTRUSION_MODES:
-        issues.append(
-            Issue(f"{label}.mode", f"must be one of {', '.join(EXTRUSION_MODES)}, got {mode!r}")
-        )
+    if mode not in modes:
+        issues.append(Issue(f"{label}.mode", f"must be one of {', '.join(modes)}, got {mode!r}"))
     dimension = merged["dimension"]
     if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 2:
         issues.append(Issue(f"{label}.dimension", f"must be an integer >= 2, got {dimension!r}"))

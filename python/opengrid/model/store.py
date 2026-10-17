@@ -37,7 +37,9 @@ def references(entity: Entity) -> set[int]:
             refs.add(entity.params["surface"])
         return refs
     if entity.kind == "volume":
-        return set(entity.params["faces"])
+        if entity.params["faces"] is not None:
+            return set(entity.params["faces"])
+        return {entity.params["extrusion"]["domain"]}
     if entity.kind == "smoothing_group":
         from opengrid.model.groups import group_references
 
@@ -53,7 +55,7 @@ def references(entity: Entity) -> set[int]:
         return refs
     if entity.kind == "patch":
         refs = {
-            item.get("connector", item.get("domain", item.get("block")))
+            item.get("connector", item.get("domain", item.get("block", item.get("volume"))))
             for item in entity.params["members"]
         }
         if entity.params.get("periodic") is not None:

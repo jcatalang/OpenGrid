@@ -990,6 +990,13 @@ class PropertyPanel(QWidget):
         status = QLabel(text)
         status.setWordWrap(True)
         self._form.addRow("status", status)
+        if entity.params["faces"] is None:
+            source = QLabel(self.session.store.get(entity.params["extrusion"]["domain"]).name)
+            self._form.addRow("base domain", source)
+            editor = ExtrusionEditor(entity.params["extrusion"])
+            self._form.addRow("extrusion", editor)
+            self._editors["extrusion"] = ("extrusion", editor)
+            return
         faces = QLabel(", ".join(self.session.store.get(f).name for f in entity.params["faces"]))
         faces.setWordWrap(True)
         self._form.addRow("faces", faces)

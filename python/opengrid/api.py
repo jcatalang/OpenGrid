@@ -922,9 +922,13 @@ class Session:
 
     # ------------------------------------------------------ patches and zones
     # --------------------------------------------------------------- volumes
-    def create_volume(self, faces, generator=None, name: str | None = None) -> str:
+    def create_volume(
+        self, faces=None, generator=None, name: str | None = None, extrusion=None
+    ) -> str:
         """Unstructured 3D volume (tetrahedra, pyramids on quad faces) enclosed by the given
-        domains (one or more closed shells). ``generator``: ``{"backend": "netgen",
+        domains (one or more closed shells), or - with ``extrusion`` instead of ``faces`` -
+        prisms and hexahedra swept from an unstructured domain (see
+        ``create_extruded_volume``). ``generator``: ``{"backend": "netgen",
         "max_size": None, "grading": 0.3, "pyramids": "auto" | "always" | "never",
         "inflation": None, "optimize": True}``. ``optimize``: improve cells with a scaled
         Jacobian below 0.3 by moving interior nodes and pyramid apexes and swapping tetrahedra
@@ -934,7 +938,29 @@ class Session:
         "layers": 30, "total_thickness": None, "transition": True, "slide": True}``; with
         ``slide`` the layers slide along planar unstructured faces that meet the walls and are
         used by this volume only (those faces are re-meshed around the layers)."""
-        return self._create("volume", {"faces": faces, "generator": generator}, name)
+        params = {"faces": faces, "extrusion": extrusion, "generator": generator}
+        return self._create("volume", params, name)
+
+    def create_extruded_volume(
+        self,
+        domain,
+        mode: str = "translate",
+        name: str | None = None,
+        generator=None,
+        **settings,
+    ) -> str:
+        """Volume of prisms (from the triangles) and hexahedra (from the quads) swept from an
+        unstructured ``domain``: ``mode`` "translate" (``vector``), "rotate" (axis ``vector``
+        through ``axis_point``, ``angle`` in radians) or "normal" (``distance`` along the plane
+        normal of a planar domain), with ``dimension`` points across the layers and a
+        connector-style ``distribution`` (as ``create_extruded_block``; the base is mirrored
+        when the sweep runs against its normal). Its boundary for patches: the domain (the
+        bottom), ``{"volume": name, "face": "top"}`` and the domain's connectors (the side
+        walls), so a 2D model's patches carry over to the one-cell-thick 3D mesh some solvers
+        want. ``generator`` only sets the quality floor. Structured domains extrude to blocks."""
+        return self.create_volume(
+            extrusion={"domain": domain, "mode": mode, **settings}, generator=generator, name=name
+        )
 
     def set_volume_generator(self, name: str, **changes) -> str:
         """Change some generator settings of a volume."""
@@ -944,8 +970,10 @@ class Session:
 
     def volume_mesh(self, name: str) -> dict:
         """``{"points", "tets" (m, 4), "pyramids" (k, 5), "prisms" (k, 6), "hexes" (k, 8),
-        "faces" {domain id: boundary cells}, "inflation" (None or {"max_layers", "layers",
-        "height", "stops", ...}), "optimization" (None or {"moved", "swaps_23", "swaps_32",
+        "faces" {domain id, ("top", domain id) or ("side", connector id): outward boundary
+        cells}, "extrusion" (None or {"mirrored", "layers"}), "inflation" (None or
+        {"max_layers", "layers", "height", "stops", ...}), "optimization" (None or {"moved",
+        "swaps_23", "swaps_32",
         "worst_before", "worst_after", "below_before", "below_after"}), "warnings", ...}``
         (boundary nodes first, identical to the face meshes)."""
         return self.volumes.mesh(self.store.get(name).id)
@@ -963,7 +991,17 @@ class Session:
         for key, label in (("pyramids", "pyramids"), ("prisms", "prisms"), ("hexes", "hexahedra")):
             if len(mesh[key]):
                 text += f", {len(mesh[key])} {label}"
-        text += f", {len(mesh['points'])} points, {mesh['shells']} shell(s)"
+        text += f", {len(mesh['points'])} points"
+        if mesh.get("extrusion") is not None:
+            params = self.store.get(name).params["extrusion"]
+            source = self.store.get(params["domain"]).name
+            text += (
+                f"; {params['mode']} extrusion of {source}, {mesh['extrusion']['layers']} layers"
+            )
+            if mesh["extrusion"]["mirrored"]:
+                text += " (base mirrored)"
+        else:
+            text += f", {mesh['shells']} shell(s)"
         if mesh["inflation"] is not None:
             text += f"; up to {mesh['inflation']['max_layers']} layers"
         if mesh["warnings"]:
@@ -1105,7 +1143,9 @@ class Session:
         return self.modify(name, patch_type=patch_type)
 
     def add_to_patch(self, name: str, connectors) -> str:
-        """Add members (connectors in 2D, domains or block faces in 3D) to a patch."""
+        """Add members (connectors in 2D, domains, block faces or extruded-volume ends
+        ``{"volume", "face"}`` in 3D; connectors are also the side walls of extruded volumes)
+        to a patch."""
         return self._change_members(name, "connector", connectors, add=True)
 
     def remove_from_patch(self, name: str, connectors) -> str:
@@ -1134,7 +1174,10 @@ class Session:
         labels = [member_label(item, self.store) for item in entity.params["members"]]
         given = []
         for ref in refs:
-            if isinstance(ref, dict) or (isinstance(ref, (list, tuple)) and len(ref) == 2):
+            if isinstance(ref, dict) and "volume" in ref:
+                volume = self.store.get(ref["volume"]).name
+                given.append(({"volume": volume, "face": ref["face"]}, f"{volume}.{ref['face']}"))
+            elif isinstance(ref, dict) or (isinstance(ref, (list, tuple)) and len(ref) == 2):
                 if isinstance(ref, dict):
                     block, face = ref["block"], ref["face"]
                 else:

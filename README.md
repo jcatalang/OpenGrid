@@ -84,6 +84,10 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - Airfoil `.dat` (Selig and Lednicer) and CSV point import.
 - STEP / IGES import through OpenCASCADE (optional backend): sewing and healing, faces as
   surfaces, automatic connectors and structured or unstructured domains on every face.
+- Extrusion of any 2D domain: a structured domain becomes a block, an unstructured one a
+  volume of prisms and hexahedra (translate, rotate, normal), with the 2D patches carried
+  over to the side walls and the ends patched as front / back: the one-cell-thick 3D mesh
+  that 2D solvers want.
 - Freehand curves drawn with the mouse, fitted to splines; a stroke released at its start is a
   closed loop, meshed with one click; curve networks with snapping. Double-click a curve to
   add a point (NURBS: by knot insertion, shape unchanged) and a handle to remove it.

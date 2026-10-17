@@ -435,10 +435,12 @@ One-line summary of a block: points, cells, source, smoothing and quality floor.
 
 ## Volumes (unstructured / hybrid 3D)
 
-### `create_volume(faces, generator=None, name: str | None = None) -> str`
+### `create_volume(faces=None, generator=None, name: str | None = None, extrusion=None) -> str`
 
 Unstructured 3D volume (tetrahedra, pyramids on quad faces) enclosed by the given
-domains (one or more closed shells). ``generator``: ``{"backend": "netgen",
+domains (one or more closed shells), or - with ``extrusion`` instead of ``faces`` -
+prisms and hexahedra swept from an unstructured domain (see
+``create_extruded_volume``). ``generator``: ``{"backend": "netgen",
 "max_size": None, "grading": 0.3, "pyramids": "auto" | "always" | "never",
 "inflation": None, "optimize": True}``. ``optimize``: improve cells with a scaled
 Jacobian below 0.3 by moving interior nodes and pyramid apexes and swapping tetrahedra
@@ -449,6 +451,18 @@ wall faces, ``{"faces": [domains], "first_height", "growth_rate": 1.2,
 ``slide`` the layers slide along planar unstructured faces that meet the walls and are
 used by this volume only (those faces are re-meshed around the layers).
 
+### `create_extruded_volume(domain, mode: str = 'translate', name: str | None = None, generator=None, **settings) -> str`
+
+Volume of prisms (from the triangles) and hexahedra (from the quads) swept from an
+unstructured ``domain``: ``mode`` "translate" (``vector``), "rotate" (axis ``vector``
+through ``axis_point``, ``angle`` in radians) or "normal" (``distance`` along the plane
+normal of a planar domain), with ``dimension`` points across the layers and a
+connector-style ``distribution`` (as ``create_extruded_block``; the base is mirrored
+when the sweep runs against its normal). Its boundary for patches: the domain (the
+bottom), ``{"volume": name, "face": "top"}`` and the domain's connectors (the side
+walls), so a 2D model's patches carry over to the one-cell-thick 3D mesh some solvers
+want. ``generator`` only sets the quality floor. Structured domains extrude to blocks.
+
 ### `set_volume_generator(name: str, **changes) -> str`
 
 Change some generator settings of a volume.
@@ -456,8 +470,10 @@ Change some generator settings of a volume.
 ### `volume_mesh(name: str) -> dict`
 
 ``{"points", "tets" (m, 4), "pyramids" (k, 5), "prisms" (k, 6), "hexes" (k, 8),
-"faces" {domain id: boundary cells}, "inflation" (None or {"max_layers", "layers",
-"height", "stops", ...}), "optimization" (None or {"moved", "swaps_23", "swaps_32",
+"faces" {domain id, ("top", domain id) or ("side", connector id): outward boundary
+cells}, "extrusion" (None or {"mirrored", "layers"}), "inflation" (None or
+{"max_layers", "layers", "height", "stops", ...}), "optimization" (None or {"moved",
+"swaps_23", "swaps_32",
 "worst_before", "worst_after", "below_before", "below_after"}), "warnings", ...}``
 (boundary nodes first, identical to the face meshes).
 
@@ -528,7 +544,9 @@ Change a patch's boundary-condition type (wall, inlet, outlet, ...).
 
 ### `add_to_patch(name: str, connectors) -> str`
 
-Add members (connectors in 2D, domains or block faces in 3D) to a patch.
+Add members (connectors in 2D, domains, block faces or extruded-volume ends
+``{"volume", "face"}`` in 3D; connectors are also the side walls of extruded volumes)
+to a patch.
 
 ### `remove_from_patch(name: str, connectors) -> str`
 

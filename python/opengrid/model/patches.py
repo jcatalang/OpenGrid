@@ -103,11 +103,14 @@ def _periodic(raw, store, where: str, issues: list[Issue]) -> dict | None:
 
 
 BLOCK_FACES = ("imin", "imax", "jmin", "jmax", "kmin", "kmax")
+VOLUME_FACES = ("bottom", "top")  # of an extruded volume (its sides are its connectors)
 
 
 def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
-    """Patch members: connectors (2D boundaries), structured domains (faces of 3D blocks) or
-    block faces ({"block": name or id, "face": "imin" ...}, or a (block, face) pair)."""
+    """Patch members: connectors (2D boundaries, and the side walls of extruded volumes),
+    domains (faces of 3D blocks and volumes, the bottom of an extruded volume), block faces
+    ({"block": name or id, "face": "imin" ...}, or a (block, face) pair) and the ends of
+    extruded volumes ({"volume": name or id, "face": "top" | "bottom"})."""
     if isinstance(raw, (str, int, dict)):
         raw = [raw]
     result = []
@@ -118,6 +121,33 @@ def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
         ref = item
         if isinstance(item, dict) and "block" in item:
             block_face = (item.get("block"), item.get("face"))
+        elif isinstance(item, dict) and "volume" in item:
+            volume = item.get("volume")
+            face = item.get("face")
+            if (
+                isinstance(volume, bool)
+                or not isinstance(volume, (str, int))
+                or volume not in store
+                or store.get(volume).kind != "volume"
+            ):
+                issues.append(Issue(label, f"no volume {volume!r}"))
+                continue
+            entity = store.get(volume)
+            if entity.params["faces"] is not None:
+                issues.append(
+                    Issue(label, f"{entity.name!r} is not extruded: patch its face domains")
+                )
+                continue
+            if face not in VOLUME_FACES:
+                issues.append(Issue(label, f"face must be one of {', '.join(VOLUME_FACES)}"))
+                continue
+            key = (entity.id, face)
+            if key in seen:
+                issues.append(Issue(label, "listed twice"))
+                continue
+            seen.add(key)
+            result.append({"volume": entity.id, "face": face})
+            continue
         elif isinstance(item, (list, tuple)) and len(item) == 2:
             block_face = tuple(item)
         elif isinstance(item, dict):
@@ -166,6 +196,8 @@ def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
 def member_label(item: dict, store) -> str:
     if "block" in item:
         return f"{store.get(item['block']).name}.{item['face']}"
+    if "volume" in item:
+        return f"{store.get(item['volume']).name}.{item['face']}"
     ref = item.get("connector", item.get("domain"))
     return store.get(ref).name
 
@@ -173,6 +205,8 @@ def member_label(item: dict, store) -> str:
 def member_script(item: dict, store):
     if "block" in item:
         return {"block": store.get(item["block"]).name, "face": item["face"]}
+    if "volume" in item:
+        return {"volume": store.get(item["volume"]).name, "face": item["face"]}
     return member_label(item, store)
 
 

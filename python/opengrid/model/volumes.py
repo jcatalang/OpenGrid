@@ -50,6 +50,7 @@ DEFAULT_VOLUME_GENERATOR = {
     "quality_floor": None,
 }
 PYRAMID_MODES = ("auto", "always", "never")
+VOLUME_EXTRUSION_MODES = ("translate", "rotate", "normal")
 # Internal settings of the 3D inflation (opengrid._core.inflate_3d; not in projects).
 INFLATION_INTERNALS = {
     "min_jacobian": 0.2,
@@ -136,13 +137,28 @@ def normalize_volume_inflation(raw, faces, store, label: str, issues: list) -> d
 
 def normalize_volume(raw: dict, store, where: str) -> dict:
     issues: list[Issue] = []
-    for key in sorted(set(raw) - {"faces", "generator"}):
+    for key in sorted(set(raw) - {"faces", "generator", "extrusion"}):
         issues.append(Issue(f"{where}: {key}", "unexpected parameter for a volume"))
     faces = []
     refs = raw.get("faces")
+    extrusion = raw.get("extrusion")
+    if (refs is None) == (extrusion is None):
+        issues.append(Issue(where, "give either faces (a shell) or an extrusion (not both)"))
+    if extrusion is not None:
+        from opengrid.model.blocks import _normalize_extrusion
+
+        extrusion = _normalize_extrusion(
+            extrusion,
+            f"{where}: extrusion",
+            store,
+            issues,
+            kinds=("unstructured_domain",),
+            modes=VOLUME_EXTRUSION_MODES,
+        )
+        refs = []
     if isinstance(refs, (str, int)):
         refs = [refs]
-    if not isinstance(refs, (list, tuple)) or len(refs) < 2:
+    if not isinstance(refs, (list, tuple)) or (extrusion is None and len(refs) < 2):
         issues.append(Issue(f"{where}: faces", "at least two domains are needed"))
         refs = []
     for k, ref in enumerate(refs):
@@ -190,13 +206,24 @@ def normalize_volume(raw: dict, store, where: str) -> dict:
     generator["inflation"] = normalize_volume_inflation(
         generator["inflation"], faces, store, f"{where}: generator.inflation", issues
     )
+    if extrusion is not None and generator["inflation"] is not None:
+        issues.append(
+            Issue(f"{where}: generator.inflation", "an extruded volume has no inflation layers")
+        )
     if issues:
         raise ValidationError(issues)
-    return {"faces": tuple(faces), "generator": generator}
+    if extrusion is not None:
+        return {"faces": None, "extrusion": extrusion, "generator": generator}
+    return {"faces": tuple(faces), "extrusion": None, "generator": generator}
 
 
 def volume_script_params(params: dict, store) -> dict:
     result = dict(params)
+    if params["faces"] is None:
+        extrusion = dict(params["extrusion"])
+        extrusion["domain"] = store.get(extrusion["domain"]).name
+        result["extrusion"] = extrusion
+        return result
     result["faces"] = tuple(store.get(f).name for f in params["faces"])
     inflation = params["generator"]["inflation"]
     if inflation is not None:
@@ -512,6 +539,8 @@ class VolumeEvaluator:
         store = session.store
         entity = store.get(entity_id)
         generator = entity.params["generator"]
+        if entity.params["faces"] is None:
+            return self._extruded(entity)
         shell = self._shell(entity)
         digest = hashlib.sha256(repr(generator).encode())
         digest.update(shell["digest"].encode())
@@ -714,6 +743,106 @@ class VolumeEvaluator:
             self._cache.popitem(last=False)
         return result
 
+    def _extruded(self, entity) -> dict:
+        """Prisms and hexahedra swept from an unstructured domain (opengrid.model.extrusion);
+        faces: the domain (bottom, outward), ("top", domain) and ("side", connector)."""
+        from opengrid.model.extrusion import extrude_mesh
+
+        session = self.session
+        store = session.store
+        e = entity.params["extrusion"]
+        generator = entity.params["generator"]
+        domain = store.get(e["domain"])
+        mesh2d = session.unstructured_mesh(domain.name)
+        counts = {}
+        for loop in domain.params["loops"]:
+            for item in loop:
+                counts[item["connector"]] = len(session.connectors.nodes(item["connector"]).points)
+        digest = hashlib.sha256(
+            repr((e, generator["quality_floor"], sorted(counts.items()))).encode()
+        )
+        digest.update(face_digest(session, [domain.id]).encode())
+        key = digest.hexdigest()
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        d = e["distribution"]
+        fractions, warnings = _core.distribute(
+            e["dimension"], d["type"], d["begin_spacing"], d["end_spacing"], d["growth_ratio"]
+        )
+        warnings = list(warnings)
+        points2d = np.asarray(mesh2d["points"], dtype=float)
+        normal = None
+        if e["mode"] == "normal":
+            if domain.params.get("surface") is not None or not _planar(points2d):
+                raise ValidationError(
+                    [
+                        Issue(
+                            entity.name,
+                            "a normal extrusion needs a planar domain (translate or rotate "
+                            "it instead)",
+                        )
+                    ]
+                )
+            area = np.zeros(3)
+            for cells in (mesh2d["triangles"], mesh2d["quads"]):
+                array = np.asarray(cells, dtype=np.int64)
+                if array.size:
+                    area += _area_vector(points2d[array.reshape(len(array), -1)]).sum(axis=0)
+            length = float(np.linalg.norm(area))
+            if length == 0.0:
+                raise ValidationError([Issue(entity.name, "the domain has no area to extrude")])
+            normal = area / length
+        out = extrude_mesh(
+            points2d,
+            mesh2d["triangles"],
+            mesh2d["quads"],
+            domain.params["loops"],
+            counts,
+            e,
+            list(fractions),
+            normal,
+        )
+        faces = {domain.id: out["bottom"], ("top", domain.id): out["top"]}
+        for connector, strip in out["sides"].items():
+            faces[("side", connector)] = strip
+        result = {
+            "points": out["points"],
+            "tets": np.zeros((0, 4), dtype=np.int64),
+            "pyramids": np.zeros((0, 5), dtype=np.int64),
+            "prisms": out["prisms"],
+            "hexes": out["hexes"],
+            "n_surface": out["boundary_points"],
+            "faces": faces,
+            "shells": 1,
+            "inflation": None,
+            "optimization": None,
+            "extrusion": {"mirrored": out["mirrored"], "layers": len(fractions) - 1},
+            "warnings": warnings,
+        }
+        cell_quality = _cell_quality(result)
+        result["cell_quality"] = cell_quality
+        result["enclosed_volume"] = float(cell_quality["volume"].sum())
+        folded = int(np.count_nonzero(cell_quality["volume"] <= 0.0))
+        if folded:
+            warnings.append(
+                f"{folded} cells are flat or inverted (the sweep folds the domain: a rotation "
+                "axis crossing it, or a vector in its plane)"
+            )
+        result["quality"] = floor_summary(
+            cell_quality["scaled_jacobian"], cell_quality["skewness"], generator["quality_floor"]
+        )
+        if result["quality"]["below_floor"]:
+            warnings.append(
+                f"{result['quality']['below_floor']} cells miss the quality floor (worst scaled "
+                f"Jacobian {result['quality']['worst_jacobian']:.3g}, skewness "
+                f"{result['quality']['worst_skewness']:.3g})"
+            )
+        self._cache[key] = result
+        while len(self._cache) > self.CACHE_SIZE:
+            self._cache.popitem(last=False)
+        return result
+
     def _shared_faces(self, entity) -> set:
         """Faces of this volume also used by another volume or a block."""
         store = self.session.store
@@ -888,6 +1017,15 @@ def _cell_quality(mesh) -> dict:
 
 
 # ------------------------------------------------------------------------- 3D topology
+def face_name(store, key) -> str:
+    """Name of a volume face key: a domain id, ("top", domain id) or ("side", connector id)."""
+    if isinstance(key, tuple):
+        if key[0] == "top":
+            return f"{store.get(key[1]).name}_top"
+        return store.get(key[1]).name
+    return store.get(key).name
+
+
 def analyze_3d(session) -> dict:
     """Boundary / interface faces of a 3D model (blocks and volumes) and their patches.
 
@@ -905,9 +1043,19 @@ def analyze_3d(session) -> dict:
         topo = Topology3D()
     issues.extend(topo.problems)
     volume_uses: dict[int, list[int]] = {}
+    extruded: set[tuple[int, int]] = set()  # (volume, its domain)
+    side_uses: dict[int, list[int]] = {}  # connector -> extruded volumes with that side wall
     for volume in store.entities("volume"):
-        for d in volume.params["faces"]:
-            volume_uses.setdefault(d, []).append(volume.id)
+        if volume.params["faces"] is not None:
+            for d in volume.params["faces"]:
+                volume_uses.setdefault(d, []).append(volume.id)
+            continue
+        d = volume.params["extrusion"]["domain"]
+        volume_uses.setdefault(d, []).append(volume.id)
+        extruded.add((volume.id, d))
+        for loop in store.get(d).params["loops"]:
+            for item in loop:
+                side_uses.setdefault(item["connector"], []).append(volume.id)
     entries = []
     interfaces = []
 
@@ -932,18 +1080,44 @@ def analyze_3d(session) -> dict:
     for d, vols in sorted(volume_uses.items()):
         count = len(vols) + int(d in block_domains)
         if count == 1:
+            keys = {("domain", d)}
+            if (vols[0], d) in extruded:
+                keys.add(("volume", vols[0], "bottom"))
             entries.append(
                 {
                     "label": f"{name(vols[0])}.{name(d)}",
                     "block": None,
                     "volume": (vols[0], d),
-                    "keys": {("domain", d)},
+                    "keys": keys,
                 }
             )
         elif count == 2 and d not in block_domains:
             interfaces.append(f"{name(vols[0])} | {name(vols[1])} ({name(d)})")
         elif count > 2:
             issues.append(Issue(name(d), f"bounds {count} blocks / volumes (at most 2)"))
+    for v, d in sorted(extruded):
+        entries.append(
+            {
+                "label": f"{name(v)}.top",
+                "block": None,
+                "volume": (v, ("top", d)),
+                "keys": {("volume", v, "top")},
+            }
+        )
+    for c, vols in sorted(side_uses.items()):
+        if len(vols) == 1:
+            entries.append(
+                {
+                    "label": f"{name(vols[0])}.{name(c)}",
+                    "block": None,
+                    "volume": (vols[0], ("side", c)),
+                    "keys": {("connector", c)},
+                }
+            )
+        elif len(vols) == 2:
+            interfaces.append(f"{name(vols[0])} | {name(vols[1])} ({name(c)})")
+        else:
+            issues.append(Issue(name(c), f"bounds {len(vols)} extruded volumes (at most 2)"))
     # Patches.
     by_key: dict[tuple, list[int]] = {}
     for index, entry in enumerate(entries):
@@ -953,18 +1127,24 @@ def analyze_3d(session) -> dict:
     assigned: dict[int, list[str]] = {}
     for patch in store.entities("patch"):
         for item in patch.params["members"]:
-            if "connector" in item:
+            if "connector" in item and ("connector", item["connector"]) not in by_key:
                 issues.append(
                     Issue(
                         name(item["connector"]),
-                        f"is a connector in patch {patch.name}; 3D patches contain domains or "
-                        "block faces",
+                        f"is a connector in patch {patch.name}; 3D patches contain domains, "
+                        "block faces and the ends and side connectors of extruded volumes",
                     )
                 )
                 continue
-            if "block" in item:
+            if "connector" in item:
+                key = ("connector", item["connector"])
+                label = name(item["connector"])
+            elif "block" in item:
                 key = ("block", item["block"], item["face"])
                 label = f"{name(item['block'])}.{item['face']}"
+            elif "volume" in item:
+                key = ("volume", item["volume"], item["face"])
+                label = f"{name(item['volume'])}.{item['face']}"
             else:
                 key = ("domain", item["domain"])
                 label = name(item["domain"])

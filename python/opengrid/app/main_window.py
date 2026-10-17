@@ -1130,25 +1130,70 @@ class MainWindow(QMainWindow):
         return name
 
     def extrude_selection(self) -> str | None:
-        domains = self._selected_of_kind("domain")
+        """Extrude the selected domain a quarter of its size along its normal: a structured
+        domain becomes a block (hexahedra), an unstructured one a volume of prisms and
+        hexahedra; both are edited afterwards in the property panel."""
+        domains = self._selected_of_kind("domain") + self._selected_of_kind("unstructured_domain")
         if len(domains) != 1:
-            self.statusBar().showMessage("Select one structured domain to extrude", 5000)
+            self.statusBar().showMessage(
+                self._selection_hint(
+                    "one domain to extrude (structured: a block; unstructured: "
+                    "a volume of prisms and hexahedra)"
+                ),
+                5000,
+            )
             return None
-        grid = self.session.domain_grid(domains[0])
-        size = float(np.linalg.norm(np.ptp(grid.reshape(-1, 3), axis=0)))
-        normal = np.cross(grid[0, -1] - grid[0, 0], grid[-1, 0] - grid[0, 0])
+        structured = self.session.store.get(domains[0]).kind == "domain"
+        if structured:
+            grid = self.session.domain_grid(domains[0])
+            points = grid.reshape(-1, 3)
+            normal = np.cross(grid[0, -1] - grid[0, 0], grid[-1, 0] - grid[0, 0])
+        else:
+            mesh = self.session.unstructured_mesh(domains[0])
+            points = np.asarray(mesh["points"], dtype=float)
+            normal = np.zeros(3)
+            triangles = np.asarray(mesh["triangles"], dtype=np.int64).reshape(-1, 3)
+            if len(triangles):
+                p = points[triangles]
+                normal = np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]).sum(axis=0)
+            quads = np.asarray(mesh["quads"], dtype=np.int64).reshape(-1, 4)
+            if len(quads):
+                p = points[quads]
+                normal = normal + np.cross(p[:, 2] - p[:, 0], p[:, 3] - p[:, 1]).sum(axis=0)
+        size = float(np.linalg.norm(np.ptp(points, axis=0)))
         if np.linalg.norm(normal) == 0:
             normal = np.array([0.0, 0.0, 1.0])
         vector = tuple(float(v) for v in 0.25 * size * normal / np.linalg.norm(normal))
-        name = self._run(
-            lambda: self.session.create_extruded_block(
-                domains[0], "translate", vector=vector, dimension=self.dimension_box.value()
+        dimension = self.dimension_box.value()
+        if structured:
+            name = self._run(
+                lambda: self.session.create_extruded_block(
+                    domains[0], "translate", vector=vector, dimension=dimension
+                )
             )
-        )
+            if name:
+                log.info("created %s: %s", name, self.session.block_status(name))
+        else:
+            name = self._run(
+                lambda: self.session.create_extruded_volume(
+                    domains[0], "translate", vector=vector, dimension=dimension
+                )
+            )
+            if name:
+                log.info("created %s: %s", name, self.session.volume_status(name))
         if name:
-            log.info("created %s: %s", name, self.session.block_status(name))
             self.set_selection([self.session.store.get(name).id])
         return name
+
+    def _patch_members_from_selection(self) -> list:
+        """Connectors (2D boundaries, side walls of extruded volumes), structured domains
+        (faces of blocks and volumes) and extruded volumes (both their ends)."""
+        members = self._selected_of_kind("connector") + self._selected_of_kind("domain")
+        for name in self._selected_of_kind("volume"):
+            if self.session.store.get(name).params["faces"] is None:
+                members.append({"volume": name, "face": "bottom"})
+                members.append({"volume": name, "face": "top"})
+        return members
 
     def set_cut_plane(self, enabled: bool) -> None:
         """Cut the blocks with the plane x = centre of the model (normal +x)."""
@@ -1483,7 +1528,7 @@ class MainWindow(QMainWindow):
         return [n for n in self.selected_names() if self.session.store.get(n).kind == kind]
 
     def create_patch_from_selection(self, name: str, patch_type: str = "wall") -> str | None:
-        connectors = self._selected_of_kind("connector") + self._selected_of_kind("domain")
+        connectors = self._patch_members_from_selection()
         if not name:
             self.statusBar().showMessage("Enter a patch name", 5000)
             return None
@@ -1496,16 +1541,18 @@ class MainWindow(QMainWindow):
         return created
 
     def add_selection_to_patch(self, name: str) -> bool:
-        connectors = self._selected_of_kind("connector")
+        connectors = self._patch_members_from_selection()
         if not connectors:
-            self.statusBar().showMessage("Select connectors first", 5000)
+            self.statusBar().showMessage(
+                self._selection_hint("connectors, domains or extruded volumes"), 5000
+            )
             return False
         done = self._run(lambda: self.session.add_to_patch(name, connectors))
         self.validate_boundary()
         return bool(done)
 
     def remove_selection_from_patch(self, name: str) -> bool:
-        connectors = self._selected_of_kind("connector")
+        connectors = self._patch_members_from_selection()
         done = self._run(lambda: self.session.remove_from_patch(name, connectors))
         self.validate_boundary()
         return bool(done)

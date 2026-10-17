@@ -288,7 +288,7 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
     """
     from opengrid.io.assembly3d import block_zones
     from opengrid.model.blocks import face_range, one_to_one_3d
-    from opengrid.model.volumes import analyze_3d, volume_cells
+    from opengrid.model.volumes import analyze_3d, face_name, volume_cells
 
     if not _core.cgns_available():
         raise RuntimeError("OpenGrid was built without CGNS support")
@@ -363,7 +363,7 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
                 group = [c for c in cells if len(c) == size]
                 if not group:
                     continue
-                label = f"{entry['patch']}_{store.get(entry['volume'][1]).name}"
+                label = f"{entry['patch']}_{face_name(store, entry['volume'][1])}"
                 if size == 4:
                     label += "_q"
                 name = unique_in(zone, label)
@@ -385,7 +385,7 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
     sides: dict[int, list[tuple[int, dict]]] = {}
     for v in volumes:
         pts = meshes[v.id]["points"]
-        for d in v.params["faces"]:
+        for d in v.params["faces"] or ():
             ids = np.unique(np.concatenate(meshes[v.id]["faces"][d]))
             sides.setdefault(d, []).append((v.id, {pts[i].tobytes(): (int(i) + 1,) for i in ids}))
     for f in topology["blocks"].boundary:

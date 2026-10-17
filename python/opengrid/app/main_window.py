@@ -397,6 +397,7 @@ class MainWindow(QMainWindow):
             "navigation-3d": self.navigation_3d_action,
             "perspective": self.perspective_action,
             "zoom-window": self.zoom_window_action,
+            "grid": self.grid_action,
         }
         for name, action in icons.items():
             action.setIcon(icon(name))
@@ -553,6 +554,14 @@ class MainWindow(QMainWindow):
             "Perspective instead of parallel projection (the 2D tools need the parallel view)"
         )
         self.perspective_action.toggled.connect(self.set_perspective)
+        self.grid_action = QAction("Reference &grid", self)
+        self.grid_action.setCheckable(True)
+        self.grid_action.setShortcut(QKeySequence("G"))
+        self.grid_action.setStatusTip(
+            "Grid of the z = 0 plane at a step that follows the zoom, with the axes and, in a "
+            "view along z, the coordinates along the edges"
+        )
+        self.grid_action.toggled.connect(self.set_grid)
         self.navigation_3d_action = QAction("&3D navigation (left-drag rotates)", self)
         self.navigation_3d_action.setCheckable(True)
         self.navigation_3d_action.setStatusTip(
@@ -567,6 +576,7 @@ class MainWindow(QMainWindow):
             self.zoom_selection_action,
             *self.view_actions.values(),
             self.perspective_action,
+            self.grid_action,
         ):
             action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             self.addAction(action)
@@ -724,6 +734,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.navigation_3d_action)
         view_menu.addAction(self.zoom_window_action)
         view_menu.addAction(self.perspective_action)
+        view_menu.addAction(self.grid_action)
         view_menu.addSeparator()
         view_menu.addAction(self.color_action)
         view_menu.addAction(self.nodes_action)
@@ -773,6 +784,7 @@ class MainWindow(QMainWindow):
         view_toolbar.addAction(self.navigation_3d_action)
         view_toolbar.addAction(self.zoom_window_action)
         view_toolbar.addAction(self.perspective_action)
+        view_toolbar.addAction(self.grid_action)
         view_toolbar.addSeparator()
         view_toolbar.addAction(self.network_action)
         view_toolbar.addAction(self.group_action)
@@ -798,6 +810,16 @@ class MainWindow(QMainWindow):
             ("LeaveEvent", self._on_vtk_leave),
         ):
             tag = interactor.AddObserver(event, handler)
+            interactor.GetCommand(tag).SetPassiveObserver(True)
+        # The reference grid follows the camera: after the style's moves (low priority) and
+        # at the end of every interaction.
+        for event in (
+            "InteractionEvent",
+            "EndInteractionEvent",
+            "MouseWheelForwardEvent",
+            "MouseWheelBackwardEvent",
+        ):
+            tag = interactor.AddObserver(event, self._on_camera_moved, -1.0)
             interactor.GetCommand(tag).SetPassiveObserver(True)
         # Drags of handles and freehand strokes take the left button before the camera does:
         # high-priority observers that stop the event when they use it.
@@ -855,7 +877,18 @@ class MainWindow(QMainWindow):
 
     def _end_zoom(self, x: float, y: float) -> None:
         self.zoom_box.finish(x, y)
-        self.viewport.render()  # zoomed, or the outline removed
+        self.scene.camera_changed()  # zoomed, or the outline removed; the grid follows
+
+    def _on_camera_moved(self, *_args) -> None:
+        if self.scene.grid.enabled:
+            self.scene.grid.update()
+
+    def set_grid(self, enabled: bool) -> None:
+        self.scene.grid.set_enabled(enabled)
+        if enabled:
+            self.statusBar().showMessage(
+                f"Reference grid: major lines every {self.scene.grid.step:g} (G toggles it)", 6000
+            )
 
     def cancel_zoom_box(self) -> None:
         """Drop a zoom window in progress (Esc, tool change)."""
@@ -2315,16 +2348,18 @@ class MainWindow(QMainWindow):
         from opengrid.model.connectors import CURVE_KINDS
         from opengrid.model.entities import SURFACE_KINDS
 
-        sketch = self._one("sketch", "sketch (and the curves or surfaces to assign)")
+        sketch = self._one("sketch", "sketch (and the curves, connectors or surfaces to assign)")
         if sketch is None:
             return None
         geometry = [
             n
             for n in self.selected_names()
-            if self.session.store.get(n).kind in (*CURVE_KINDS, *SURFACE_KINDS)
+            if self.session.store.get(n).kind in (*CURVE_KINDS, "connector", *SURFACE_KINDS)
         ]
         if not geometry:
-            self.statusBar().showMessage("Select curves or surfaces with the sketch", 5000)
+            self.statusBar().showMessage(
+                "Select curves, connectors or surfaces with the sketch", 5000
+            )
             return None
         name = self._run_long(
             "Assigning the geometry…", lambda: self.session.assign_sketch_geometry(sketch, geometry)
@@ -2708,6 +2743,7 @@ class MainWindow(QMainWindow):
         self.zoom_window_action.setChecked(_setting_bool(s.value("view/zoom_window"), True))
         self.nodes_action.setChecked(_setting_bool(s.value("view/nodes"), True))
         self.color_action.setChecked(_setting_bool(s.value("view/stretching"), True))
+        self.grid_action.setChecked(_setting_bool(s.value("view/grid"), False))
         dimension = s.value("tools/dimension")
         if dimension is not None:
             self.dimension_box.setValue(int(dimension))
@@ -2725,6 +2761,7 @@ class MainWindow(QMainWindow):
         s.setValue("view/zoom_window", self.zoom_window_action.isChecked())
         s.setValue("view/nodes", self.nodes_action.isChecked())
         s.setValue("view/stretching", self.color_action.isChecked())
+        s.setValue("view/grid", self.grid_action.isChecked())
         s.setValue("tools/dimension", self.dimension_box.value())
         s.setValue("files/last_dir", self._last_dir)
         s.setValue("files/recent", self._recent)

@@ -406,6 +406,18 @@ def _zoom_window(painter, color):
     _poly(painter, [(0.74, 0.72), (0.88, 0.86)])
 
 
+def _grid(painter, color):
+    painter.save()
+    _thin(painter, 0.5)
+    for k in range(1, 5):
+        v = 0.1 + 0.8 * k / 5
+        _poly(painter, [(v, 0.1), (v, 0.9)])
+        _poly(painter, [(0.1, v), (0.9, v)])
+    painter.restore()
+    _poly(painter, [(0.1, 0.58), (0.9, 0.58)])
+    _poly(painter, [(0.42, 0.1), (0.42, 0.9)])
+
+
 def _group(painter, color):
     painter.save()
     _thin(painter, 0.8)
@@ -460,4 +472,5 @@ GLYPHS = {
     "navigation-3d": _nav3d,
     "perspective": _perspective,
     "zoom-window": _zoom_window,
+    "grid": _grid,
 }

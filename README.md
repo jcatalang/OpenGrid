@@ -124,7 +124,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   blocks were one grid; boundary nodes sliding on their curves and surfaces; singular points
   (3 or 5 blocks around a vertex); symmetry planes; wall control and wall layers; Anderson
   acceleration with a safeguard.
-- **Sketch topology:** draw a block layout with the mouse; it is fitted to the geometry and
+- **Sketch topology:** draw a block layout with the mouse (edges drawn onto existing
+  connectors adopt them and share their nodes); it is fitted to the geometry and
   meshed. Live editing: drag control points and vertices with immediate previews.
 - **Templates:** 2D `ogrid`, `butterfly`, `cgrid`, `hgrid`, `body_in_channel` (also
   extruded); 3D `pipe`, `cylinder_in_channel`, `bump_channel`, `wing_in_box` (taper, sweep,
@@ -270,7 +271,9 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   by hand): left-drag rotates, Shift + drag pans, Alt + drag zooms to a window. `F` re-centres
   the view keeping its direction, `Z` zooms to the selection, `1 2 3` look at the XY, XZ and
   YZ planes (again: from the other side), `7` is the isometric view, `V` toggles perspective,
-  `Esc` cancels. The keys work wherever the focus is, except in text fields.
+  `Esc` cancels, `G` shows a reference grid of the z = 0 plane whose step follows the zoom,
+  with the coordinates along the edges in a view along z. The keys work wherever the focus is,
+  except in text fields.
 - Selection by click in any view (3D picks along the view ray), hover highlight, the
   pointer's coordinates in the status bar, and a right-click menu with what applies to the
   selection.

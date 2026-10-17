@@ -20,6 +20,7 @@ import numpy as np
 import pyvista as pv
 
 from opengrid.api import Session
+from opengrid.app.reference_grid import ReferenceGrid
 from opengrid.model.connectors import CURVE_KINDS
 from opengrid.model.entities import SURFACE_KINDS
 from opengrid.validation import ValidationError
@@ -100,6 +101,7 @@ class Scene:
         # The view "fit" starts from: "xy" (2D navigation) or "iso" (3D).
         self.default_view = "xy"
         self.hovered: int | None = None  # entity highlighted under the pointer
+        self.grid = ReferenceGrid(plotter)  # the z = 0 plane's grid, when enabled
 
     # ---------------------------------------------------------- actor plumbing
     def _add(self, mesh, name: str, pickable: bool = True, **kwargs):
@@ -500,10 +502,17 @@ class Scene:
         """The default view (top in 2D navigation, isometric in 3D), centred on everything."""
         self.view_preset(self.default_view)
 
+    def camera_changed(self) -> None:
+        """After the camera moved: the reference grid follows, then a render."""
+        if self.grid.enabled:
+            self.grid.update()  # renders
+        else:
+            self.plotter.render()
+
     def reset_camera(self) -> None:
         """Centre the view on everything, keeping the viewing direction."""
         self.plotter.reset_camera()
-        self.plotter.render()
+        self.camera_changed()
 
     def view_preset(self, name: str, negative: bool | None = None) -> None:
         """Look at the xy plane from +z ("xy", top), the xz plane from -y ("xz", front), the
@@ -526,7 +535,7 @@ class Scene:
                 negative = bool(np.allclose(current, direction, atol=1e-9))
         look(negative=negative)
         self.plotter.reset_camera()
-        self.plotter.render()
+        self.camera_changed()
 
     def view_name(self) -> str | None:
         """ "xy", "-xy", "xz", "-xz", "yz", "-yz" when the view looks along an axis, else None."""
@@ -547,7 +556,7 @@ class Scene:
             self.plotter.disable_parallel_projection()
         else:
             self.plotter.enable_parallel_projection()
-        self.plotter.render()
+        self.camera_changed()
 
     def zoom_to(self, ids) -> bool:
         """Centre the view on the given entities (keeping the viewing direction); False when
@@ -556,7 +565,7 @@ class Scene:
         if bounds is None:
             return False
         self.plotter.reset_camera(bounds=bounds)
-        self.plotter.render()
+        self.camera_changed()
         return True
 
     def entity_bounds(self, ids) -> tuple | None:
@@ -777,7 +786,7 @@ class Scene:
         camera.focal_point = tuple(center)
         camera.position = (center[0], center[1], center[2] + 10.0 * max(size, 1e-12))
         camera.parallel_scale = max(10.0 * size, 1e-9)
-        self.plotter.render()
+        self.camera_changed()
 
     # ------------------------------------------------------- screen <-> model
     def pick_display(self, x: float, y: float) -> tuple[int | None, tuple | None]:

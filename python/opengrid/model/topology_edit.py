@@ -1250,6 +1250,9 @@ def _edit_curve(store, entity, changes: dict, check: bool, remap: bool = False):
         if dependent.kind == "sketch":
             _names, sketch_warnings = regenerate_sketch(store, dependent.name, passes=check)
             warnings.extend(sketch_warnings)
+    from opengrid.model.sketch import regenerate_adopters
+
+    regenerate_adopters(store, entity.id)  # sketches adopting a connector on this curve
     if check:
         from opengrid.commands.geometry import _check_dependents_still_valid
 

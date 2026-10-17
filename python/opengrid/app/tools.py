@@ -254,12 +254,21 @@ class SketchTool(Tool):
         return f"Sketch block for {target}: click corner {len(self.points) + 1} of 4"
 
     def create(self, points) -> str:
-        if self.sketch is None or self.sketch not in self.session.store:
+        """The block of four clicks; edges drawn onto the ends of existing connectors (the
+        clicks snapped there) adopt them, so the block shares their nodes."""
+        from opengrid.model.sketch import matching_connectors
+
+        store = self.session.store
+        if self.sketch is None or self.sketch not in store:
             mean = sum(math.dist(points[k], points[(k + 1) % 4]) for k in range(4)) / 4.0
             spacing = mean / max(self.points_per_edge - 1, 1)
-            self.sketch = self.session.create_sketch(points, [(0, 1, 2, 3)], spacing=spacing)
+            block = (0, 1, 2, 3)
+            adopted = matching_connectors(store, points, _block_edges(block))
+            self.sketch = self.session.create_sketch(
+                points, [block], spacing=spacing, connectors=adopted
+            )
             return self.sketch
-        entity = self.session.store.get(self.sketch)
+        entity = store.get(self.sketch)
         vertices = [tuple(v) for v in entity.params["vertices"]]
         block = []
         for point in points:
@@ -277,12 +286,23 @@ class SketchTool(Tool):
         if entity.params["spacing"] is None:
             mean = sum(math.dist(points[k], points[(k + 1) % 4]) for k in range(4)) / 4.0
             changes["spacing"] = mean / max(self.points_per_edge - 1, 1)
+        adopted = {item["edge"]: item["connector"] for item in entity.params["connectors"]}
+        new = matching_connectors(store, vertices, _block_edges(tuple(block)))
+        for key, connector in new.items():
+            if key not in adopted and connector not in adopted.values():
+                adopted[key] = connector
+        if adopted != {item["edge"]: item["connector"] for item in entity.params["connectors"]}:
+            changes["connectors"] = adopted
         return self.session.edit_sketch(self.sketch, **changes)
 
     def preview(self, cursor) -> list[tuple]:
         if not self.points:
             return []
         return [*self.points, tuple(cursor), self.points[0]]
+
+
+def _block_edges(block) -> list[tuple[int, int]]:
+    return [(block[k], block[(k + 1) % 4]) for k in range(4)]
 
 
 TOOLS = {

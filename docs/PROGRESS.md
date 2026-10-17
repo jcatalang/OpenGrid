@@ -848,6 +848,40 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Sketch edges adopt existing connectors; reference grid (2026-10-17) — requested by the user
+
+The user drew a sketch block under an unstructured dome and found the shared boundary not
+shared (the sketch made its own 41-point connector beside the dome's 51-point one), asked how
+to mesh a block unstructured (the sketch tool is structured by design: draw the boundary and
+use Unstructured domain), where the inflation layers are (the generator's boundary-layer rows
+of the property panel), and for a reference grid to read sizes off the view.
+
+### Built
+- Sketch parameter ``connectors`` (`{(a, b): connector}`, `model/sketch.py`): a 2D edge adopts
+  a connector made by hand. Its vertices go to the connector's ends (`place_vertices`), the
+  domain's loop uses the connector itself (so the other side shares its nodes), the edge
+  family takes its point count (`_family_dimensions`; conflicts with given dimensions or
+  another adopted count, and counts not fitting `interval_multiple`, reported by edge), the
+  group keeps it `pinned`, and the vertex passes use a sketch-owned copy at half resolution.
+  `sketch_references` holds it (deleting it is refused); editing it, or a curve under it,
+  regenerates the adopting sketches (`regenerate_adopters`, from ModifyEntity and
+  `_edit_curve`). `suggestions` offers connectors under edges (ends and middle), before
+  curves; `assign_sketch_geometry` and the GUI's assign action take connectors; the Sketch
+  block tool adopts the connectors its snapped clicks landed on (`matching_connectors`).
+- Reference grid (`app/reference_grid.py`, View > Reference grid, `G`, persisted): lines of
+  the z = 0 plane at a 1 / 2 / 5 x 10^k step from the visible extent with minor divisions,
+  the x and y axes marked, coordinates of the major lines along the viewport edges in views
+  along z; rebuilt after every camera move (interaction and wheel observers, the zoom window,
+  the camera actions).
+
+### Verified
+- pytest +5: adoption (the domain uses the connector, the family follows, nodes shared with
+  the dome and the connector an interface in the boundary report, the group leaves it in
+  place, editing its dimension regenerates the sketch, conflicts and refusals by edge, replay),
+  suggestions and assignment of a connector under a loosely drawn edge with the project round
+  trip, the GUI tool adopting snapped connector ends; the grid's step table, actors, labels in
+  z views only, zoom following, and persistence.
+
 ## GUI round: navigation, speed, 3D picking, discoverability, workers, settings (2026-10-17) — requested by the user
 
 The user could not turn the camera in 3D after starting in 2D, missed a camera reset, asked

@@ -417,6 +417,14 @@ history). Phase tags show where each item came from.
   the wing: a mid-chord spanwise edge took the trailing-edge line). Check the report.
 - **Wall sources restart** [10d]: warm-started group runs restart wall control from zero
   (only positions are warm-started); the sketch passes run without walls.
+- **Sketch connector adoption** [2026-10-17]: 2D edges only; a sketch cannot adopt another
+  sketch's connectors (two sketches do not share a boundary); the vertex passes use a
+  sketch-owned copy of an adopted connector at half resolution; adopted connectors are kept
+  fixed by the group (their nodes belong to both sides), so the sketch's vertices at their
+  ends do not relax; a wall on an adopted edge gets wall control on the sketch's side only.
+- **Reference grid** [2026-10-17]: the z = 0 plane only (the plane the 2D tools draw in);
+  coordinates are written along the edges only in views along z; the step follows the view's
+  extent (1, 2, 5 x 10^k with 10, 4 or 5 minor divisions), not the model's units.
 - **Sketch GUI** [10d]: blocks are added four clicks at a time (2D, in the z = 0 plane);
   vertices, blocks and assignments are otherwise edited by script or the property panel
   (dimensions, walls, relax); no 3D axis handles; deleting single blocks has no tool.

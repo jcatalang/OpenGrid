@@ -216,6 +216,9 @@ class ModifyEntity(Command):
             merged.update(self.changes)
             params = normalize_params(entity.kind, merged, entity.name, store)
             store.update(entity.id, params=params)
+            from opengrid.model.sketch import regenerate_adopters
+
+            regenerate_adopters(store, entity.id)  # sketches follow an adopted connector
             _check_dependents_still_valid(store, entity.id)
             recorded = {}
             shown = _for_script(entity.kind, params, store)

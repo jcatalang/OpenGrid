@@ -655,6 +655,7 @@ class Session:
         max_iterations: int = 4000,
         extrude=None,
         interval_multiple: int = 1,
+        connectors=(),
         name: str | None = None,
     ) -> str:
         """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
@@ -662,7 +663,10 @@ class Session:
         2D, counter-clockwise or not; 8 in 3D, VTK hexahedron order). ``dimensions``: points
         per edge, ``{(a, b): n}`` on any edge of each edge family (or ``spacing`` for the
         families without one); ``curves``: ``{(a, b): curve}`` assigns edges to database
-        curves, ``surfaces``: ``{(a, b, c, d): surface}`` 3D boundary faces to surfaces;
+        curves, ``connectors``: ``{(a, b): connector}`` makes 2D edges adopt existing
+        connectors (the domain shares their nodes with whatever is on their other side, the
+        edge family takes their point count), ``surfaces``: ``{(a, b, c, d): surface}`` 3D
+        boundary faces to surfaces;
         ``walls``: ``{(a, b): first-cell height or None}`` (edges, 2D; faces, 3D) or dicts
         with ``"edge"``/``"face"``, ``"spacing"``, ``"decay"``, ``"relaxation"``,
         ``"max_source"``, ``"layers"``, ``"growth"`` (wall layers, as in
@@ -696,6 +700,7 @@ class Session:
             "max_iterations": max_iterations,
             "extrude": extrude,
             "interval_multiple": interval_multiple,
+            "connectors": connectors,
             "name": name,
         }
         # The journal records what was given (defaults left out).
@@ -761,7 +766,8 @@ class Session:
         """Assign the given curves (and 3D: surfaces) to the unassigned boundary edges (faces)
         of a sketch that lie near them - within ``tolerance``, by default the ends within a
         fifth of the edge length and the middle within half of it (the nearest of them; the
-        GUI's "assign selected geometry"). One edit."""
+        GUI's "assign selected geometry"); given connectors are adopted by the 2D edges
+        whose vertices lie at their ends. One edit."""
         from opengrid.model.sketch import suggestions
 
         entity = self._sketch(name)
@@ -784,14 +790,21 @@ class Session:
         name = entity.name
         changes = {}
         curves = {item["edge"]: item["curve"] for item in params["curves"]}
+        connectors = {item["edge"]: item["connector"] for item in params["connectors"]}
         surfaces = {item["face"]: item["surface"] for item in params["surfaces"]}
         for item in found:
-            if "curve" in item:
-                curves[item["edge"]] = item["curve"]
+            if "connector" in item:
+                connectors[item["edge"]] = item["connector"]
+                curves.pop(item["edge"], None)  # the connector carries the geometry
+            elif "curve" in item:
+                if item["edge"] not in connectors:
+                    curves[item["edge"]] = item["curve"]
             else:
                 surfaces[item["face"]] = item["surface"]
-        if len(curves) != len(params["curves"]):
+        if curves != {item["edge"]: item["curve"] for item in params["curves"]}:
             changes["curves"] = curves
+        if len(connectors) != len(params["connectors"]):
+            changes["connectors"] = connectors
         if len(surfaces) != len(params["surfaces"]):
             changes["surfaces"] = surfaces
         return self.edit_sketch(name, **changes)

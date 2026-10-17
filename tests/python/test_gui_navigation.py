@@ -1,5 +1,6 @@
 """GUI navigation: zoom to a window (app/zoom_box.py) and docks whose dividers move freely."""
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -255,7 +256,9 @@ def test_camera_reset_keeps_the_direction_and_views_are_presets(qtbot):
     from PySide6.QtWidgets import QApplication
 
     window.activateWindow()  # off-screen: shortcuts fire only in the active window
-    QApplication.setActiveWindow(window)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        QApplication.setActiveWindow(window)
     window.model_tree.setFocus()
     QTest.keyClick(window.model_tree, Qt.Key.Key_7)
     assert window.scene.view_name() is None  # isometric

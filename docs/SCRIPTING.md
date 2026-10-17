@@ -217,6 +217,14 @@ print(og.sketch_report("c"))  # where each vertex went
 og.smooth_group("c-group")
 og.move_handle("c", "vertices", 9, (0.8, 0.65))  # as a mouse drag
 ```
+A sketch edge can adopt a connector made by hand (`connectors={(2, 3): "c-base"}`): the
+block then uses that connector itself, so an unstructured (or any other) domain on its other
+side shares its nodes, the edge family takes its point count and the group keeps it fixed.
+The GUI's Sketch block tool adopts the connectors whose ends its clicks snapped to, "Assign
+selected geometry to sketch" adopts selected connectors under the edges, and the log suggests
+adoptions for edges drawn along a connector. Editing the adopted connector regenerates the
+sketch. (The sketch's own connectors cannot be adopted by another sketch.)
+
 Wall layers keep grid lines normal to a wall through the boundary layer (11a): a wall entry
 `{"spacing": 1e-5, "layers": 30, "growth": 1.2}` (sketches: `walls={(1, 2): {...}}`; groups:
 `{"connector": ..., ...}`; templates: `layers=30, growth=1.2` for all walls); the first 30 layers

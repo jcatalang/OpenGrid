@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
             "Domains from curves",
             self.domains_from_selected_curves,
             tip="Structured domains from the selected curves drawn across each other (regions "
-            "with four corners); point counts from the 'dim' box",
+            "with four corners); point counts from the 'points' box",
         )
         self.group_action = self._action(
             "Smoothing group",
@@ -785,11 +785,16 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.block_action)
         toolbar.addAction(self.extrude_action)
         toolbar.addAction(self.volume_action)
-        toolbar.addWidget(QLabel(" dim "))
+        toolbar.addWidget(QLabel(" points "))
         self.dimension_box = QSpinBox()
         self.dimension_box.setRange(2, 100000)
         self.dimension_box.setValue(DEFAULT_DIMENSION)
-        self.dimension_box.setToolTip("Number of points for new connectors")
+        self.dimension_box.setToolTip(
+            "Points of the connectors the toolbar makes: Connectors on curves and Chain "
+            "connector (per connector), Unstructured domain and Domains from curves (per "
+            "curve), Sketch block (per edge); the layers of Extrude domain. Change a "
+            "connector's points later in its property panel."
+        )
         toolbar.addWidget(self.dimension_box)
         toolbar.addSeparator()
         toolbar.addAction(self.undo_action)
@@ -1871,7 +1876,7 @@ class MainWindow(QMainWindow):
 
     def create_unstructured_on_selection(self) -> str | None:
         """Unstructured domain from the selected connectors; selected curves first get a
-        connector each ('dim' box points), all in one undo step."""
+        connector each ('points' box points), all in one undo step."""
         connectors = self._selected_of_kind("connector")
         curves = self._selected_curves()
         if not connectors and not curves:

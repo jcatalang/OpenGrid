@@ -211,7 +211,7 @@ it, otherwise the log says how far the curve moved; the end control points stay)
 
 In the GUI a freehand stroke released within the pick tolerance of its start is a closed
 loop, the new curves are selected, and **Unstructured domain** meshes selected curves
-directly (one connector per curve with the "dim" box's points, one undo step). A stroke that
+directly (one connector per curve with the "points" box's points, one undo step). A stroke that
 crosses its own beginning encloses a region for "Domains from curves"; the tails beyond the
 crossing are dropped.
 

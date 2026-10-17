@@ -872,6 +872,8 @@ change kind, and for suggested first layer heights.
 - Sketch tool: a block drawn onto the vertices of an existing sketch extends that sketch
   (`attached_sketch`), and with one sketch in the model new blocks go to it; so the shared
   edge is one connector.
+- The toolbar's "dim" box is now "points", with a tooltip listing what uses it (the user:
+  "dim is misleading").
 - `Session.convert_domain(name)` (`topology_edit.convert_domain`): structured <->
   unstructured on the same connectors, name kept, zones and 3D patches follow; refusals for
   sketch domains, group members, faces of blocks / volumes and holes. Topology menu and the

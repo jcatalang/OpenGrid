@@ -1019,7 +1019,7 @@ segment, so derivative jumps at knots never cost accuracy.
   closed; then the affected group or domain is smoothed again. The left button is taken from
   the camera by high-priority VTK observers that abort the event while a drag or stroke runs.
 - **Tools:** NURBS (click control points; clamped uniform knots, degree <= 3) and Freehand
-  (press, draw, release); Create -> Domains from curves (counts from the 'dim' box).
+  (press, draw, release); Create -> Domains from curves (counts from the 'points' box).
 - **Results:** preview of a dragged spline point with a 200 x 100 dependent domain: ~12 ms
   (85 frames/s, offscreen); a six-domain freehand network: 83 ms (12 frames/s). Quarter
   circle stroke: 4 control points within 0.5 %.

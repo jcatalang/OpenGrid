@@ -848,6 +848,32 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Spheres mesh: poles opened in parameter space, cleaned up on the surface (2026-10-18) — the user
+
+The user asked how to mesh a sphere; neither the shape nor a CAD sphere could be (its poles
+leave no boundary, and the importer skips faces with degenerate edges).
+
+### Built
+- `unstructured.py`: `_open_poles` finds loop nodes where the surface's parameter line
+  collapses (`_degenerate_direction`), opens each into two 2D nodes joined along the
+  degenerate side (taking the neighbours' other coordinate) so the 2D polygon is the full
+  parameter region; `_close_poles` folds the duplicates back after triangulation (the loop
+  nodes stay first, in loop order; cells left with a repeated node go, quads with one become
+  triangles). `_improve_on_surface`, for such meshes only: interior edges shorter than 0.55
+  of the target collapsed (link condition, no turned triangles), interior nodes smoothed and
+  projected back onto the surface, interior edges flipped where the smallest angle grows.
+- `create_sphere` makes two halves ``<name>-a`` / ``-b`` of the meridian ``-meridian-a``
+  with the opposite meridian ``-meridian-b``; `mesh_surfaces` meshes them (the pole arcs are
+  dropped as zero-length sides, the two meridians shared). A full-turn surface closing on its
+  axis says to build it as two halves.
+
+### Verified
+- pytest: a unit sphere at spacing 0.15 gives about 490 triangles per half (2870 before the
+  cleanup), smallest angle above 21 degrees (1 degree before), all nodes on the sphere,
+  manifold, meridian nodes first, fans at the poles; a sphere in a box meshes to a two-shell
+  volume with no cell under the quality floor (473 before); replay; the shape and
+  surface-mesh tests updated to the new sphere parts.
+
 ## Surface meshes of the 3D shapes (2026-10-18) — requested by the user
 
 The user tried "Unstructured domain" on a cylinder's generating lines, which are no loop;

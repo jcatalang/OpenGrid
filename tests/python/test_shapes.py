@@ -107,8 +107,13 @@ def test_session_shapes_and_replay():
         "cylinder-1-side-a",
         "cylinder-1-side-b",
     ]
-    assert og.create_sphere((1, 2, 3), 2.0, name="sp") == ["sp-meridian", "sp"]
-    meridian = og.geometry("sp-meridian")
+    assert og.create_sphere((1, 2, 3), 2.0, name="sp") == [
+        "sp-meridian-a",
+        "sp-meridian-b",
+        "sp-a",
+        "sp-b",
+    ]
+    meridian = og.geometry("sp-meridian-a")
     assert tuple(meridian.eval(0.0)) == pytest.approx((1.0, 2.0, 5.0))  # the +z pole
     assert tuple(meridian.eval(1.0)) == pytest.approx((1.0, 2.0, 1.0))
     wing = og.create_wing("0012", 1.0, 0.5, 3.0, sweep=20.0, dihedral=5.0, name="wg")

@@ -83,9 +83,10 @@ def test_wing_extruded_surface_and_sphere():
     og.create_extruded_surface("quarter", (0, 0, 2), name="sheet")
     (sheet,) = og.mesh_surfaces(["sheet"], points=6)
     assert len(og.names("arc")) == 2 and og.entity(sheet).params["surface"] == og.entity("sheet").id
-    with pytest.raises(ValidationError, match="poles"):
-        og.create_sphere(name="sp")
-        og.mesh_surfaces(["sp"], spacing=0.1)
+    og.create_arc((0, 0, 0), 1.0, 0.0, math.pi, normal=(0, 1, 0), x_axis=(0, 0, 1), name="m")
+    og.create_revolved_surface("m", math.tau, (0, 0, 0), (0, 0, 1), name="whole-sphere")
+    with pytest.raises(ValidationError, match="two halves"):
+        og.mesh_surfaces(["whole-sphere"], spacing=0.1)
     with pytest.raises(ValidationError, match=r"not a surface|mesh_surfaces takes"):
         og.mesh_surfaces(["quarter"], spacing=0.1)
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
@@ -107,3 +108,49 @@ def test_mesh_surfaces_from_the_gui(qtbot):
     assert window.selected_names() == names
     assert window.create_volume_on_selection() == "volume-1"
     window.close()
+
+
+def test_sphere_meshes_with_fans_at_the_poles():
+    """A sphere's halves are meshed on the surface: the pole nodes are opened into their
+    degenerate side so the triangles fan around them, and the mesh is cleaned up where the
+    parametrisation crowds (collapses, smoothing on the surface, flips)."""
+    import numpy as np
+
+    from opengrid.model.unstructured import _min_angles
+
+    og = opengrid.Session()
+    assert og.create_sphere(radius=1.0, name="sp") == [
+        "sp-meridian-a",
+        "sp-meridian-b",
+        "sp-a",
+        "sp-b",
+    ]
+    domains = og.mesh_surfaces(["sp-a", "sp-b"], spacing=0.15)
+    assert domains == ["sp-a-mesh", "sp-b-mesh"]
+    assert og.names("connector") == ["c-sp-meridian-b", "c-sp-meridian-a"]  # shared by both
+    for name in domains:
+        mesh = og.unstructured_mesh(name)
+        points = np.asarray(mesh["points"])
+        triangles = np.asarray(mesh["triangles"])
+        assert np.max(np.abs(np.linalg.norm(points, axis=1) - 1.0)) < 1e-9  # on the sphere
+        assert 350 < len(triangles) < 700  # about the spacing's worth, not crowded at the poles
+        assert _min_angles(points, triangles).min() > 15.0
+        edges = np.sort(
+            np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]]),
+            axis=1,
+        )
+        _unique, counts = np.unique(edges, axis=0, return_counts=True)
+        assert counts.max() <= 2  # manifold
+        loop = og.entity(name).params["loops"][0]
+        boundary = sum(
+            len(og.connector_nodes(og.store.get(i["connector"]).name).points) - 1 for i in loop
+        )
+        assert np.allclose(points[:boundary, 1], 0.0, atol=1e-9)  # the meridian nodes come first
+        north = int(np.argmin(np.linalg.norm(points - np.asarray([0.0, 0.0, 1.0]), axis=1)))
+        assert np.sum(np.any(triangles == north, axis=1)) >= 3  # a fan at the pole
+    og.create_box(size=(6, 6, 6), name="box")
+    outer = og.mesh_surfaces([f"box-{s}" for s in BOX_FACES], spacing=0.8)
+    volume = og.create_volume(outer + domains, name="flow")
+    status = og.volume_status(volume)
+    assert "2 shell(s)" in status and "miss the quality floor" not in status
+    assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)

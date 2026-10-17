@@ -88,7 +88,9 @@ edge curves (a box face's lines, a cylinder's rims and seams, a wing's leading a
 edges), shares the connectors on them with the neighbouring surfaces, meshes flat surfaces as
 planar domains and curved ones on the surface. The domains of a closed set of surfaces are
 then a watertight shell for `create_volume` (GUI: Create > Mesh surfaces, then Volume from
-faces). Spheres cannot be surface-meshed yet (their poles), nor NURBS surfaces.
+faces). A sphere comes as two halves whose poles are meshed as fans (the mesher opens a pole
+into the degenerate side it stands for and cleans the mesh up around it). NURBS surfaces are
+not surface-meshed here yet.
 
 ## Typical workflows
 

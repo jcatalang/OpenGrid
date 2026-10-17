@@ -589,8 +589,14 @@ class UnstructuredEvaluator:
                 }
             loops3 = loop_points(entity.params, self.store, self.connectors, entity.name)
             frame = domain_frame(entity.params, self.store, loops3, entity.name)
+            uv = frame.to2d(points)
+            # A loop node where the surface closes on itself (a pole, an apex) is opened into
+            # the degenerate side it stands for, so the triangles there fan around it.
+            uv, points_in, segments, wall, origin = _open_poles(
+                frame, loops3, points, uv, segments, wall
+            )
             xy, triangles, quads, rejected, warnings, layers = _core.mesh_domain(
-                frame.to2d(points),
+                uv,
                 segments,
                 algorithm=generator["algorithm"],
                 element_type=generator["element_type"],
@@ -609,10 +615,20 @@ class UnstructuredEvaluator:
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None
         xyz = np.zeros((len(xy), 3))
-        if len(xy) > len(points):
-            xyz[len(points) :] = frame.to3d(xy[len(points) :])
+        if len(xy) > len(points_in):
+            xyz[len(points_in) :] = frame.to3d(xy[len(points_in) :])
         # Boundary points are the connector nodes themselves (bitwise), so they merge exactly.
-        xyz[: len(points)] = points
+        xyz[: len(points_in)] = points_in
+        if origin is not None:
+            xyz, triangles, quads = _close_poles(xyz, triangles, quads, origin, len(points))
+            if len(quads) == 0:
+                target = generator["max_size"]
+                if target is None:
+                    lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+                    target = float(np.median(lengths[lengths > 0]))
+                xyz, triangles = _improve_on_surface(
+                    xyz, triangles, len(points), frame.surface, target
+                )
         result = {
             "points": xyz,
             "triangles": triangles,
@@ -625,3 +641,263 @@ class UnstructuredEvaluator:
         while len(self._cache) > self.CACHE_SIZE:
             self._cache.popitem(last=False)
         return result
+
+
+def _degenerate_direction(surface, u: float, v: float, point, tolerance: float):
+    """ "u" when the whole u line through (u, v) collapses onto ``point`` (the surface closes
+    there along u, e.g. a pole of a surface of revolution), "v" likewise, else None."""
+    target = np.asarray(point, dtype=float)
+    samples = (0.0, 0.25, 0.5, 0.75, 1.0)
+    along_v = max(float(np.linalg.norm(np.asarray(surface.eval(u, t)) - target)) for t in samples)
+    if along_v <= tolerance:
+        return "v"
+    along_u = max(float(np.linalg.norm(np.asarray(surface.eval(t, v)) - target)) for t in samples)
+    if along_u <= tolerance:
+        return "u"
+    return None
+
+
+def _open_poles(frame, loops3, points, uv, segments, wall):
+    """Loop nodes at a pole of the surface (its parameter line collapses there) become two
+    2D nodes joined along the degenerate side, taking the neighbours' other coordinate, so the
+    2D polygon is the surface's full parameter region. Returns (uv, points, segments, wall,
+    origin): the expanded arrays and, when anything was opened, the original boundary index
+    of every expanded boundary node (else None)."""
+    if getattr(frame, "kind", "") != "surface":
+        return uv, points, segments, wall, None
+    tolerance = _tolerance(points)
+    poles = {}  # boundary index -> "u" | "v"
+    for k, (x, y) in enumerate(uv):
+        u = x / frame.su
+        v = frame.flip_v * y / frame.sv
+        direction = _degenerate_direction(frame.surface, u, v, points[k], tolerance)
+        if direction is not None:
+            poles[k] = direction
+    if not poles:
+        return uv, points, segments, wall, None
+    flags = list(wall)
+    if not flags:
+        flags = [False] * len(segments)
+    new_uv = []
+    new_points = []
+    new_segments = []
+    new_wall = []
+    origin = []
+    start = 0
+    for loop in loops3:
+        n = len(loop)
+        first = len(new_uv)
+        for j in range(n):
+            k = start + j
+            previous = start + (j - 1) % n
+            following = start + (j + 1) % n
+            if k not in poles:
+                new_uv.append(tuple(uv[k]))
+                new_points.append(points[k])
+                origin.append(k)
+                new_wall.append(flags[k])
+                continue
+            if poles[k] == "v":
+                before = (uv[k][0], uv[previous][1])
+                after = (uv[k][0], uv[following][1])
+            else:
+                before = (uv[previous][0], uv[k][1])
+                after = (uv[following][0], uv[k][1])
+            new_uv.append(before)
+            new_points.append(points[k])
+            origin.append(k)
+            new_wall.append(False)  # the degenerate side carries no wall
+            new_uv.append(after)
+            new_points.append(points[k])
+            origin.append(k)
+            new_wall.append(flags[k])
+        count = len(new_uv) - first
+        index = np.arange(first, first + count)
+        new_segments.append(np.stack([index, np.roll(index, -1)], axis=1))
+        start += n
+    uv_out = np.ascontiguousarray(np.asarray(new_uv, dtype=float))
+    points_out = np.asarray(new_points, dtype=float)
+    segments_out = np.concatenate(new_segments).astype(np.int64)
+    if not wall:
+        new_wall = []
+    return uv_out, points_out, segments_out, new_wall, np.asarray(origin, dtype=np.int64)
+
+
+def _close_poles(xyz, triangles, quads, origin, n_original: int):
+    """Undo the pole opening on the mesh: the duplicated boundary nodes fold back onto their
+    original node (the first ``n_original`` nodes are the loop nodes again, in loop order),
+    the interior nodes follow, cells left with a repeated node go (quads with one become
+    triangles)."""
+    n_expanded = len(origin)
+    remap = np.empty(len(xyz), dtype=np.int64)
+    remap[:n_expanded] = origin
+    remap[n_expanded:] = np.arange(n_original, n_original + len(xyz) - n_expanded)
+    points = np.concatenate([np.zeros((n_original, 3)), xyz[n_expanded:]])
+    for j in range(n_expanded):
+        points[origin[j]] = xyz[j]
+    tris = []
+    for cell in np.asarray(triangles, dtype=np.int64).reshape(-1, 3):
+        mapped = remap[cell]
+        if len(set(mapped.tolist())) == 3:
+            tris.append(mapped)
+    quad_cells = []
+    for cell in np.asarray(quads, dtype=np.int64).reshape(-1, 4):
+        mapped = remap[cell]
+        unique = []
+        for index in mapped.tolist():
+            if index not in unique:
+                unique.append(index)
+        if len(unique) == 4:
+            quad_cells.append(mapped)
+        elif len(unique) == 3:
+            tris.append(np.asarray(unique, dtype=np.int64))
+    out_tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
+    out_quads = np.asarray(quad_cells, dtype=np.int64).reshape(-1, 4)
+    return points, out_tris, out_quads
+
+
+def _triangle_normals(points, triangles):
+    a = points[triangles[:, 0]]
+    b = points[triangles[:, 1]]
+    c = points[triangles[:, 2]]
+    return np.cross(b - a, c - a)
+
+
+def _min_angles(points, triangles):
+    """The smallest angle (degrees) of each triangle."""
+    out = np.full(len(triangles), 180.0)
+    for k in range(3):
+        p = points[triangles[:, k]]
+        q = points[triangles[:, (k + 1) % 3]]
+        r = points[triangles[:, (k + 2) % 3]]
+        u = q - p
+        v = r - p
+        cosine = np.einsum("ij,ij->i", u, v) / (
+            np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1) + 1e-300
+        )
+        out = np.minimum(out, np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+    return out
+
+
+def _improve_on_surface(points, triangles, n_boundary: int, surface, target: float):
+    """Clean up a triangle mesh on a surface whose parametrisation is distorted (a pole):
+    interior edges much shorter than ``target`` are collapsed, interior nodes smoothed and put
+    back on the surface, interior edges flipped where that opens the angles; the boundary
+    nodes (the first ``n_boundary``) never move. Returns (points, triangles)."""
+    points = np.array(points, dtype=float)
+    triangles = np.array(triangles, dtype=np.int64).reshape(-1, 3)
+    if len(triangles) == 0:
+        return points, triangles
+    alive = np.ones(len(points), dtype=bool)
+    for _pass in range(12):
+        normals = _triangle_normals(points, triangles)
+        edges = np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]])
+        lengths = np.linalg.norm(points[edges[:, 0]] - points[edges[:, 1]], axis=1)
+        order = np.argsort(lengths)
+        touched = np.zeros(len(points), dtype=bool)
+        collapsed = 0
+        for index in order:
+            if lengths[index] >= 0.55 * target:
+                break
+            a, b = int(edges[index, 0]), int(edges[index, 1])
+            if touched[a] or touched[b]:
+                continue
+            if a < n_boundary and b < n_boundary:
+                continue
+            if a < n_boundary:
+                a, b = b, a  # the interior node a folds onto b
+            uses_a = np.any(triangles == a, axis=1)
+            uses_b = np.any(triangles == b, axis=1)
+            # The link condition: the nodes next to both a and b must be exactly the apexes
+            # of the edge's triangles, else the collapse folds the mesh (a duplicate triangle).
+            link_a = set(np.unique(triangles[uses_a]).tolist()) - {a, b}
+            link_b = set(np.unique(triangles[uses_b]).tolist()) - {a, b}
+            apexes = set(np.unique(triangles[uses_a & uses_b]).tolist()) - {a, b}
+            if link_a & link_b != apexes:
+                continue
+            trial = triangles[uses_a].copy()
+            trial[trial == a] = b
+            keep = np.array([len(set(row.tolist())) == 3 for row in trial])
+            kept = trial[keep]
+            if len(kept) == 0:
+                continue
+            new_normals = _triangle_normals(points, kept)
+            old_normals = normals[uses_a][keep]
+            if np.any(np.einsum("ij,ij->i", new_normals, old_normals) <= 0.0):
+                continue
+            triangles = np.concatenate([triangles[~uses_a], kept])
+            normals = _triangle_normals(points, triangles)
+            alive[a] = False
+            touched[a] = True
+            touched[b] = True
+            collapsed += 1
+        if collapsed == 0:
+            break
+    for _pass in range(4):
+        # Laplacian smoothing of the interior nodes, back onto the surface, kept only when no
+        # triangle turns over.
+        neighbours = [set() for _ in range(len(points))]
+        for tri in triangles:
+            for k in range(3):
+                neighbours[tri[k]].add(int(tri[(k + 1) % 3]))
+                neighbours[tri[k]].add(int(tri[(k + 2) % 3]))
+        normals = _triangle_normals(points, triangles)
+        for node in range(n_boundary, len(points)):
+            if not alive[node] or not neighbours[node]:
+                continue
+            centroid = points[list(neighbours[node])].mean(axis=0)
+            _u, _v, projected, _d = surface.project(tuple(float(c) for c in centroid))
+            old = points[node].copy()
+            points[node] = projected
+            uses = np.any(triangles == node, axis=1)
+            new_normals = _triangle_normals(points, triangles[uses])
+            if np.any(np.einsum("ij,ij->i", new_normals, normals[uses]) <= 0.0):
+                points[node] = old
+            else:
+                normals[uses] = new_normals
+        # Edge flips where the two triangles' smallest angle grows.
+        edge_triangles: dict = {}
+        for t_index, tri in enumerate(triangles):
+            for k in range(3):
+                key = (min(tri[k], tri[(k + 1) % 3]), max(tri[k], tri[(k + 1) % 3]))
+                edge_triangles.setdefault(key, []).append(t_index)
+        flipped = 0
+        touched_triangles: set = set()
+        existing = set(edge_triangles)
+        for (a, b), owners in list(edge_triangles.items()):
+            if len(owners) != 2 or (a, b) not in existing:
+                continue
+            t0, t1 = owners
+            if t0 in touched_triangles or t1 in touched_triangles:
+                continue
+            c = [v for v in triangles[t0].tolist() if v not in (a, b)]
+            d = [v for v in triangles[t1].tolist() if v not in (a, b)]
+            if len(c) != 1 or len(d) != 1:
+                continue
+            c, d = c[0], d[0]
+            if (min(c, d), max(c, d)) in existing:
+                continue  # the flipped edge exists already
+            before = np.asarray([triangles[t0], triangles[t1]])
+            after = np.asarray([[a, c, d], [b, d, c]], dtype=np.int64)
+            reference = _triangle_normals(points, before).mean(axis=0)
+            new_normals = _triangle_normals(points, after)
+            if np.dot(new_normals[0], reference) < 0:
+                after = after[:, ::-1]
+                new_normals = _triangle_normals(points, after)
+            if np.any(new_normals @ reference <= 0.0):
+                continue
+            if _min_angles(points, after).min() <= _min_angles(points, before).min() + 1e-9:
+                continue
+            triangles[t0] = after[0]
+            triangles[t1] = after[1]
+            existing.discard((a, b))
+            existing.add((min(c, d), max(c, d)))
+            touched_triangles.update((t0, t1))
+            flipped += 1
+        if flipped == 0 and _pass > 0:
+            break
+    used = np.zeros(len(points), dtype=bool)
+    used[:n_boundary] = True
+    used[np.unique(triangles)] = True
+    index = np.cumsum(used) - 1
+    return points[used], index[triangles]

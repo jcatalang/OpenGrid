@@ -104,9 +104,11 @@ One undo step; :meth:`mesh_surfaces` meshes all of it.
 
 ### `create_sphere(center=(0.0, 0.0, 0.0), radius: float = 0.5, name=None) -> list[str]`
 
-A sphere as the surface of revolution ``<name>`` of a meridian half circle
-``<name>-meridian`` (from the +z pole to the -z pole) about the z axis through the
-centre ("sphere-<n>" by default). One undo step.
+A sphere as two half surfaces of revolution ``<name>-a`` (the +y half) and
+``<name>-b`` of the meridian half circle ``<name>-meridian-a`` (from the +z pole
+through +x to the -z pole) about the z axis through the centre, the opposite
+meridian ``<name>-meridian-b`` between them ("sphere-<n>" by default). One undo
+step; :meth:`mesh_surfaces` meshes both halves, the poles as fans.
 
 ### `create_wing(code: str = '0012', root_chord: float = 1.0, tip_chord: float | None = None, span: float = 3.0, sweep: float = 0.0, dihedral: float = 0.0, points: int = 101, caps: bool = True, name=None) -> list[str]`
 

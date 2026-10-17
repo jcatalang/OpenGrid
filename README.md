@@ -147,7 +147,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   solvers that want 3D meshes of 2D cases.
 - **Surface meshes of 3D shapes** (Create > Mesh surfaces, `mesh_surfaces`): domains on
   planes, ruled, extruded and revolved surfaces with their edge curves found or made and the
-  connectors shared, a watertight shell for Volume from faces (a cylinder or a wing in a box).
+  connectors shared, a watertight shell for Volume from faces (a cylinder, a sphere or a wing
+  in a box; poles are meshed as fans).
 - **Picking through surfaces and hiding**: a click picks lines and points before surfaces,
   so a body inside its far-field box is selected directly; View > Hide selected (H) takes
   entities out of the view and out of picking, Shift+H shows all.

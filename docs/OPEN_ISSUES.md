@@ -430,11 +430,17 @@ history). Phase tags show where each item came from.
   connector between the two kinds stays where the connector puts it.
 - **Surface meshes** [2026-10-18]: `mesh_surfaces` takes planes, ruled, extruded and
   revolved surfaces (no NURBS surfaces); a curved surface of revolution must be less than a
-  full turn (the cylinder is made as two halves) and must not close on its axis at both ends
-  (a sphere cannot be surface-meshed yet: its poles leave no boundary); a connector already on
-  an edge curve is reused whatever its points (the neighbours must agree); existing arcs are
+  full turn (the cylinder and the sphere are made as two halves); a connector already on an
+  edge curve is reused whatever its points (the neighbours must agree); existing arcs are
   only matched to a full circle when they tile it exactly; the domains inherit no boundary
   type (set wall / farfield on them afterwards).
+- **Poles** [2026-10-18]: a surface domain whose loop passes a pole (the surface closes on
+  itself there) is meshed by opening the pole into its degenerate side in parameter space
+  and folding the duplicates back; the parametrisation crowds the triangles near a pole, so
+  such meshes get a cleanup on the surface (short interior edges collapsed, Laplacian
+  smoothing projected back, edge flips) that other surface domains do not; quads touching a
+  pole become triangles or go; inflation layers are not taken along the degenerate side. CAD
+  faces with degenerate edges are still skipped by the importer (they could use this now).
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a

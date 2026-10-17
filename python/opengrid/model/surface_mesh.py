@@ -394,8 +394,8 @@ def mesh_surfaces(store, names, spacing=None, points=None, generator=None):
             reason = "has no boundary sides of any length"
             if entity.kind == "revolved_surface":
                 reason = (
-                    "closes on its axis at both ends (a sphere): its poles leave no boundary "
-                    "to mesh from; a sphere surface mesh is not available yet"
+                    "closes on its axis at both ends over a full turn: no boundary is left "
+                    "to mesh from; build it as two halves (create_sphere does)"
                 )
             raise ValidationError([Issue(name, reason)])
         if full_turn and not flat:

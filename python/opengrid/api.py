@@ -288,26 +288,33 @@ class Session:
         return self.commands.run(CreateEntities(items, label=f"Cylinder {base}"))
 
     def create_sphere(self, center=(0.0, 0.0, 0.0), radius: float = 0.5, name=None) -> list[str]:
-        """A sphere as the surface of revolution ``<name>`` of a meridian half circle
-        ``<name>-meridian`` (from the +z pole to the -z pole) about the z axis through the
-        centre ("sphere-<n>" by default). One undo step."""
+        """A sphere as two half surfaces of revolution ``<name>-a`` (the +y half) and
+        ``<name>-b`` of the meridian half circle ``<name>-meridian-a`` (from the +z pole
+        through +x to the -z pole) about the z axis through the centre, the opposite
+        meridian ``<name>-meridian-b`` between them ("sphere-<n>" by default). One undo
+        step; :meth:`mesh_surfaces` meshes both halves, the poles as fans."""
         base = self._shape_name(name, "sphere")
         c = _as3(center)
-        meridian = {
-            "center": c,
-            "radius": radius,
-            "normal": (0.0, 1.0, 0.0),
-            "x_axis": (0.0, 0.0, 1.0),
-            "start_angle": 0.0,
-            "end_angle": math.pi,
-        }
-        revolve = {
-            "curve": f"{base}-meridian",
-            "axis_point": c,
-            "axis": (0.0, 0.0, 1.0),
-            "end_angle": math.tau,
-        }
-        items = [("arc", meridian, f"{base}-meridian"), ("revolved_surface", revolve, base)]
+        items = []
+        for half, normal in (("a", (0.0, 1.0, 0.0)), ("b", (0.0, -1.0, 0.0))):
+            meridian = {
+                "center": c,
+                "radius": radius,
+                "normal": normal,
+                "x_axis": (0.0, 0.0, 1.0),
+                "start_angle": 0.0,
+                "end_angle": math.pi,
+            }
+            items.append(("arc", meridian, f"{base}-meridian-{half}"))
+        for half, (a0, a1) in (("a", (0.0, math.pi)), ("b", (math.pi, math.tau))):
+            revolve = {
+                "curve": f"{base}-meridian-a",
+                "axis_point": c,
+                "axis": (0.0, 0.0, 1.0),
+                "start_angle": a0,
+                "end_angle": a1,
+            }
+            items.append(("revolved_surface", revolve, f"{base}-{half}"))
         return self.commands.run(CreateEntities(items, label=f"Sphere {base}"))
 
     def create_wing(

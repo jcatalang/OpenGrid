@@ -12,7 +12,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -78,8 +78,9 @@ class BoundaryDock(QWidget):
         self.status = QLabel("No boundaries yet")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Selection:"))
+        # The controls in three short rows (the panel must not need to be wide):
+        # type + name, the three actions on the selection, zone + refresh.
+        grid = QGridLayout()
         self.patch_type = QComboBox()
         self.patch_type.addItems(list(PATCH_TYPES))
         self.patch_type.setToolTip(
@@ -101,21 +102,23 @@ class BoundaryDock(QWidget):
         )
         self.clear = QPushButton("Clear type")
         self.clear.setToolTip("The selected boundaries leave their patches")
-        for widget in (self.patch_type, self.name, self.set_type, self.pair, self.clear):
-            row.addWidget(widget)
-        layout.addLayout(row)
-        row2 = QHBoxLayout()
-        self.new_zone = QPushButton("New zone from selected domains")
-        self.new_zone.setToolTip("A named group of domains (the patch name field names it)")
+        self.new_zone = QPushButton("New zone")
+        self.new_zone.setToolTip("A named group of the selected domains (the name field names it)")
         self.refresh = QPushButton("Refresh")
         self.refresh.setToolTip(
             "Check the boundary again (a 2D model is checked at every change; a 3D model's "
             "check meshes every block and volume, so it runs on request)"
         )
-        row2.addWidget(self.new_zone)
-        row2.addStretch(1)
-        row2.addWidget(self.refresh)
-        layout.addLayout(row2)
+        grid.addWidget(QLabel("Type"), 0, 0)
+        grid.addWidget(self.patch_type, 0, 1)
+        grid.addWidget(self.name, 0, 2)
+        grid.addWidget(self.set_type, 1, 0)
+        grid.addWidget(self.pair, 1, 1)
+        grid.addWidget(self.clear, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(self.new_zone, 2, 0)
+        grid.addWidget(self.refresh, 2, 2, Qt.AlignmentFlag.AlignRight)
+        grid.setColumnStretch(2, 1)  # the name field takes the spare width, not the buttons
+        layout.addLayout(grid)
         self.set_type.clicked.connect(
             lambda: self.type_requested.emit(
                 self.patch_type.currentText(), self.name.text().strip()

@@ -863,7 +863,8 @@ patch on a shared connector was reported as an error, and a mismatched pair said
   status), Periodic pairs (a ↔ b, the transform, match or why not), Interfaces (shared by
   two domains: no type needed), Empty patches, Other problems; a row click selects the
   entity. Actions on the selection: Set type (type combo, optional patch name), Pair as
-  periodic, Clear type; New zone; Refresh. The panel follows a 2D model at every change
+  periodic, Clear type; New zone; Refresh - in three short rows, so the panel fits in
+  300 px (the user: "too many buttons horizontally"). The panel follows a 2D model at every change
   (`MainWindow._refresh_boundary`, coalesced by a timer); a 3D model marks it stale and
   Refresh recomputes. Setting a type or pairing raises the panel and switches the patch
   colouring on. `BoundaryReport` gained `assignment` (label -> patch) and `ids` (label ->

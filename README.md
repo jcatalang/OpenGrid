@@ -145,6 +145,9 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - **2D model extruded one cell thick** (`extrude_model`): blocks and volumes with the 2D
   patches on their sides and the front / back as a periodic pair or symmetry planes, for
   solvers that want 3D meshes of 2D cases.
+- **Drag the geometry with the mesh in place**: a selected domain, connector or sketch
+  block shows the handles of what moves it (its curves' points, or the sketch's vertices);
+  dragging one regenerates and remeshes, layers included.
 - **Boundary panel** that follows the model: every boundary with its patch, type and status,
   the periodic pairs with their transform and whether their nodes match (and why not, in
   plain words), the interfaces found automatically; Set type, Pair as periodic and Clear

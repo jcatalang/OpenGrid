@@ -163,6 +163,13 @@ while it is in a group.
     domains = og.domains_from_curves(curves)          # crossing curves -> structured domains
     og.domains_from_curves(curves, unstructured=True)  # regions without 4 corners: triangles
     og.move_handle("h1", "points", 6, (1.0, 0.9, 0))  # as a mouse drag: crossings follow
+    og.insert_handle("h1", (1.4, 0.9, 0))            # a point (control point) added there
+    og.remove_handle("h1", 6)                        # ... and taken away; one undo step each
+
+A double-click on a polyline, spline or NURBS curve (or on a connector lying on it) adds a
+point there; a double-click on a handle removes it. NURBS control points are added by knot
+insertion (the curve is unchanged) and removed by knot removal (exact when the curve allows
+it, otherwise the log says how far the curve moved; the end control points stay).
 
 In the GUI a freehand stroke released within the pick tolerance of its start is a closed
 loop, the new curves are selected, and **Unstructured domain** meshes selected curves

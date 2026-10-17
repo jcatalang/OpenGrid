@@ -85,7 +85,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - STEP / IGES import through OpenCASCADE (optional backend): sewing and healing, faces as
   surfaces, automatic connectors and structured or unstructured domains on every face.
 - Freehand curves drawn with the mouse, fitted to splines; a stroke released at its start is a
-  closed loop, meshed with one click; curve networks with snapping.
+  closed loop, meshed with one click; curve networks with snapping. Double-click a curve to
+  add a point (NURBS: by knot insertion, shape unchanged) and a handle to remove it.
 
 ### Connectors and distributions
 - Uniform, geometric, tanh (Vinokur), sine distributions with begin / end spacings, growth

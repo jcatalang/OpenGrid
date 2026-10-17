@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -64,6 +64,7 @@ UPDATE_CHECK_MS = 30000  # how often to look for updated code
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
+INSERTABLE_FIELD = {"polyline": "points", "spline": "points", "nurbs": "control_points"}
 
 
 def set_navigation_style(iren) -> None:
@@ -520,6 +521,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     def _connect_viewport_events(self) -> None:
+        # Double clicks come from Qt (VTK has no such event): add / remove curve points.
+        self.viewport.installEventFilter(self)
         iren = self.viewport.iren
         if iren is None:
             return  # off-screen (tests): handlers are driven directly in world space
@@ -739,6 +742,87 @@ class MainWindow(QMainWindow):
     def snap_point(self, xyz):
         tolerance = SNAP_PIXELS * self.scene.world_per_pixel()
         return snap(xyz, snap_targets(self.session), tolerance)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt virtual)
+        if (
+            watched is self.viewport
+            and event.type() == QEvent.Type.MouseButtonDblClick
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            position = event.position()
+            scale = self.viewport.ren_win.GetSize()[0] / max(self.viewport.width(), 1)
+            x = position.x() * scale
+            y = (self.viewport.height() - 1 - position.y()) * scale
+            self.handle_double_click(self.scene.display_to_world(x, y))
+            return True  # not a press for VTK (the click before it did the selecting)
+        return super().eventFilter(watched, event)
+
+    def handle_double_click(self, xyz) -> str | None:
+        """Select tool: a double-click on a handle removes that point (undo restores it); on a
+        polyline, spline or NURBS curve - or a connector lying on one - it adds a point there
+        (a control point by knot insertion: the curve keeps its shape). Returns the curve."""
+        from opengrid.app.handles import pick_handle
+
+        if self.tool.name != "select":
+            return None
+        tolerance = PICK_PIXELS * self.scene.world_per_pixel()
+        handle = pick_handle(self.visible_handles(), xyz, tolerance)
+        if handle is not None and handle.field in ("points", "control_points"):
+            name = self._run(lambda: self.session.remove_handle(handle.entity, handle.index))
+            if name:
+                self._after_curve_edit(name, f"Removed point {handle.index} of {name}")
+            return name
+        picked = pick_entity(self.session, xyz, tolerance)
+        curve = self._curve_under(picked, xyz)
+        if curve is None:
+            self.statusBar().showMessage(
+                "Double-click a polyline, spline or NURBS curve to add a point there, or one "
+                "of its handles to remove it",
+                5000,
+            )
+            return None
+        name = self._run(lambda: self.session.insert_handle(curve, xyz))
+        if name:
+            if curve not in self.selected_names() and picked not in self.selected_names():
+                self.set_selection([self.session.store.get(curve).id])
+            entity = self.session.store.get(curve)
+            count = len(entity.params[INSERTABLE_FIELD[entity.kind]])
+            self._after_curve_edit(name, f"Added a point to {name} ({count} now)")
+        return name
+
+    def _curve_under(self, picked: str | None, xyz) -> str | None:
+        """The editable curve a double-click lands on: the picked curve, or the closest of the
+        curves a picked connector runs on."""
+        from opengrid.model.topology_edit import INSERTABLE
+
+        if picked is None:
+            return None
+        entity = self.session.store.get(picked)
+        if entity.kind in INSERTABLE:
+            return picked
+        if entity.kind != "connector":
+            return None
+        best = None
+        best_distance = None
+        for segment in entity.params["segments"]:
+            curve = self.session.store.get(segment["curve"])
+            if curve.kind not in INSERTABLE:
+                continue
+            distance = float(self.session.geometry(curve.name).project(tuple(xyz))[2])
+            if best_distance is None or distance < best_distance:
+                best = curve.name
+                best_distance = distance
+        return best
+
+    def _after_curve_edit(self, name: str, message: str) -> None:
+        from opengrid.app.handles import dependents_closure
+
+        log.info("%s", message)
+        for warning in self.session.last_warnings:
+            log.warning(warning)
+        self.scene.update_entities(dependents_closure(self.session.store, name))
+        self._show_handles()
+        self.statusBar().showMessage(f"{message}; undo restores the curve", 5000)
 
     def handle_click(self, xyz, additive: bool = False) -> None:
         """A click at world position ``xyz`` (from the viewport, or from tests)."""

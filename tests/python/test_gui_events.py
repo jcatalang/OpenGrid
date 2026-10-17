@@ -92,6 +92,17 @@ class Live:
         QTest.mouseRelease(self.widget, Qt.MouseButton.LeftButton, modifier, self.display(xyz))
         self._buttons = Qt.MouseButton.NoButton
 
+    def double_click(self, xyz):
+        """Press, release, double-click, release: what Qt sends for a real double click (the
+        last release matters: QTest's button state is process-wide and later tests ask it)."""
+        point = self.display(xyz)
+        button = Qt.MouseButton.LeftButton
+        modifier = Qt.KeyboardModifier.NoModifier
+        QTest.mouseClick(self.widget, button, modifier, point)
+        QTest.mouseDClick(self.widget, button, modifier, point)
+        QTest.mouseRelease(self.widget, button, modifier, point)
+        self._buttons = Qt.MouseButton.NoButton
+
     def click(self, xyz, shift: bool = False):
         modifier = Qt.KeyboardModifier.NoModifier
         if shift:
@@ -399,3 +410,25 @@ def test_actions_explain_a_wrong_selection(live):
         == "Select the connectors or curves of the boundary loops first"
     )
     assert live.og.names("unstructured_domain") == []
+
+
+def test_double_click_adds_and_removes_a_spline_point(live):
+    window = live.window
+    live.click((1.0, 0.1, 0.0))  # the connector on the spline b
+    assert window.selected_names() == ["cb"]
+    before = len(live.og.entity("b").params["points"])
+    journal = len(live.og.journal_text().splitlines())
+    live.double_click((0.5, 0.07, 0.0))  # on the spline, between its first two points
+    points = live.og.entity("b").params["points"]
+    assert len(points) == before + 1
+    assert window.statusBar().currentMessage().startswith("Added a point to b")
+    assert len(live.og.journal_text().splitlines()) == journal + 1
+    assert live.og.domain_quality("d")["scaled_jacobian"].min() > 0.5  # d follows b
+    live.double_click(points[1])  # the new handle
+    assert len(live.og.entity("b").params["points"]) == before
+    assert window.statusBar().currentMessage().startswith("Removed point 1 of b")
+    assert window.selected_names() == ["cb"]
+    window.set_selection([])
+    live.double_click((1.0, 0.5, 0.0))  # inside the domain, on nothing editable
+    assert window.statusBar().currentMessage().startswith("Double-click a polyline")
+    assert len(live.og.entity("b").params["points"]) == before

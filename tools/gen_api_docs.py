@@ -72,6 +72,8 @@ GROUPS = [
             "create_freehand",
             "domains_from_curves",
             "move_handle",
+            "insert_handle",
+            "remove_handle",
         ],
     ),
     (

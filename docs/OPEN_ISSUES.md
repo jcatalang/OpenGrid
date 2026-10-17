@@ -360,6 +360,13 @@ history). Phase tags show where each item came from.
   when released within the pick tolerance (8 pixels) of its start [2026-10-17]: a loop whose
   end misses its start by more is open, and "Unstructured domain" says which end meets
   nothing; the closure is C0 (the loop may have a small kink where the stroke began).
+- **Adding and removing curve points** [2026-10-17]: a point added to an interpolating
+  spline lies on the old curve, but the new spline through one more point differs slightly
+  elsewhere (a few per cent of the chord); NURBS control points are added by knot insertion
+  (exact) and removed by Tiller's knot removal, which is exact only when the curve is smooth
+  enough there (otherwise the curve moves and the log says by how much); the control points
+  without an interior knot (the first and last two of a cubic) cannot be removed, they fix
+  the end points and tangents. Lines and arcs have no insertable points.
 - **Curve networks: rings** [2026-10-17]: a curve joining an outer loop to an inner one makes
   the region between them a face whose boundary runs along that curve twice; it is reported,
   not meshed (delete the joining curve and mesh the loops as a domain with a hole, or select

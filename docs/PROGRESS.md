@@ -848,6 +848,35 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Curve points added and removed in the GUI (2026-10-17) — requested by the user
+
+### Built
+- Double-click (Select tool): on a polyline, spline or NURBS curve - or on a connector lying
+  on one - adds a point there; on a handle of a selected curve, removes that point. Qt
+  delivers the double click (VTK has no such event): an event filter on the viewport, which
+  consumes it so that the click before it does the selecting. The status bar reports the
+  point count and that undo restores the curve. A click on a handle without moving it no
+  longer records an empty move.
+- `Session.insert_handle(name, xyz)` / `remove_handle(name, index)` (journaled, one undo
+  step; `model/topology_edit.py`): polylines and splines get the projected point between its
+  neighbours (chord-length parametrisation) and lose point ``index``; NURBS curves get a
+  control point by knot insertion at the projected parameter (`model/knots.py`, Piegl and
+  Tiller A5.1: the curve is unchanged) and lose one by knot removal (A5.8: exact when the
+  curve allows it, otherwise the warning says how far the curve moved; control points without
+  an interior knot - the ends - are refused, with the removable ones listed).
+- `move_handle`'s network bookkeeping became `_edit_curve`, shared by the three edits; with
+  ``remap`` the connector segment parameters on a reparametrised spline are re-projected
+  first, so connectors and domains stay where they were (crossings are solved again as for a
+  drag).
+
+### Verified
+- pytest +4 -> 461 passed, 1 xfailed: polyline / spline insert and remove (on the curve, in
+  order, one undo step, replay), NURBS insertion exact to 1e-12 and its removal exact again,
+  a genuine removal warned, the refusals, a lattice of splines keeping its 7 interfaces and
+  its domains (grids move < 0.05) after an insertion, and a real double-click on the spline
+  under a connector adding, then removing, a point with the domain following.
+- ruff, format, ternary check, API docs regenerated; `tools/check_launcher.py` current.
+
 ## Freehand loops meshed from the GUI (2026-10-17) — requested by the user
 
 The user drew a freehand curve, clicked "Unstructured domain" and nothing happened: the

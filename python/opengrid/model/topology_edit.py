@@ -1149,8 +1149,6 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
     (field "vertices") regenerates its sketch. ``check``: validate the dependents and run
     the sketch vertex passes (previews skip both: an invalid state fails when it is drawn).
     Returns ([name], warnings)."""
-    from opengrid.model.network import _refine
-
     entity = _entity(store, name, tuple(MOVABLE), "move_handle")
     if field not in MOVABLE[entity.kind]:
         _fail(entity.name, f"has no movable field {field!r} ({', '.join(MOVABLE[entity.kind])})")
@@ -1170,8 +1168,17 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
 
         # A drag preview (check=False) regenerates without the vertex passes.
         return edit_sketch(store, entity.name, passes=check, **changes)
+    return _edit_curve(store, entity, changes, check)
+
+
+def _edit_curve(store, entity, changes: dict, check: bool, remap: bool = False):
+    """Apply parameter ``changes`` to a curve and keep the curve network connected (the second
+    half of move_handle, shared with insert_handle and remove_handle). ``remap``: connector
+    segment parameters on the curve are re-projected first (its parametrisation changed but
+    not its shape). Returns ([name], warnings)."""
     # Meeting places of the moved curve with other curves, before the move (the connectors
     # of sketches are left to their sketch, which is regenerated).
+    from opengrid.model.network import _refine
     from opengrid.model.sketch import owned_entities
 
     owned = owned_entities(store)
@@ -1186,10 +1193,32 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
         partners = [other for other in group if other[3] != entity.id]
         if partners and not any(group == g for g in groups):
             groups.append(group)
+    # Connector segment parameters on the curve, re-projected when its parametrisation
+    # changes but its shape (nearly) does not (a spline point added or removed).
+    old_points = {}
+    if remap:
+        before = store.geometry(entity.id)
+        for dependent in store.dependents(entity.id):
+            if dependent.kind != "connector":
+                continue
+            for k, segment in enumerate(dependent.params["segments"]):
+                if segment["curve"] != entity.id:
+                    continue
+                for key in ("t0", "t1"):
+                    t = segment[key]
+                    if 0.0 < t < 1.0:
+                        item = (k, key, np.asarray(before.eval(t)))
+                        old_points.setdefault(dependent.id, []).append(item)
     _update(store, entity.id, dict(entity.params, **changes))
     warnings = []
     moved = store.geometry(entity.id)
     updates: dict[int, dict] = {}
+    for connector, items in sorted(old_points.items()):
+        segments = updates.setdefault(
+            connector, [dict(s) for s in store.get(connector).params["segments"]]
+        )
+        for k, key, point in items:
+            segments[k][key] = float(moved.project(tuple(point))[0])
     for group in groups:
         own = next(e for e in group if e[3] == entity.id)
         partner = next(e for e in group if e[3] != entity.id)
@@ -1228,3 +1257,107 @@ def move_handle(store, name, field: str, index: int, xyz, check: bool = True):
         for connector in sorted(updates):
             _check_dependents_still_valid(store, connector)
     return [entity.name], warnings
+
+
+INSERTABLE = ("polyline", "spline", "nurbs")
+
+
+def _chord_knots(points) -> np.ndarray:
+    """Normalised cumulative chord length of a point sequence (the polyline and spline
+    parametrisation)."""
+    pts = np.asarray(points, dtype=float)
+    lengths = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    s = np.concatenate([[0.0], np.cumsum(lengths)])
+    return s / s[-1]
+
+
+def insert_handle(store, name, xyz, check: bool = True):
+    """Add a defining point to a polyline or spline (on the curve, where it is closest to
+    ``xyz``, between the neighbouring points) or a control point to a NURBS curve (a knot
+    inserted at the closest parameter: the curve does not change). Connectors on the curve
+    keep their places and crossings are solved again (as in move_handle). Returns
+    ([name], warnings)."""
+    from opengrid.model.knots import insert_knot, multiplicity
+
+    entity = _entity(store, name, INSERTABLE, "insert_handle")
+    point = tuple(float(c) for c in xyz)
+    if len(point) == 2:
+        point = (*point, 0.0)
+    curve = store.geometry(entity.id)
+    t = float(curve.project(point)[0])
+    on_curve = tuple(float(c) for c in curve.eval(t))
+    if entity.kind == "nurbs":
+        p = entity.params
+        degree = p["degree"]
+        knots = p["knots"]
+        if not knots[degree] < t < knots[len(knots) - degree - 1]:
+            _fail(entity.name, "a control point cannot be inserted at the curve's end")
+        scale = max(1.0, float(np.max(np.abs(p["control_points"]))))
+        if multiplicity(knots, t, 1e-12) >= degree:
+            _fail(entity.name, f"the knot at t = {t:.4g} already has multiplicity {degree}")
+        del scale
+        new_knots, points, weights = insert_knot(
+            degree, knots, p["control_points"], p["weights"], t
+        )
+        changes = {"knots": new_knots, "control_points": points, "weights": weights}
+        return _edit_curve(store, entity, changes, check)
+    points = [tuple(q) for q in entity.params["points"]]
+    knots = _chord_knots(points)
+    k = int(np.searchsorted(knots, t, side="right") - 1)
+    k = min(max(k, 0), len(points) - 2)
+    scale = max(1.0, float(np.max(np.abs(points))))
+    for neighbour in (points[k], points[k + 1]):
+        if np.linalg.norm(np.subtract(neighbour, on_curve)) <= 1e-9 * scale:
+            _fail(entity.name, "a point already lies there")
+    points.insert(k + 1, on_curve)
+    return _edit_curve(store, entity, {"points": tuple(points)}, check, remap=True)
+
+
+def remove_handle(store, name, index: int, check: bool = True):
+    """Remove defining point ``index`` of a polyline or spline, or control point ``index`` of
+    a NURBS curve by knot removal (exact when the curve allows it; otherwise the curve changes
+    and the warnings say by how much; the end control points cannot be removed). Returns
+    ([name], warnings)."""
+    from opengrid.model.knots import removable_control_points, remove_knot
+
+    entity = _entity(store, name, INSERTABLE, "remove_handle")
+    index = int(index)
+    if entity.kind == "nurbs":
+        p = entity.params
+        n = len(p["control_points"])
+        if not 0 <= index < n:
+            _fail(entity.name, f"has no control point {index}")
+        removable = removable_control_points(p["degree"], p["knots"])
+        if index not in removable:
+            allowed = ", ".join(str(i) for i in sorted(removable))
+            if not allowed:
+                allowed = "none"
+            _fail(
+                entity.name,
+                f"control point {index} cannot be removed (removable: {allowed}; each goes "
+                "with an interior knot, and the end ones fix the curve's ends)",
+            )
+        before = store.geometry(entity.id)
+        new_knots, points, weights = remove_knot(
+            p["degree"], p["knots"], p["control_points"], p["weights"], removable[index]
+        )
+        changes = {"knots": new_knots, "control_points": points, "weights": weights}
+        names, warnings = _edit_curve(store, entity, changes, check)
+        after = store.geometry(entity.id)
+        samples = np.linspace(0.0, 1.0, 257)
+        deviation = float(
+            np.max(np.linalg.norm(before.eval_many(samples) - after.eval_many(samples), axis=1))
+        )
+        scale = max(1.0, float(np.max(np.abs(p["control_points"]))))
+        if deviation > 1e-9 * scale:
+            warnings.append(
+                f"the curve moved by up to {deviation:.3g} (the knot removal was not exact)"
+            )
+        return names, warnings
+    points = [tuple(q) for q in entity.params["points"]]
+    if not 0 <= index < len(points):
+        _fail(entity.name, f"has no point {index}")
+    if len(points) <= 2:
+        _fail(entity.name, "needs at least two points")
+    del points[index]
+    return _edit_curve(store, entity, {"points": tuple(points)}, check, remap=True)

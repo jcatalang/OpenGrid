@@ -184,6 +184,8 @@ class Drag:
             if not changes:
                 return None
             return self.session.modify(self.handle.entity, **changes)
+        if not self.changes and np.allclose(xyz, self.handle.xyz):
+            return None  # a click on the handle, not a drag: nothing to record
         return self.session.move_handle(
             self.handle.entity, self.handle.field, self.handle.index, xyz
         )

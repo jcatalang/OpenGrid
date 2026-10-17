@@ -243,6 +243,21 @@ does: crossings of the curve with other curves are solved again and the connecto
 meeting there follow, so domains built from a curve network stay closed. One undo
 step.
 
+### `insert_handle(name: str, xyz) -> str`
+
+Add a defining point to a polyline or spline (on the curve where it is closest to
+``xyz``, between the neighbouring points) or a control point to a NURBS curve (a knot
+inserted at the closest parameter: the curve does not change), as a double-click on
+a curve does in the GUI. Connectors on the curve keep their places and crossings are
+solved again. One undo step.
+
+### `remove_handle(name: str, index: int) -> str`
+
+Remove defining point ``index`` of a polyline or spline, or control point ``index``
+of a NURBS curve (knot removal: exact when the curve allows it, otherwise
+``last_warnings`` says how far the curve moved; the end control points cannot be
+removed), as a double-click on a handle does in the GUI. One undo step.
+
 ## Multi-block smoothing groups
 
 ### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5, symmetry=()) -> str`

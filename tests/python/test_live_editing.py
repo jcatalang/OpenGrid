@@ -280,3 +280,78 @@ def test_loose_curves_and_bridges_are_reported_not_meshed():
     made = og.domains_from_curves(curves, spacing=0.25, unstructured=True)
     assert len(made) == 1 and og.entity(made[0]).kind == "domain"
     assert any("runs along a curve twice" in warning for warning in og.last_warnings)
+
+
+def test_insert_and_remove_points_of_a_polyline_and_a_spline():
+    og = opengrid.Session()
+    og.create_polyline([(0, 0), (1, 0), (1, 1)], name="pl")
+    og.insert_handle("pl", (0.5, 0.1))
+    assert og.entity("pl").params["points"] == (
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+    )
+    og.remove_handle("pl", 1)
+    og.remove_handle("pl", 1)
+    assert og.entity("pl").params["points"] == ((0.0, 0.0, 0.0), (1.0, 1.0, 0.0))
+    with pytest.raises(ValidationError, match="at least two"):
+        og.remove_handle("pl", 0)
+    og.create_spline([(0, 0), (1, 0.5), (2, 0)], name="sp")
+    before = og.geometry("sp")
+    og.insert_handle("sp", (0.5, 0.3))
+    points = og.entity("sp").params["points"]
+    assert len(points) == 4
+    assert float(before.project(points[1])[2]) < 1e-9  # the new point lies on the old curve
+    after = og.geometry("sp")
+    along = [float(after.project(p)[0]) for p in points]
+    assert along == sorted(along)  # in order along the curve
+    assert replays(og)
+    og.undo()
+    assert len(og.entity("sp").params["points"]) == 3  # one step
+
+
+def test_nurbs_control_point_by_knot_insertion_keeps_the_curve():
+    from opengrid.model.knots import removable_control_points
+
+    og = opengrid.Session()
+    t = np.linspace(0.0, 2 * np.pi, 40)
+    (name,) = og.create_freehand(np.stack([np.cos(t), np.sin(t), 0 * t], axis=1), name="nb")
+    s = np.linspace(0.0, 1.0, 101)
+    reference = og.geometry(name).eval_many(s)
+    first = og.entity(name).params
+    og.insert_handle(name, (0.0, 1.0))
+    p = og.entity(name).params
+    assert len(p["control_points"]) == len(first["control_points"]) + 1
+    assert len(p["knots"]) == len(p["control_points"]) + p["degree"] + 1
+    assert np.max(np.linalg.norm(og.geometry(name).eval_many(s) - reference, axis=1)) < 1e-12
+    # The inserted knot's control point comes out again exactly ...
+    (new_knot,) = set(p["knots"]) - set(first["knots"])
+    removable = removable_control_points(p["degree"], p["knots"])
+    (index,) = [i for i, r in removable.items() if p["knots"][r] == new_knot]
+    og.remove_handle(name, index)
+    assert og.last_warnings == []
+    assert np.max(np.linalg.norm(og.geometry(name).eval_many(s) - reference, axis=1)) < 1e-12
+    # ... a genuine control point does not: the curve changes a little, and says so.
+    og.remove_handle(name, 3)
+    assert len(og.entity(name).params["control_points"]) == len(first["control_points"]) - 1
+    assert any("not exact" in w for w in og.last_warnings)
+    with pytest.raises(ValidationError, match="cannot be removed"):
+        og.remove_handle(name, 0)
+    with pytest.raises(ValidationError, match="curve's end"):
+        og.insert_handle(name, (1.0, 0.0))  # the stroke's start
+    assert replays(og)
+
+
+def test_inserted_spline_point_keeps_a_curve_network_connected():
+    og = opengrid.Session()
+    curves = lattice(og)
+    domains = og.domains_from_curves(curves, spacing=0.05)
+    interfaces = len(og.topology().interfaces())
+    grids = {d: og.domain_grid(d).copy() for d in domains}
+    og.insert_handle(curves[0], (0.1, 0.6))  # the first vertical spline, between crossings
+    assert len(og.topology().interfaces()) == interfaces
+    for d in domains:
+        assert og.domain_quality(d)["scaled_jacobian"].min() > 0.9
+        assert np.max(np.abs(og.domain_grid(d) - grids[d])) < 0.05  # the curve barely moved
+    assert replays(og)

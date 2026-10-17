@@ -1443,6 +1443,21 @@ class Session:
         step."""
         return self._topology("move_handle", f"Move {name}", name, field, index, tuple(xyz))[0]
 
+    def insert_handle(self, name: str, xyz) -> str:
+        """Add a defining point to a polyline or spline (on the curve where it is closest to
+        ``xyz``, between the neighbouring points) or a control point to a NURBS curve (a knot
+        inserted at the closest parameter: the curve does not change), as a double-click on
+        a curve does in the GUI. Connectors on the curve keep their places and crossings are
+        solved again. One undo step."""
+        return self._topology("insert_handle", f"Add a point to {name}", name, tuple(xyz))[0]
+
+    def remove_handle(self, name: str, index: int) -> str:
+        """Remove defining point ``index`` of a polyline or spline, or control point ``index``
+        of a NURBS curve (knot removal: exact when the curve allows it, otherwise
+        ``last_warnings`` says how far the curve moved; the end control points cannot be
+        removed), as a double-click on a handle does in the GUI. One undo step."""
+        return self._topology("remove_handle", f"Remove a point of {name}", name, int(index))[0]
+
     def split_connector(self, name: str, index: int, new_name: str | None = None) -> list[str]:
         """Split a connector at node ``index``: it keeps nodes 0..index, a new connector takes
         the rest (explicit distributions keep every node). Domains, loops and patches using it

@@ -61,6 +61,20 @@ Every change (create, modify, rename, delete, split, import, ...) is one command
 The GUI writes the same journal (File → Save journal), so an interactive session can be turned
 into a script and edited.
 
+### Standard shapes
+```python
+og.create_rectangle((0, 0), 20, 20, name="far")        # far-bottom, far-right, far-top, far-left
+og.create_circle((0, 0), 0.5, name="cyl")
+og.create_ellipse((0, 0), 2.0, 1.0, name="e")           # exact, a rational NURBS
+og.create_airfoil("2412", chord=1.0, angle=4.0, name="naca")   # naca-upper, naca-lower
+og.unstructured_domain_from_curves(["naca-upper", "naca-lower", *og.create_rectangle((0.5, 0), 30, 30)], 81)
+og.create_box(size=(2, 1, 1)); og.create_cylinder(radius=0.5, height=2.0); og.create_sphere(radius=1.0)
+og.create_wing("0012", root_chord=1.0, tip_chord=0.5, span=3.0, sweep=20.0, name="wing")
+```
+Every shape is one undo step and names its parts (`<name>-upper`, `-side`, `-xmin`, ...);
+the GUI's Create > Shapes asks the same values in a dialog and selects the result. NACA
+sections are the 4-digit family (closed trailing edge), cosine spaced from the leading edge.
+
 ## Typical workflows
 
 ### 2D structured grid with wall spacing

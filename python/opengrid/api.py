@@ -139,6 +139,192 @@ class Session:
         }
         return self._create("nurbs", params, name)
 
+    # ---------------------------------------------------------------- shapes
+    def _shape_name(self, name: str | None, kind: str) -> str:
+        """``name``, or the first free "<kind>-<n>" (no entity so called or so prefixed);
+        the store's name counters are left alone, so a replay makes the same names."""
+        if name is not None:
+            return name
+        number = 0
+        while True:
+            number += 1
+            base = f"{kind}-{number}"
+            taken = any(e.name == base or e.name.startswith(base + "-") for e in self.store)
+            if not taken:
+                return base
+
+    def create_rectangle(
+        self, center=(0.0, 0.0), width: float = 1.0, height: float = 1.0, name=None
+    ) -> list[str]:
+        """Four lines counter-clockwise from the lower left: ``<name>-bottom``, ``-right``,
+        ``-top``, ``-left`` (``name`` "rectangle-<n>" by default). One undo step; returns
+        the four names."""
+        from opengrid.model.shapes import rectangle_corners
+
+        base = self._shape_name(name, "rectangle")
+        corners = rectangle_corners(center, width, height)
+        items = []
+        for k, side in enumerate(("bottom", "right", "top", "left")):
+            params = {"p0": corners[k], "p1": corners[(k + 1) % 4]}
+            items.append(("line", params, f"{base}-{side}"))
+        return self.commands.run(CreateEntities(items, label=f"Rectangle {base}"))
+
+    def create_ellipse(self, center=(0.0, 0.0), a: float = 1.0, b: float = 0.5, name=None) -> str:
+        """Exact ellipse (a rational NURBS) with semi-axes ``a`` along x and ``b`` along y,
+        starting on the +x side and running counter-clockwise."""
+        from opengrid.model.shapes import ellipse_nurbs
+
+        degree, knots, control, weights = ellipse_nurbs(center, a, b)
+        return self.create_nurbs(degree, knots, control, weights, name=name)
+
+    def create_airfoil(
+        self,
+        code: str = "0012",
+        chord: float = 1.0,
+        leading_edge=(0.0, 0.0),
+        angle: float = 0.0,
+        points: int = 101,
+        name=None,
+    ) -> list[str]:
+        """A NACA 4-digit airfoil (``code`` "0012", "2412", ...) as two clamped splines from
+        the leading edge to the sharp trailing edge, ``<name>-upper`` and ``<name>-lower``
+        ("airfoil-<n>" by default), of ``chord`` at ``leading_edge`` and ``angle`` of attack
+        in degrees (nose up). The two curves close on each other: select both for an
+        unstructured domain, or build C / O grids on them. One undo step."""
+        from opengrid.model.shapes import naca4, placed
+
+        base = self._shape_name(name, "airfoil")
+        upper, lower = naca4(code, points)
+        c = math.cos(math.radians(-angle))
+        s = math.sin(math.radians(-angle))
+        items = []
+        for side, pts, tangent in (("upper", upper, (0.0, 1.0)), ("lower", lower, (0.0, -1.0))):
+            params = {
+                "points": placed(pts, chord, leading_edge, angle),
+                "method": "clamped",
+                "start_tangent": (
+                    c * tangent[0] - s * tangent[1],
+                    s * tangent[0] + c * tangent[1],
+                    0.0,
+                ),
+                "end_tangent": None,
+            }
+            items.append(("spline", params, f"{base}-{side}"))
+        return self.commands.run(CreateEntities(items, label=f"NACA {code} airfoil {base}"))
+
+    def create_box(self, center=(0.0, 0.0, 0.0), size=(1.0, 1.0, 1.0), name=None) -> list[str]:
+        """The six faces of an axis-aligned box as plane patches ``<name>-xmin`` ...
+        ``-zmax`` ("box-<n>" by default), normals outward. One undo step."""
+        from opengrid.model.shapes import box_planes
+
+        base = self._shape_name(name, "box")
+        items = [
+            ("plane", {"origin": origin, "u_vector": u, "v_vector": v}, f"{base}-{suffix}")
+            for suffix, origin, u, v in box_planes(center, size)
+        ]
+        return self.commands.run(CreateEntities(items, label=f"Box {base}"))
+
+    def create_cylinder(
+        self,
+        center=(0.0, 0.0, 0.0),
+        radius: float = 0.5,
+        height: float = 1.0,
+        axis=(0.0, 0.0, 1.0),
+        caps: bool = True,
+        name=None,
+    ) -> list[str]:
+        """A cylinder of revolution: ``center`` is the middle of the bottom face, the axis
+        points up through the top. Surfaces ``<name>-side`` and, with ``caps``, ``-bottom``
+        and ``-top`` (discs, degenerate at their centre), from the generating lines
+        ``<name>-generatrix``, ``-bottom-radius``, ``-top-radius``. One undo step."""
+        from opengrid.model.shapes import along, frame
+
+        base = self._shape_name(name, "cylinder")
+        u, _v, w = frame(axis)
+        bottom = _as3(center)
+        top = along(bottom, w, height)
+        rim_bottom = along(bottom, u, radius)
+        rim_top = along(top, u, radius)
+        revolve = {"axis_point": bottom, "axis": w, "end_angle": math.tau}
+        items = [
+            ("line", {"p0": rim_bottom, "p1": rim_top}, f"{base}-generatrix"),
+            ("revolved_surface", {"curve": f"{base}-generatrix", **revolve}, f"{base}-side"),
+        ]
+        if caps:
+            for suffix, centre, rim in (("bottom", bottom, rim_bottom), ("top", top, rim_top)):
+                items.append(("line", {"p0": centre, "p1": rim}, f"{base}-{suffix}-radius"))
+                items.append(
+                    (
+                        "revolved_surface",
+                        {"curve": f"{base}-{suffix}-radius", **revolve},
+                        f"{base}-{suffix}",
+                    )
+                )
+        return self.commands.run(CreateEntities(items, label=f"Cylinder {base}"))
+
+    def create_sphere(self, center=(0.0, 0.0, 0.0), radius: float = 0.5, name=None) -> list[str]:
+        """A sphere as the surface of revolution ``<name>`` of a meridian half circle
+        ``<name>-meridian`` (from the +z pole to the -z pole) about the z axis through the
+        centre ("sphere-<n>" by default). One undo step."""
+        base = self._shape_name(name, "sphere")
+        c = _as3(center)
+        meridian = {
+            "center": c,
+            "radius": radius,
+            "normal": (0.0, 1.0, 0.0),
+            "x_axis": (0.0, 0.0, 1.0),
+            "start_angle": 0.0,
+            "end_angle": math.pi,
+        }
+        revolve = {
+            "curve": f"{base}-meridian",
+            "axis_point": c,
+            "axis": (0.0, 0.0, 1.0),
+            "end_angle": math.tau,
+        }
+        items = [("arc", meridian, f"{base}-meridian"), ("revolved_surface", revolve, base)]
+        return self.commands.run(CreateEntities(items, label=f"Sphere {base}"))
+
+    def create_wing(
+        self,
+        code: str = "0012",
+        root_chord: float = 1.0,
+        tip_chord: float | None = None,
+        span: float = 3.0,
+        sweep: float = 0.0,
+        dihedral: float = 0.0,
+        points: int = 101,
+        name=None,
+    ) -> list[str]:
+        """A straight tapered wing: NACA 4-digit sections at the root (y = 0) and the tip
+        (y = ``span``, chord ``tip_chord``, leading edge swept back by ``sweep`` degrees and
+        raised by ``dihedral`` degrees), chord along +x and thickness along z, as four
+        clamped splines ``<name>-root-upper`` ... ``-tip-lower`` and the ruled surfaces
+        ``<name>-upper`` and ``<name>-lower`` between them ("wing-<n>" by default). The tip
+        is open (no cap). One undo step."""
+        from opengrid.model.shapes import wing_sections
+
+        base = self._shape_name(name, "wing")
+        if tip_chord is None:
+            tip_chord = root_chord
+        sections = wing_sections(code, root_chord, tip_chord, span, sweep, dihedral, points)
+        items = []
+        for station in ("root", "tip"):
+            upper, lower = sections[station]
+            sides = (("upper", upper, (0.0, 0.0, 1.0)), ("lower", lower, (0.0, 0.0, -1.0)))
+            for side, pts, tangent in sides:
+                params = {
+                    "points": pts,
+                    "method": "clamped",
+                    "start_tangent": tangent,
+                    "end_tangent": None,
+                }
+                items.append(("spline", params, f"{base}-{station}-{side}"))
+        for side in ("upper", "lower"):
+            ruled = {"curve0": f"{base}-root-{side}", "curve1": f"{base}-tip-{side}"}
+            items.append(("ruled_surface", ruled, f"{base}-{side}"))
+        return self.commands.run(CreateEntities(items, label=f"Wing {base}"))
+
     # ----------------------------------------------------------- connectors
     # -------------------------------------------------------------- surfaces
     def create_freehand(

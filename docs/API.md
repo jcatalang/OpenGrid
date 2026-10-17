@@ -68,6 +68,52 @@ x = curve(u) + v direction.
 
 Tensor-product NURBS; ``control_points`` is a list of rows (one per u index).
 
+### `create_rectangle(center=(0.0, 0.0), width: float = 1.0, height: float = 1.0, name=None) -> list[str]`
+
+Four lines counter-clockwise from the lower left: ``<name>-bottom``, ``-right``,
+``-top``, ``-left`` (``name`` "rectangle-<n>" by default). One undo step; returns
+the four names.
+
+### `create_ellipse(center=(0.0, 0.0), a: float = 1.0, b: float = 0.5, name=None) -> str`
+
+Exact ellipse (a rational NURBS) with semi-axes ``a`` along x and ``b`` along y,
+starting on the +x side and running counter-clockwise.
+
+### `create_airfoil(code: str = '0012', chord: float = 1.0, leading_edge=(0.0, 0.0), angle: float = 0.0, points: int = 101, name=None) -> list[str]`
+
+A NACA 4-digit airfoil (``code`` "0012", "2412", ...) as two clamped splines from
+the leading edge to the sharp trailing edge, ``<name>-upper`` and ``<name>-lower``
+("airfoil-<n>" by default), of ``chord`` at ``leading_edge`` and ``angle`` of attack
+in degrees (nose up). The two curves close on each other: select both for an
+unstructured domain, or build C / O grids on them. One undo step.
+
+### `create_box(center=(0.0, 0.0, 0.0), size=(1.0, 1.0, 1.0), name=None) -> list[str]`
+
+The six faces of an axis-aligned box as plane patches ``<name>-xmin`` ...
+``-zmax`` ("box-<n>" by default), normals outward. One undo step.
+
+### `create_cylinder(center=(0.0, 0.0, 0.0), radius: float = 0.5, height: float = 1.0, axis=(0.0, 0.0, 1.0), caps: bool = True, name=None) -> list[str]`
+
+A cylinder of revolution: ``center`` is the middle of the bottom face, the axis
+points up through the top. Surfaces ``<name>-side`` and, with ``caps``, ``-bottom``
+and ``-top`` (discs, degenerate at their centre), from the generating lines
+``<name>-generatrix``, ``-bottom-radius``, ``-top-radius``. One undo step.
+
+### `create_sphere(center=(0.0, 0.0, 0.0), radius: float = 0.5, name=None) -> list[str]`
+
+A sphere as the surface of revolution ``<name>`` of a meridian half circle
+``<name>-meridian`` (from the +z pole to the -z pole) about the z axis through the
+centre ("sphere-<n>" by default). One undo step.
+
+### `create_wing(code: str = '0012', root_chord: float = 1.0, tip_chord: float | None = None, span: float = 3.0, sweep: float = 0.0, dihedral: float = 0.0, points: int = 101, name=None) -> list[str]`
+
+A straight tapered wing: NACA 4-digit sections at the root (y = 0) and the tip
+(y = ``span``, chord ``tip_chord``, leading edge swept back by ``sweep`` degrees and
+raised by ``dihedral`` degrees), chord along +x and thickness along z, as four
+clamped splines ``<name>-root-upper`` ... ``-tip-lower`` and the ruled surfaces
+``<name>-upper`` and ``<name>-lower`` between them ("wing-<n>" by default). The tip
+is open (no cap). One undo step.
+
 ### `geometry(name: str)`
 
 The C++ curve of an entity (None for points).

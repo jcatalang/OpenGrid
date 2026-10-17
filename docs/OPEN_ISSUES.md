@@ -428,6 +428,11 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
+  or data files: import those as points / splines); a cylinder's caps are discs degenerate at
+  their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a
+  structured domain on them; a wing has no tip cap and straight taper / sweep / dihedral
+  only (no twist).
 - **Sketch block generators** [2026-10-17]: a sketch has one generator for all its
   unstructured blocks (editing one block's settings changes them all); its inflation layers
   are sketch walls, which stop at the core cell size (no total thickness, no transition

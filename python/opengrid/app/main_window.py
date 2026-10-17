@@ -697,6 +697,7 @@ class MainWindow(QMainWindow):
         for name in ("point", "line", "arc", "polyline", "spline", "nurbs", "freehand", "sketch"):
             create_menu.addAction(self.tool_actions[name])
         create_menu.addAction(self.sketch_unstructured_action)
+        create_menu.addMenu(self.shapes_menu(create_menu))
         create_menu.addSeparator()
         create_menu.addAction(self.connectors_action)
         create_menu.addAction(self.chain_action)
@@ -2297,6 +2298,41 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Extruded {len(names) - 2} domain(s) by {thickness:g}; front / back {ends}", 8000
             )
+        return names
+
+    def shapes_menu(self, parent=None) -> QMenu:
+        """Create > Shapes: standard shapes from a small dialog each."""
+        from opengrid.app.shapes_dialog import SHAPES
+
+        menu = QMenu("&Shapes", parent)
+        for kind, spec in SHAPES.items():
+            action = menu.addAction(f"{spec.title}…")
+            action.setToolTip(spec.hint)
+            action.triggered.connect(lambda _checked=False, k=kind: self.create_shape(k))
+        return menu
+
+    def create_shape(self, kind: str, values: dict | None = None):
+        """A standard shape (Create > Shapes), from the dialog or from ``values`` (the
+        Session creator's arguments); the new entities are selected. Returns their names."""
+        from PySide6.QtWidgets import QDialog
+
+        from opengrid.app.shapes_dialog import SHAPES, ShapeDialog
+
+        spec = SHAPES[kind]
+        if values is None:
+            dialog = ShapeDialog(spec, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            values = dialog.values()
+        method = getattr(self.session, spec.method)
+        names = self._run(lambda: method(**values))
+        if not names:
+            return None
+        if isinstance(names, str):
+            names = [names]
+        self.set_selection([self.session.store.get(n).id for n in names])
+        log.info("%s: %s", spec.title, ", ".join(names))
+        self.statusBar().showMessage(f"{spec.title}: {', '.join(names)} (selected)", 6000)
         return names
 
     def boundary_type_menu(self, parent=None) -> QMenu:

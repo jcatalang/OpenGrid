@@ -145,6 +145,10 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 - **2D model extruded one cell thick** (`extrude_model`): blocks and volumes with the 2D
   patches on their sides and the front / back as a periodic pair or symmetry planes, for
   solvers that want 3D meshes of 2D cases.
+- **Standard shapes** (Create > Shapes, `create_airfoil`, `create_rectangle`,
+  `create_ellipse`, `create_box`, `create_cylinder`, `create_sphere`, `create_wing`): NACA
+  4-digit airfoils, exact ellipses, boxes, cylinders and spheres of revolution, tapered
+  swept wings; each one undo step with named parts.
 - **Drag the geometry with the mesh in place**: a selected domain, connector or sketch
   block shows the handles of what moves it (its curves' points, or the sketch's vertices);
   dragging one regenerates and remeshes, layers included.

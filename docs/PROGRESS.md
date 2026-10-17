@@ -848,6 +848,28 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Standard shapes (2026-10-18) — requested by the user
+
+The user asked for default shapes: circles, NACA 0012, cylinder, sphere, wing.
+
+### Built
+- `model/shapes.py` (methods and references in its header): `naca4` (4-digit sections,
+  cosine spaced, closed trailing edge), `placed` (chord, angle of attack, leading edge),
+  `ellipse_nurbs` (the nine-point rational circle scaled), `rectangle_corners`, `frame`,
+  `box_planes` (outward normals), `wing_sections` (taper, sweep, dihedral).
+- `Session.create_rectangle / create_ellipse / create_airfoil / create_box /
+  create_cylinder / create_sphere / create_wing`: one `CreateEntities` step each, parts
+  named `<name>-upper`, `-side`, `-xmin`, ... (`<kind>-<n>` by default, chosen without
+  touching the name counters so replays match).
+- GUI: Create > Shapes, a dialog per shape (`app/shapes_dialog.py`: fields parsed as
+  numbers, vectors, text, yes/no; invalid input kept in the dialog), the result selected.
+
+### Verified
+- pytest +4 (`tests/python/test_shapes.py`): the section formulas (thickness, symmetry,
+  camber, closure), the ellipse / frame / box / wing helpers, every creator (names,
+  geometry, an airfoil in a far-field rectangle meshed with the airfoil as a hole, undo as
+  one step, replay), the GUI (create_shape, the menu, the dialog's parsing).
+
 ## Closed loops stay closed; the region between two loops (2026-10-17) — the user
 
 The user could not mesh a freehand loop after moving its control points: dragging the

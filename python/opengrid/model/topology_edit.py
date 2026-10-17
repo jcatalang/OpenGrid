@@ -1451,3 +1451,153 @@ def convert_domain(store, name: str):
         params["members"] = (*params["members"], {"domain": new.id})
         store.update(holder_id, params=params)
     return [new.name], []
+
+
+def make_periodic_pair(store, source_members, target_members, **transform):
+    """Two periodic patches from the two sides, paired (opengrid.model.patches)."""
+    from opengrid.model.patches import make_periodic_pair as make
+
+    return make(store, source_members, target_members, **transform), []
+
+
+EDGE_FACES = ("jmin", "imax", "jmax", "imin")  # a structured domain's edges as block faces
+
+
+def extrude_model(store, thickness: float, layers: int = 1, ends: str = "periodic"):
+    """Every 2D domain extruded by ``thickness`` along z (``layers`` cells): structured
+    domains to blocks, unstructured ones to volumes of prisms and hexahedra, named
+    ``<domain>-ext``. The 2D patches carry over to the side faces (a block's face for each
+    domain edge, the connectors themselves for the volumes' side walls), their periodic
+    pairings kept; zones take the new blocks and volumes; the fronts and backs go into the
+    patches "front" and "back", paired as periodic (``ends="periodic"``) or both symmetry
+    planes (``ends="symmetry"``). Refused when a structured domain's edge has connectors in
+    two patches (split the domain there) or the model is 3D already. Returns the new names."""
+    from opengrid.model.blocks import BlockEvaluator
+    from opengrid.model.connectors import ConnectorEvaluator
+    from opengrid.model.domains import DomainEvaluator
+    from opengrid.model.entities import normalize_params
+
+    if ends not in ("periodic", "symmetry"):
+        raise ValidationError([Issue("ends", f"must be 'periodic' or 'symmetry', got {ends!r}")])
+    if not isinstance(thickness, (int, float)) or isinstance(thickness, bool) or thickness <= 0:
+        raise ValidationError([Issue("thickness", f"must be a positive length, got {thickness!r}")])
+    if not isinstance(layers, int) or isinstance(layers, bool) or layers < 1:
+        raise ValidationError([Issue("layers", f"must be a whole number >= 1, got {layers!r}")])
+    if store.entities("block") or store.entities("volume"):
+        raise ValidationError(
+            [Issue("extrude_model", "the model is 3D already (it has blocks or volumes)")]
+        )
+    domains = [e for e in store if e.kind in ("domain", "unstructured_domain")]
+    if not domains:
+        raise ValidationError([Issue("extrude_model", "the model has no domains to extrude")])
+    for name in ("front", "back"):
+        if name in store:
+            raise ValidationError(
+                [Issue(name, "is already in use: the extruded ends need the names front / back")]
+            )
+    connectors = ConnectorEvaluator(store)
+    blocks = BlockEvaluator(store, DomainEvaluator(store, connectors))
+    extrusion = {
+        "mode": "translate",
+        "vector": (0.0, 0.0, float(thickness)),
+        "dimension": layers + 1,
+    }
+    made = {}  # domain id -> (kind, entity)
+    for domain in domains:
+        name = f"{domain.name}-ext"
+        number = 1
+        while name in store:
+            number += 1
+            name = f"{domain.name}-ext-{number}"
+        raw = {"extrusion": dict(extrusion, domain=domain.id)}
+        if domain.kind == "domain":
+            params = normalize_params("block", raw, name, store)
+            made[domain.id] = ("block", store.add("block", params, name))
+        else:
+            params = normalize_params("volume", raw, name, store)
+            made[domain.id] = ("volume", store.add("volume", params, name))
+    # Where each connector sits: block faces (structured domains, by edge) or side walls.
+    face_of: dict[int, list] = {}  # connector id -> [{"block": id, "face": f} | {"connector": id}]
+    for domain in domains:
+        kind, entity = made[domain.id]
+        if kind == "volume":
+            for loop in domain.params["loops"]:
+                for item in loop:
+                    face_of.setdefault(item["connector"], []).append(
+                        {"connector": item["connector"]}
+                    )
+            continue
+        mirrored = blocks.evaluate(entity.id)["mirrored"]
+        for k, edge in enumerate(domain.params["edges"]):
+            face = EDGE_FACES[k]
+            if mirrored and face in ("imin", "imax"):
+                face = {"imin": "imax", "imax": "imin"}[face]
+            for item in edge:
+                face_of.setdefault(item["connector"], []).append(
+                    {"block": entity.id, "face": face, "edge": k, "domain": domain.id}
+                )
+    issues = []
+    for patch in store.entities("patch"):
+        members = []
+        for item in patch.params["members"]:
+            if "connector" not in item:
+                members.append(item)
+                continue
+            for ref in face_of.get(item["connector"], [{"connector": item["connector"]}]):
+                member = {k: v for k, v in ref.items() if k in ("block", "face", "connector")}
+                if member not in members:
+                    members.append(member)
+        params = dict(patch.params)
+        params["members"] = tuple(members)
+        store.update(patch.id, params=params)
+    # A structured domain's edge must be in one patch (a block face takes one patch).
+    owners: dict[tuple, set] = {}
+    for patch in store.entities("patch"):
+        for item in patch.params["members"]:
+            if "block" in item:
+                owners.setdefault((item["block"], item["face"]), set()).add(patch.name)
+    for (block_id, face), names in sorted(owners.items()):
+        if len(names) > 1:
+            issues.append(
+                Issue(
+                    f"{store.get(block_id).name}.{face}",
+                    f"would belong to patches {', '.join(sorted(names))}: split the domain "
+                    "where the boundary type changes before extruding",
+                )
+            )
+    if issues:
+        raise ValidationError(issues)
+    for zone in store.entities("zone"):
+        members = list(zone.params["members"])
+        for item in zone.params["members"]:
+            if item.get("domain") in made:
+                members.append({"domain": made[item["domain"]][1].id})
+        params = dict(zone.params)
+        params["members"] = tuple(members)
+        store.update(zone.id, params=params)
+    fronts = [{"domain": d.id} for d in domains]
+    backs = []
+    for domain in domains:
+        kind, entity = made[domain.id]
+        if kind == "block":
+            backs.append({"block": entity.id, "face": "kmax"})
+        else:
+            backs.append({"volume": entity.id, "face": "top"})
+    names = [e.name for _kind, e in made.values()]
+    if ends == "periodic":
+        from opengrid.model.patches import make_periodic_pair
+
+        names += make_periodic_pair(
+            store, fronts, backs, translation=(0.0, 0.0, float(thickness)), name="front"
+        )
+        # The pair is called front / back.
+        back = store.get(names[-1])
+        if back.name != "back":
+            store.update(back.id, name="back")
+            names[-1] = "back"
+    else:
+        from opengrid.model.patches import set_boundary_type
+
+        names += set_boundary_type(store, fronts, "symmetry", "front")
+        names += set_boundary_type(store, backs, "symmetry", "back")
+    return names, []

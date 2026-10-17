@@ -589,6 +589,23 @@ source connectors must map node by node onto the target's; 3D (block faces, volu
 faces, the ends and side walls of extruded volumes): the faces must map node by node
 and face by face. The boundary report names what does not match.
 
+### `make_periodic_pair(source, target, translation=None, rotation_angle: float = 0.0, rotation_center=(0.0, 0.0, 0.0), rotation_axis=(0.0, 0.0, 1.0), name: str | None = None) -> list[str]`
+
+Two periodic patches from the two sides (connectors in 2D; domains, block faces or
+extruded-volume ends in 3D) and their pairing, in one step (the GUI's "Pair as
+periodic"): patches ``name`` and ``name-2`` ("periodic" by default). Without a
+translation and no rotation, the translation maps the centroid of the source side
+onto the target's. Returns [source patch, target patch]; one undo step.
+
+### `extrude_model(thickness: float, layers: int = 1, ends: str = 'periodic') -> list[str]`
+
+The one-cell-thick (``layers`` cells) 3D model of a 2D one: every domain extruded
+by ``thickness`` along z (blocks from structured domains, volumes of prisms and
+hexahedra from unstructured ones, named ``<domain>-ext``), the 2D patches carried
+over to the side faces with their periodic pairings, zones extended, and the fronts
+and backs in the patches "front" / "back": a periodic pair (``ends="periodic"``) or
+two symmetry planes (``ends="symmetry"``). One undo step; returns the new names.
+
 ### `unpair_periodic(source: str) -> str`
 
 Remove the periodic pairing of a patch.

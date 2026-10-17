@@ -536,21 +536,49 @@ def write_cgns_3d(path, session, base_name: str = "OpenGrid") -> dict:
                 for i in range(r[0], r[3] + 1):
                     lookup[grid[k, j, i].tobytes()] = (i + 1, j + 1, k + 1)
         sides[f.domain].append((f.block, lookup))
+    # Side walls of extruded volumes meeting the side faces of extruded blocks: matched by
+    # their identical nodes as well.
+    for c, (block_id, face), volume_id in topology.get("side_pairs", ()):
+        grid = grids[block_id]
+        r = face_range(grid, face)
+        lookup = {}
+        for k in range(r[2], r[5] + 1):
+            for j in range(r[1], r[4] + 1):
+                for i in range(r[0], r[3] + 1):
+                    lookup[grid[k, j, i].tobytes()] = (i + 1, j + 1, k + 1)
+        pts = meshes[volume_id]["points"]
+        ids = np.unique(np.concatenate(meshes[volume_id]["faces"][("side", c)]))
+        # Only the face's nodes on this connector's strip (a face may span several).
+        strip = {pts[i].tobytes(): (int(i) + 1,) for i in ids}
+        shared = {key: place for key, place in lookup.items() if key in strip}
+        if len(shared) != len(strip):
+            raise ValidationError(
+                [
+                    Issue(
+                        store.get(c).name,
+                        "the block face and the volume side do not share its nodes",
+                    )
+                ]
+            )
+        sides.setdefault(("side", c), []).extend([(block_id, shared), (volume_id, strip)])
     vertex_connections = []
-    for d, owners in sorted(sides.items()):
+    for d, owners in sorted(sides.items(), key=lambda item: str(item[0])):
         if len(owners) != 2:
             continue
         keys = sorted(owners[0][1])
+        label = d
+        if isinstance(d, tuple):
+            label = d[1]
         if sorted(owners[1][1]) != keys:
             raise ValidationError(
-                [Issue(store.get(d).name, "the nodes of its two sides do not match")]
+                [Issue(store.get(label).name, "the nodes of its two sides do not match")]
             )
         for (this, here), (donor, there) in (owners, owners[::-1]):
             zone = zone_index[this]
             vertex_connections.append(
                 (
                     zone,
-                    unique_in(zone, store.get(d).name),
+                    unique_in(zone, store.get(label).name),
                     zone_index[donor],
                     [n for key in keys for n in here[key]],
                     [n for key in keys for n in there[key]],

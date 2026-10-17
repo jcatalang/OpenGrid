@@ -428,6 +428,11 @@ history). Phase tags show where each item came from.
   unstructured meaning); the vertex passes relax the topology as if every block were
   structured; an unstructured block does not take part in the smoothing group, so a
   connector between the two kinds stays where the connector puts it.
+- **Extruded 2D model** [2026-10-17]: along z only, one thickness, the end patches are named
+  front / back (refused when those names are taken); a structured domain's edge must lie in
+  one patch (a block face carries one patch: split the domain where the type changes);
+  structured domains become blocks without smoothing, unstructured ones volumes of prisms
+  and hexahedra; the 2D domains stay as the fronts (deleting them deletes the extrusion).
 - **Suggested values** [2026-10-17]: the clustering spacings (a quarter of the uniform
   spacing), the growth ratio (1.2) and the first layer height (a twentieth of the boundary
   spacing) are starting points, not y+ estimates: no flow data is known; the inflation hint

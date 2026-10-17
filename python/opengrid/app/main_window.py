@@ -499,6 +499,18 @@ class MainWindow(QMainWindow):
             self.create_volume_on_selection,
             tip="Unstructured volume (tetrahedra) enclosed by the selected domains",
         )
+        self.periodic_pair_action = self._action(
+            "Pair as periodic",
+            self.pair_selection_as_periodic,
+            tip="The two selected sides (two connectors; 3D: two faces, or one extruded volume "
+            "for its ends) become a periodic pair; two selected periodic patches are paired",
+        )
+        self.extrude_model_action = self._action(
+            "Extrude 2D model (one cell thick)…",
+            self.extrude_model,
+            tip="Every domain extruded along z: blocks and volumes with the 2D patches on "
+            "their sides and the front / back as a periodic pair (or symmetry planes)",
+        )
         self.cut_action = QAction("Cut blocks (plane x)", self)
         self.cut_action.setCheckable(True)
         self.cut_action.toggled.connect(self.set_cut_plane)
@@ -692,6 +704,8 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.volume_action)
         create_menu.addSeparator()
         create_menu.addMenu(self.boundary_type_menu(create_menu))
+        create_menu.addAction(self.periodic_pair_action)
+        create_menu.addAction(self.extrude_model_action)
         create_menu.addSeparator()
         create_menu.addAction(self.finish_action)
         create_menu.addAction(self.cancel_action)
@@ -1170,8 +1184,14 @@ class MainWindow(QMainWindow):
                 menu.addAction(action)
         if any(applies for _action, applies in groups):
             menu.addSeparator()
-        if self._patch_members_from_selection():
+        members = self._patch_members_from_selection()
+        if members:
             menu.addMenu(self.boundary_type_menu(menu))
+            if len(members) == 2 or len(self._selected_of_kind("patch")) == 2:
+                menu.addAction(self.periodic_pair_action)
+            menu.addSeparator()
+        elif len(self._selected_of_kind("patch")) == 2:
+            menu.addAction(self.periodic_pair_action)
             menu.addSeparator()
         topology = menu.addMenu("Topology")
         for action in self.topology_actions.values():
@@ -2153,6 +2173,99 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"{name} is now a {kind}", 5000)
         return name
 
+    def pair_selection_as_periodic(self) -> list[str] | None:
+        """Two selected sides (two connectors; 3D: two faces, or one extruded volume for its
+        two ends) become a periodic pair; two selected periodic patches are paired."""
+        patches = [
+            n
+            for n in self._selected_of_kind("patch")
+            if self.session.store.get(n).params["patch_type"] == "periodic"
+        ]
+        if len(patches) == 2:
+            name = self._run(lambda: self.session.pair_periodic(patches[0], patches[1]))
+            if name:
+                self._after_pairing(name)
+                return [patches[0], patches[1]]
+            return None
+        members = self._patch_members_from_selection()
+        if len(members) != 2:
+            self.statusBar().showMessage(
+                self._selection_hint(
+                    "the two sides: two connectors (3D: two faces, or one extruded volume)"
+                ),
+                6000,
+            )
+            return None
+        names = self._run(lambda: self.session.make_periodic_pair([members[0]], [members[1]]))
+        if names:
+            self._after_pairing(names[0])
+        return names
+
+    def _after_pairing(self, source: str) -> None:
+        entity = self.session.store.get(source)
+        transform = entity.params["periodic"]
+        t = transform["translation"]
+        log.info("%s paired with %s", source, self.session.store.get(transform["partner"]).name)
+        if not self.patch_color_action.isChecked():
+            self.patch_color_action.setChecked(True)
+        self.set_selection([entity.id])  # the panel shows the pairing (axis, angle, ...)
+        self.statusBar().showMessage(
+            f"{source}: periodic with translation ({t[0]:.4g}, {t[1]:.4g}, {t[2]:.4g}); the "
+            "property panel edits the pairing (rotation, translation)",
+            8000,
+        )
+
+    def extrude_model(self, thickness: float | None = None, ends: str | None = None):
+        """Create > Extrude 2D model: one cell thick along z, the fronts and backs periodic
+        (or symmetry planes)."""
+        from opengrid.app.property_panel import mean_connector_spacing
+
+        if self.session.is_3d():
+            self.statusBar().showMessage("The model is 3D already", 5000)
+            return None
+        if not self.session.names("domain") and not self.session.names("unstructured_domain"):
+            self.statusBar().showMessage("No domains to extrude", 5000)
+            return None
+        if thickness is None:
+            spacing = mean_connector_spacing(
+                self.session, [e.id for e in self.session.store.entities("connector")]
+            )
+            suggested = 1.0
+            if spacing is not None:
+                suggested = spacing
+            thickness, ok = QInputDialog.getDouble(
+                self,
+                "Extrude 2D model",
+                "Thickness along z (one cell; the mean boundary spacing is suggested):",
+                suggested,
+                1e-12,
+                1e12,
+                6,
+            )
+            if not ok:
+                return None
+        if ends is None:
+            ends, ok = QInputDialog.getItem(
+                self,
+                "Extrude 2D model",
+                "Front and back:",
+                ["periodic", "symmetry"],
+                0,
+                False,
+            )
+            if not ok:
+                return None
+        with self.batch_updates():
+            names = self._run(lambda: self.session.extrude_model(thickness, ends=ends))
+            if names:
+                self._run_long("Meshing the extrusion…", lambda: self._warm_caches(names))
+        if names:
+            log.info("extruded the 2D model: %s", ", ".join(names))
+            self.statusBar().showMessage(
+                f"Extruded {len(names) - 2} domain(s) by {thickness:g}; front / back {ends}", 8000
+            )
+        return names
+
     def boundary_type_menu(self, parent=None) -> QMenu:
         """A submenu with one entry per patch type: the selection joins a patch of it."""
         menu = QMenu("Boundary type", parent)
@@ -2240,13 +2353,23 @@ class MainWindow(QMainWindow):
         return report
 
     def _patch_colors(self, report=None) -> dict[int, str]:
-        topology = self.session.topology()
+        """Connector colours: interface, unassigned boundary, or the patch's colour (3D: the
+        side-wall connectors of extruded volumes)."""
         colors = {}
-        for connector_id, uses in topology.uses.items():
-            if len(uses) == 2:
-                colors[connector_id] = INTERFACE_COLOR
-            elif len(uses) == 1:
-                colors[connector_id] = UNASSIGNED_COLOR
+        if self.session.is_3d():
+            from opengrid.model.volumes import analyze_3d
+
+            for entry in analyze_3d(self.session)["entries"]:
+                for key in entry["keys"]:
+                    if key[0] == "connector":
+                        colors[key[1]] = UNASSIGNED_COLOR
+        else:
+            topology = self.session.topology()
+            for connector_id, uses in topology.uses.items():
+                if len(uses) == 2:
+                    colors[connector_id] = INTERFACE_COLOR
+                elif len(uses) == 1:
+                    colors[connector_id] = UNASSIGNED_COLOR
         for index, patch in enumerate(self.session.store.entities("patch")):
             for item in patch.params["members"]:
                 if "connector" not in item:

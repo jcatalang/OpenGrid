@@ -325,3 +325,42 @@ def set_boundary_type(store, members, patch_type: str, name: str | None = None) 
     params["members"] = tuple(existing)
     store.update(target.id, params=params)
     return [target.name]
+
+
+def make_periodic_pair(
+    store,
+    source_members,
+    target_members,
+    translation=(0.0, 0.0, 0.0),
+    rotation_angle: float = 0.0,
+    rotation_center=(0.0, 0.0, 0.0),
+    rotation_axis=(0.0, 0.0, 1.0),
+    name: str | None = None,
+) -> list[str]:
+    """Two periodic patches (``name`` / ``name-2``, "periodic" by default, unique) from the
+    two sides' members, paired source -> target with the transform. The members leave the
+    patches they were in. Returns [source patch, target patch]."""
+    base = name
+    if base is None:
+        base = "periodic"
+    names = []
+    for members in (source_members, target_members):
+        candidate = base
+        if names:
+            candidate = f"{base}-2"
+        number = 1
+        while candidate in store:
+            number += 1
+            candidate = f"{base}-{number}"
+        names.append(set_boundary_type(store, members, "periodic", candidate)[0])
+    source = store.get(names[0])
+    params = dict(source.params)
+    params["periodic"] = {
+        "partner": store.get(names[1]).id,
+        "rotation_center": rotation_center,
+        "rotation_axis": rotation_axis,
+        "rotation_angle": rotation_angle,
+        "translation": translation,
+    }
+    store.update(source.id, params=normalize_patch(params, store, source.name))
+    return names

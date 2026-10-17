@@ -146,6 +146,8 @@ GROUPS = [
             "remove_from_patch",
             "set_boundary_type",
             "pair_periodic",
+            "make_periodic_pair",
+            "extrude_model",
             "unpair_periodic",
             "create_zone",
             "add_to_zone",

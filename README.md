@@ -140,7 +140,11 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   automatically, clear messages naming the entity and what is wrong.
 - **Periodic pairs** (translational and rotational, about any axis) of 2D connectors and 3D
   faces (block faces, volume faces, the ends and side walls of extruded volumes), matched node
-  by node and written as periodic connectivity (CGNS 2D: translational).
+  by node and written as periodic connectivity (CGNS 2D: translational); two selected sides
+  pair in one step.
+- **2D model extruded one cell thick** (`extrude_model`): blocks and volumes with the 2D
+  patches on their sides and the front / back as a periodic pair or symmetry planes, for
+  solvers that want 3D meshes of 2D cases.
 
 ### Quality
 - Scaled Jacobian, equiangle skewness, aspect ratio, minimum / maximum included angle,

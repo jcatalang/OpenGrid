@@ -848,6 +848,37 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Periodic pairs in one step; the 2D model extruded one cell thick (2026-10-17) — requested by the user
+
+The user asked how to set periodic pairs, found the patch-first route a detour in 2D (the
+sides are connectors) and suggested the one-cell extrusion with periodic front and back that
+3D solvers want for 2D cases.
+
+### Built
+- `Session.make_periodic_pair(source, target, ...)` (`patches.make_periodic_pair`): the two
+  sides' members become two periodic patches (``name`` / ``name-2``) paired in one undo step,
+  the translation from the sides' centroids unless given (`_members_centroid` handles
+  connectors, domains, block faces and extruded ends). GUI: "Pair as periodic" in the Create
+  and right-click menus - two connectors, two faces, one extruded volume (its ends), or two
+  selected periodic patches; the source patch is selected afterwards so the panel shows the
+  pairing.
+- `Session.extrude_model(thickness, layers=1, ends="periodic")` (`topology_edit.extrude_model`):
+  every domain extruded along z (blocks from structured domains with the edge-to-face map,
+  mirrored blocks included; volumes of prisms and hexahedra from unstructured ones), the 2D
+  patches carried to the sides (block faces by edge, side-wall connectors for volumes) with
+  their pairings, zones extended, the fronts and backs in "front" / "back" as a periodic pair
+  or symmetry planes; refusals: a structured edge in two patches, a 3D model, taken names.
+  GUI: Create > "Extrude 2D model (one cell thick)…" asks the thickness (the mean boundary
+  spacing suggested) and the ends, meshes in the worker and switches to 3D navigation.
+
+### Verified
+- pytest +4: the pair from two sides (names, types, translation, report, undo / redo,
+  replay); the channel-with-dome model extruded (block and volume, every patch mapped to the
+  right face, the side pairing kept, front / back paired with (0, 0, 0.1), the zone, the
+  shared connector an interface, a clean boundary report with two pairs, CGNS connections,
+  undo back to 2D, replay and project round trip, "3D already"); symmetry ends and the
+  refusals; the GUI actions.
+
 ## Boundary types from the selection, suggested values, sketch attachment, domain conversion (2026-10-17) — requested by the user
 
 The user asked which distribution types cluster and for suggested spacings, how to give a

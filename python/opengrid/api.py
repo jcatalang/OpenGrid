@@ -1162,6 +1162,88 @@ class Session:
         }
         return self.modify(source, periodic=periodic)
 
+    def make_periodic_pair(
+        self,
+        source,
+        target,
+        translation=None,
+        rotation_angle: float = 0.0,
+        rotation_center=(0.0, 0.0, 0.0),
+        rotation_axis=(0.0, 0.0, 1.0),
+        name: str | None = None,
+    ) -> list[str]:
+        """Two periodic patches from the two sides (connectors in 2D; domains, block faces or
+        extruded-volume ends in 3D) and their pairing, in one step (the GUI's "Pair as
+        periodic"): patches ``name`` and ``name-2`` ("periodic" by default). Without a
+        translation and no rotation, the translation maps the centroid of the source side
+        onto the target's. Returns [source patch, target patch]; one undo step."""
+        if isinstance(source, (str, int, dict)):
+            source = [source]
+        if isinstance(target, (str, int, dict)):
+            target = [target]
+        if translation is None:
+            if rotation_angle != 0.0:
+                raise ValueError("give the translation explicitly together with a rotation")
+            delta = self._members_centroid(target) - self._members_centroid(source)
+            translation = (float(delta[0]), float(delta[1]), float(delta[2]))
+        return self._topology(
+            "make_periodic_pair",
+            "Periodic pair",
+            list(source),
+            list(target),
+            translation=translation,
+            rotation_angle=rotation_angle,
+            rotation_center=rotation_center,
+            rotation_axis=rotation_axis,
+            name=name,
+        )
+
+    def _members_centroid(self, members) -> np.ndarray:
+        """Centroid of the nodes of boundary members (connectors, domains, block faces,
+        extruded-volume ends)."""
+        from opengrid.model.blocks import face_array
+
+        pieces = []
+        for member in members:
+            if isinstance(member, dict) and "block" in member:
+                grid = self.block_grid(self.store.get(member["block"]).name)
+                pieces.append(face_array(grid, member["face"]).reshape(-1, 3))
+            elif isinstance(member, dict) and "volume" in member:
+                volume = self.store.get(member["volume"])
+                mesh = self.volume_mesh(volume.name)
+                key = volume.params["extrusion"]["domain"]
+                if member["face"] == "top":
+                    key = ("top", key)
+                ids = np.unique(np.concatenate([np.asarray(f) for f in mesh["faces"][key]]))
+                pieces.append(mesh["points"][ids])
+            else:
+                ref = member
+                if isinstance(member, dict):
+                    ref = member.get("connector", member.get("domain"))
+                entity = self.store.get(ref)
+                if entity.kind == "connector":
+                    pieces.append(np.asarray(self.connector_nodes(entity.name).points))
+                elif entity.kind == "domain":
+                    pieces.append(self.domain_grid(entity.name).reshape(-1, 3))
+                elif entity.kind == "unstructured_domain":
+                    pieces.append(np.asarray(self.unstructured_mesh(entity.name)["points"]))
+                else:
+                    raise ValueError(f"{entity.name} is a {entity.kind}, not a boundary")
+        if not pieces:
+            raise ValueError("no boundary members given")
+        return np.concatenate(pieces).mean(axis=0)
+
+    def extrude_model(self, thickness: float, layers: int = 1, ends: str = "periodic") -> list[str]:
+        """The one-cell-thick (``layers`` cells) 3D model of a 2D one: every domain extruded
+        by ``thickness`` along z (blocks from structured domains, volumes of prisms and
+        hexahedra from unstructured ones, named ``<domain>-ext``), the 2D patches carried
+        over to the side faces with their periodic pairings, zones extended, and the fronts
+        and backs in the patches "front" / "back": a periodic pair (``ends="periodic"``) or
+        two symmetry planes (``ends="symmetry"``). One undo step; returns the new names."""
+        return self._topology(
+            "extrude_model", "Extrude the 2D model", thickness, layers=layers, ends=ends
+        )
+
     def convert_domain(self, name: str) -> str:
         """Turn a structured domain into an unstructured one on the same connectors, or an
         unstructured domain (one loop that assembles into four edges) into a structured one;

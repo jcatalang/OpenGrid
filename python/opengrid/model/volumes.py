@@ -1063,8 +1063,12 @@ def analyze_3d(session) -> dict:
         for loop in store.get(d).params["loops"]:
             for item in loop:
                 side_uses.setdefault(item["connector"], []).append(volume.id)
+    # The side faces of extruded blocks stand on their domain's connectors: one shared with
+    # an extruded volume's side wall is an interface (block face | volume).
+    block_sides = block_side_connectors(session)  # (block, face) -> [connector ids]
     entries = []
     interfaces = []
+    side_pairs = []  # (connector, block face, volume) interfaces, for the CGNS writer
 
     def name(entity_id):
         return store.get(entity_id).name
@@ -1072,6 +1076,7 @@ def analyze_3d(session) -> dict:
     for a, b in topo.interfaces:
         interfaces.append(f"{name(a.block)}.{a.face} | {name(b.block)}.{b.face}")
     block_domains = set()
+    joined_sides: set[int] = set()  # connectors whose volume side meets a block face
     for f in topo.boundary:
         label = f"{name(f.block)}.{f.face}"
         if f.domain is not None:
@@ -1079,6 +1084,19 @@ def analyze_3d(session) -> dict:
         if f.domain is not None and f.domain in volume_uses:
             vols = ", ".join(name(v) for v in volume_uses[f.domain])
             interfaces.append(f"{label} | {vols} ({name(f.domain)})")
+            continue
+        connectors = block_sides.get((f.block, f.face), [])
+        partners = [(c, side_uses[c]) for c in connectors if c in side_uses]
+        if connectors and len(partners) == len(connectors):
+            for c, vols in partners:
+                if len(vols) != 1:
+                    issues.append(
+                        Issue(name(c), f"bounds {len(vols) + 1} blocks / volumes (at most 2)")
+                    )
+                    continue
+                interfaces.append(f"{label} | {name(vols[0])} ({name(c)})")
+                side_pairs.append((c, (f.block, f.face), vols[0]))
+                joined_sides.add(c)
             continue
         keys = {("block", f.block, f.face)}
         if f.domain is not None:
@@ -1112,6 +1130,8 @@ def analyze_3d(session) -> dict:
             }
         )
     for c, vols in sorted(side_uses.items()):
+        if c in joined_sides:
+            continue
         if len(vols) == 1:
             entries.append(
                 {
@@ -1175,4 +1195,30 @@ def analyze_3d(session) -> dict:
         "issues": issues,
         "blocks": topo,
         "periodic": periodic,
+        "side_pairs": side_pairs,
     }
+
+
+EDGE_FACES = ("jmin", "imax", "jmax", "imin")  # a structured domain's edges as block faces
+
+
+def block_side_connectors(session) -> dict:
+    """{(block id, face): [connector ids]} for the side faces of extruded blocks (the faces
+    standing on their domain's edges; mirrored blocks swap imin / imax)."""
+    store = session.store
+    out = {}
+    for block in store.entities("block"):
+        extrusion = block.params.get("extrusion")
+        if extrusion is None:
+            continue
+        domain = store.get(extrusion["domain"])
+        try:
+            mirrored = session.blocks.evaluate(block.id)["mirrored"]
+        except (ValidationError, ValueError, RuntimeError):
+            continue
+        for k, edge in enumerate(domain.params["edges"]):
+            face = EDGE_FACES[k]
+            if mirrored and face in ("imin", "imax"):
+                face = {"imin": "imax", "imax": "imin"}[face]
+            out[(block.id, face)] = [item["connector"] for item in edge]
+    return out

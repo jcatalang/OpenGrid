@@ -133,3 +133,27 @@ def test_boundary_type_from_the_selection_and_the_menus(window):
     from opengrid.project.ogp import to_json
 
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
+
+
+def test_pair_as_periodic_and_extrude_model_from_the_gui(window):
+    og = window.session
+    window.set_selection(_ids(window, "c-inlet"))
+    assert window.pair_selection_as_periodic() is None  # one side: a hint
+    window.set_selection(_ids(window, "c-in-top", "c-lo-bottom"))
+    names = window.pair_selection_as_periodic()
+    assert names == ["periodic", "periodic-2"]
+    assert window.selected_names() == ["periodic"]  # the panel shows the pairing
+    assert window.patch_color_action.isChecked()
+    assert "periodic" in window.property_panel._editors
+    assert "Pair as periodic" not in [a.text() for a in window.context_menu().actions()]
+    window.set_selection(_ids(window, "periodic", "periodic-2"))
+    assert "Pair as periodic" in [a.text() for a in window.context_menu().actions()]
+    og.undo()
+    # The whole 2D model, one cell thick, with periodic front and back.
+    for name in og.unassigned_boundary_connectors():
+        og.set_boundary_type([name], "wall")
+    names = window.extrude_model(thickness=0.05, ends="periodic")
+    assert names and names[-2:] == ["front", "back"]
+    assert og.is_3d() and window.navigation_mode == "3d"
+    assert og.boundary_report().ok
+    assert window.extrude_model(thickness=0.05, ends="periodic") is None  # 3D already

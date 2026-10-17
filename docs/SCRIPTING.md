@@ -186,6 +186,15 @@ A member belongs to one patch: `set_boundary_type` takes it out of any other. Co
 needs a single loop of four edges for the structured direction and is refused for sketch
 domains (set the sketch's unstructured blocks), group members and faces of blocks or volumes.
 
+    og.make_periodic_pair(["c-left"], ["c-right"])        # two periodic patches, paired (GUI: Pair as periodic)
+    og.extrude_model(0.05)                                 # the 2D model one cell thick along z:
+    # blocks and volumes "<domain>-ext", the 2D patches on their sides (pairings kept), zones
+    # extended, and the patches "front" / "back" as a periodic pair (ends="symmetry": planes)
+
+`extrude_model` is what a 2D CFD case needs for a solver that reads 3D meshes: one cell
+across, the ends periodic. The 2D model stays underneath (the domains are the fronts); undo
+brings it back.
+
 ### Periodic pairs in 3D
     og.create_patch("back", "periodic", ["disc"])
     og.create_patch("front", "periodic", [{"volume": v, "face": "top"}])

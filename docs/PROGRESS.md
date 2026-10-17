@@ -848,6 +848,22 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## The camera stays put while dragging (2026-10-17) — bug reported by the user
+
+Every control-point drag reset the camera, too far out, and mirrored the view. Cause: the
+drag preview takes the affected entities out of the merged layers and hides their actors, so
+with a small model the scene looked empty while the drag's command ran; the window then
+"fitted the first geometry", and `Scene.fit` went through the view preset whose default
+toggles to the far side when the view already faces the plane - hence the mirror image.
+
+### Fixed
+- `Scene.has_geometry` counts a drag preview as geometry; `Scene.fit` asks for the preset's
+  own side explicitly (only the view keys toggle).
+
+### Verified
+- pytest +1 (`tests/python/test_gui_camera_stability.py`): the camera state is identical
+  after a control-point drag; fit twice gives the same view from +z; the view key flips.
+
 ## Handles for what moves the selection (2026-10-17) — requested by the user
 
 The user could not move the corners of a meshed sketch block: a click in the mesh selects

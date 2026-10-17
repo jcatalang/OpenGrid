@@ -140,7 +140,9 @@ class Scene:
         return self._layers.get(name)
 
     def has_geometry(self) -> bool:
-        return bool(self._entity_actors) or bool(self._layers)
+        """Whether anything is drawn (a drag preview counts: its entities are taken out of
+        the layers and hidden while it lasts, which must not look like an empty scene)."""
+        return bool(self._entity_actors) or bool(self._layers) or bool(self._previewing)
 
     # --------------------------------------------------------------- rendering
     def rebuild(self) -> None:
@@ -499,8 +501,9 @@ class Scene:
 
     # ------------------------------------------------------------------ camera
     def fit(self) -> None:
-        """The default view (top in 2D navigation, isometric in 3D), centred on everything."""
-        self.view_preset(self.default_view)
+        """The default view (top in 2D navigation, isometric in 3D), centred on everything;
+        never the flipped side (only the view keys toggle)."""
+        self.view_preset(self.default_view, negative=False)
 
     def camera_changed(self) -> None:
         """After the camera moved: the reference grid follows, then a render."""

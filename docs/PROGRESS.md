@@ -863,6 +863,9 @@ on it: the edit was refused because the opposite edge kept its count.
   sketch's connector sets the edge family in the sketch (`edit_sketch(dimensions=...)`);
   returns the connectors changed. The property panel's "dimension" of a connector goes
   through it (the log says which connectors followed); `modify(dimension=...)` is unchanged.
+  Follow-up (the user could not set tanh on a sketch's connector): a sketch connector's
+  ``distribution`` goes to the sketch's per-edge ``distributions`` the same way, from the
+  panel too; other parameters of a sketch's connector are refused saying what can be set.
 
 ### Verified
 - pytest +4 (`tests/python/test_dimension.py`): stacked domains (the shared connector and the

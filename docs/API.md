@@ -112,10 +112,12 @@ A connector's number of points, with the connectors opposite to it in structured
 domains (and so across the faces of blocks) following, so the domains stay valid
 (opengrid.model.dimension); of several connectors on an opposite edge the longest
 takes the change (a warning says so). A sketch's connector sets its edge family in
-the sketch. ``changes``: other parameters of the connector (distribution,
-breakpoints, ...) set in the same step. The property panel's connector edits go
-through this; ``modify`` changes one connector only and is refused when a domain
-would become invalid. One undo step; returns the connectors changed.
+the sketch, and its ``distribution`` that edge's distribution there (the sketch owns
+the rest of its parameters). ``changes``: other parameters of the connector
+(distribution, breakpoints, ...) set in the same step. The property panel's
+connector edits go through this; ``modify`` changes one connector only and is
+refused when a domain would become invalid. One undo step; returns the connectors
+changed.
 
 ### `set_distribution(name: str, type: str, begin_spacing: float | None = None, end_spacing: float | None = None, growth_ratio: float | None = None) -> str`
 

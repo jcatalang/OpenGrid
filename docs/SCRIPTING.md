@@ -190,7 +190,9 @@ A structured domain extrudes to a block (``create_extruded_block``).
 A structured domain needs equal counts on opposite edges, so `set_dimension` spreads the
 change through every structured domain using the connector (and so across the faces of
 blocks); of several connectors on an opposite edge the longest takes it (`og.last_warnings`
-says which). A sketch's connector sets its edge family in the sketch. `og.modify("c",
+says which). A sketch's connector sets its edge family in the sketch, and
+`og.set_dimension("s-c0-1", 41, distribution={"type": "tanh", "begin_spacing": 1e-3})` that
+edge's distribution there too (the sketch owns the rest of its parameters). `og.modify("c",
 dimension=41)` changes that connector alone and is refused when a domain would become invalid.
 
 ### Boundary types in one step, and changing a domain's kind

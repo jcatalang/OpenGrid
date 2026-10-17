@@ -1728,8 +1728,15 @@ class PropertyPanel(QWidget):
             if chosen != self._boundary_before:
                 boundary = chosen
         dimension = None
-        if self.session.store.get(self.entity_id).kind == "connector" and "dimension" in changes:
-            dimension = changes.pop("dimension")  # propagates through structured domains
+        entity = self.session.store.get(self.entity_id)
+        if entity.kind == "connector":
+            from opengrid.model.sketch import output_owner
+
+            owned = entity.id in output_owner(self.session.store)
+            if "dimension" in changes or (owned and changes):
+                # The points propagate through structured domains; a sketch's connector takes
+                # its points and distribution from the sketch, so its edits go there.
+                dimension = changes.pop("dimension", entity.params["dimension"])
         try:
             if dimension is not None:
                 # The connector's other edits go in the same step.

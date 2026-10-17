@@ -124,3 +124,39 @@ def test_panel_dimension_propagates(qtbot):
     assert "2 opposite connector(s) followed: c-mid, c-t" in window.log_panel.toPlainText()
     assert og.domain_grid("d1").shape[:2] == (16, 41)
     window.close()
+
+
+def test_sketch_connector_distribution_goes_to_the_sketch(qtbot):
+    og = opengrid.Session()
+    og.create_sketch([(0, 0), (1, 0), (1, 1), (0, 1)], [(0, 1, 2, 3)], spacing=0.1, name="s")
+    tanh = {"type": "tanh", "begin_spacing": 0.01, "end_spacing": 0.01}
+    assert og.set_dimension("s-c0-1", 11, distribution=tanh) == ["s-c0-1"]
+    assert og.entity("s-c0-1").params["distribution"]["type"] == "tanh"
+    assert og.entity("s-c2-3").params["distribution"]["type"] == "uniform"  # per edge
+    assert og.entity("s").params["dimensions"] == ()  # the count was not pinned
+    assert [d["edge"] for d in og.entity("s").params["distributions"]] == [(0, 1)]
+    with pytest.raises(ValidationError, match="for mode edit the sketch"):
+        og.set_dimension("s-c0-1", 11, mode="parametric")
+    og.undo()
+    assert og.entity("s-c0-1").params["distribution"]["type"] == "uniform"
+    assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
+    # The panel: uniform -> tanh on a sketch's connector.
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyvistaqt")
+    from opengrid.app.main_window import MainWindow
+
+    window = MainWindow(off_screen=True)
+    qtbot.addWidget(window)
+    og = window.session
+    og.create_sketch([(0, 0), (1, 0), (1, 1), (0, 1)], [(0, 1, 2, 3)], spacing=0.1, name="s")
+    window.set_selection([og.entity("s-c1-2").id])
+    panel = window.property_panel
+    _kind, dist = panel._editors["distribution"]
+    dist.type.setCurrentText("tanh")
+    dist.begin.setText("0.005")
+    dist.end.setText("0.02")
+    assert panel.apply(), panel._error.text()
+    params = og.entity("s-c1-2").params["distribution"]
+    assert params["type"] == "tanh" and params["begin_spacing"] == pytest.approx(0.005)
+    assert og.entity("s").params["distributions"][0]["edge"] == (1, 2)
+    window.close()

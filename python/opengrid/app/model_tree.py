@@ -1,6 +1,6 @@
 """Model tree: entities grouped as database, connectors, domains, blocks, patches, zones."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 # Top-level categories, in display order (hierarchy, see docs/SPEC.md).
@@ -37,6 +37,9 @@ class ModelTree(QTreeWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Single keys the window binds (tools, views): the tree's type-ahead search would take
+        # them first; it leaves these to the window's shortcuts.
+        self.passthrough_keys: set[int] = set()
         self.setHeaderLabels(["Entity", "Type"])
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self._category_items = {}
@@ -47,6 +50,16 @@ class ModelTree(QTreeWidget):
             item.setExpanded(True)
             self._category_items[name] = item
         self.itemSelectionChanged.connect(self._emit_selection)
+
+    def event(self, event) -> bool:
+        if (
+            event.type() == QEvent.Type.ShortcutOverride
+            and int(event.key()) in self.passthrough_keys
+            and not (event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier)
+        ):
+            event.ignore()
+            return False
+        return super().event(event)
 
     def category_names(self) -> list[str]:
         """Names of the top-level category nodes, in display order."""

@@ -106,9 +106,19 @@ NAVIGATION = {
     },
 }
 NAVIGATION_HINTS = {
-    "2d": "2D navigation: left-drag zooms to a window or pans, Shift + drag pans, wheel zooms",
+    "2d": "2D navigation: left-drag zooms to a window or pans, Shift + drag pans, wheel zooms; "
+    "F re-centres",
     "3d": "3D navigation: left-drag rotates, Shift + drag pans, wheel zooms, Alt + drag zooms "
-    "to a window",
+    "to a window; 1 / 2 / 3: the XY / XZ / YZ planes, 7: isometric, F: re-centre",
+}
+VIEW_NAMES = {
+    "xy": "XY plane from +Z (top)",
+    "-xy": "XY plane from -Z (bottom)",
+    "xz": "XZ plane from -Y (front)",
+    "-xz": "XZ plane from +Y (back)",
+    "yz": "YZ plane from +X (side)",
+    "-yz": "YZ plane from -X",
+    "iso": "isometric",
 }
 
 
@@ -521,16 +531,19 @@ class MainWindow(QMainWindow):
         )
         self.view_actions: dict[str, QAction] = {}
         for key, label, shortcut, tip in (
-            ("xy", "View from +Z (top)", "1", "Look down the z axis at the x-y plane"),
-            ("xz", "View from -Y (front)", "2", "Look along the y axis at the x-z plane"),
-            ("yz", "View from +X (side)", "3", "Look along the x axis at the y-z plane"),
+            ("xy", "XY plane (top, from +Z)", "1", "Look down the z axis; again: from -Z"),
+            ("xz", "XZ plane (front, from -Y)", "2", "Look along the y axis; again: from +Y"),
+            ("yz", "YZ plane (side, from +X)", "3", "Look along the x axis; again: from -X"),
             ("iso", "Isometric view", "7", "Look from the (1, 1, 1) corner"),
+            ("-xy", "XY plane from -Z (bottom)", None, "Look up the z axis"),
+            ("-xz", "XZ plane from +Y (back)", None, "Look along -y"),
+            ("-yz", "YZ plane from -X (other side)", None, "Look along +x"),
         ):
+            sequence = None
+            if shortcut is not None:
+                sequence = QKeySequence(shortcut)
             action = self._action(
-                label,
-                lambda _checked=False, k=key: self.scene.view_preset(k),
-                QKeySequence(shortcut),
-                tip,
+                label, lambda _checked=False, k=key: self.view_from(k), sequence, tip
             )
             self.view_actions[key] = action
         self.perspective_action = QAction("&Perspective projection", self)
@@ -547,6 +560,8 @@ class MainWindow(QMainWindow):
             "bindings. Follows the model (blocks, volumes, surfaces) until set here."
         )
         self.navigation_3d_action.toggled.connect(self._on_navigation_toggled)
+        # Single-key view and camera shortcuts work wherever the focus is in the window,
+        # except in text fields (which take their own keys first).
         for action in (
             self.fit_action,
             self.zoom_selection_action,
@@ -554,8 +569,7 @@ class MainWindow(QMainWindow):
             self.perspective_action,
         ):
             action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            self.viewport.addAction(action)
-            self.model_tree.addAction(action)
+            self.addAction(action)
         self.high_order_action = QAction("Show high-order elements…", self)
         self.high_order_action.setCheckable(True)
         self.high_order_action.setStatusTip(
@@ -605,10 +619,11 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, n=name: self.set_tool(n))
             self.tool_group.addAction(action)
             self.tool_actions[name] = action
-            self.viewport.addAction(action)
-            self.model_tree.addAction(action)
+            self.addAction(action)
         self.tool_actions["select"].setChecked(True)
         self._decorate()
+        for action in self.actions_with_single_keys():
+            self.model_tree.passthrough_keys.add(int(action.shortcut()[0].key()))
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -699,8 +714,12 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
         view_menu.addAction(self.zoom_selection_action)
-        for action in self.view_actions.values():
-            view_menu.addAction(action)
+        view_menu.addSeparator()
+        for key in ("xy", "xz", "yz", "iso"):
+            view_menu.addAction(self.view_actions[key])
+        opposite = view_menu.addMenu("From the other side")
+        for key in ("-xy", "-xz", "-yz"):
+            opposite.addAction(self.view_actions[key])
         view_menu.addSeparator()
         view_menu.addAction(self.navigation_3d_action)
         view_menu.addAction(self.zoom_window_action)
@@ -748,8 +767,8 @@ class MainWindow(QMainWindow):
         view_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         view_toolbar.addAction(self.fit_action)
         view_toolbar.addAction(self.zoom_selection_action)
-        for action in self.view_actions.values():
-            view_toolbar.addAction(action)
+        for key in ("xy", "xz", "yz", "iso"):
+            view_toolbar.addAction(self.view_actions[key])
         view_toolbar.addSeparator()
         view_toolbar.addAction(self.navigation_3d_action)
         view_toolbar.addAction(self.zoom_window_action)
@@ -1098,8 +1117,8 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
         menu.addAction(self.fit_action)
         views = menu.addMenu("View from")
-        for action in self.view_actions.values():
-            views.addAction(action)
+        for key in ("xy", "xz", "yz", "iso", "-xy", "-xz", "-yz"):
+            views.addAction(self.view_actions[key])
         menu.addAction(self.navigation_3d_action)
         return menu
 
@@ -1535,6 +1554,44 @@ class MainWindow(QMainWindow):
         self.navigation_3d_action.setChecked(mode == "3d")
         self.navigation_3d_action.blockSignals(False)
         self.statusBar().showMessage(NAVIGATION_HINTS[mode], 8000)
+
+    def actions_with_single_keys(self) -> list[QAction]:
+        """The actions bound to one unmodified key (tools, views, camera)."""
+        out = []
+        for action in (
+            *self.tool_actions.values(),
+            self.fit_action,
+            self.zoom_selection_action,
+            *self.view_actions.values(),
+            self.perspective_action,
+        ):
+            sequence = action.shortcut()
+            if (
+                sequence.count() == 1
+                and sequence[0].keyboardModifiers() == Qt.KeyboardModifier.NoModifier
+            ):
+                out.append(action)
+        return out
+
+    def view_from(self, key: str) -> None:
+        """A view preset: "xy", "xz", "yz", "iso", or "-xy", "-xz", "-yz" for the opposite
+        side; a plain preset pressed again turns to the opposite side."""
+        negative = None
+        name = key
+        if key.startswith("-"):
+            negative = True
+            name = key[1:]
+        self.scene.view_preset(name, negative)
+        shown = self.scene.view_name()
+        if shown is None:
+            shown = "iso"
+        message = f"View: {VIEW_NAMES.get(shown, shown)}"
+        if self.navigation_mode == "3d" and shown != "iso":
+            message += (
+                " (3D navigation stays on: left-drag rotates; the orbit button gives the 2D "
+                "bindings)"
+            )
+        self.statusBar().showMessage(message, 6000)
 
     def zoom_to_selection(self) -> None:
         if not self.selected_ids or not self.scene.zoom_to(self.selected_ids):

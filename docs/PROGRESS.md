@@ -906,6 +906,11 @@ interface more intuitive, friendlier and faster; then asked for all of it.
   coordinates, the context menu, the worker (events processed meanwhile, exceptions, cancel),
   one refresh per long operation, settings round trip with recent files, and the one-step
   rename + edit with its journal lines; the full suite.
+- Follow-up (the user did not find the way back to the XY / XZ / YZ planes in 3D): the view
+  buttons read XY / XZ / YZ, a preset pressed again looks from the other side (`-xy`, `-xz`,
+  `-yz` in the View menu too), the status bar names the view, the single-key shortcuts are
+  window-wide (the model tree lets them through its type-ahead search) and the 3D hint lists
+  the keys.
 
 ## 3D periodic pairing (2026-10-17) — requested by the user
 

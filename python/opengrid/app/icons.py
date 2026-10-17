@@ -318,6 +318,24 @@ def _zoom_selection(painter, color):
     _dot(painter, color, 0.42, 0.42, 0.06)
 
 
+def _letters(text: str):
+    """Bold letters filling the icon (drawn in device units: text does not scale well under
+    the unit-square transform)."""
+
+    def draw(painter, color):
+        painter.save()
+        painter.resetTransform()
+        font = painter.font()
+        font.setPixelSize(int(SIZE * 0.5))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(QRectF(0, 0, SIZE, SIZE), Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
+
+    return draw
+
+
 def _cube_face(which: str):
     """The isometric cube with one face filled: "xy" its top, "xz" its front, "yz" its
     right side (the view presets look at those faces)."""
@@ -435,9 +453,9 @@ GLYPHS = {
     "redo": _redo,
     "reset-camera": _reset_camera,
     "zoom-selection": _zoom_selection,
-    "view-xy": _cube_face("xy"),
-    "view-xz": _cube_face("xz"),
-    "view-yz": _cube_face("yz"),
+    "view-xy": _letters("XY"),
+    "view-xz": _letters("XZ"),
+    "view-yz": _letters("YZ"),
     "view-iso": _iso,
     "navigation-3d": _nav3d,
     "perspective": _perspective,

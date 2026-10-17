@@ -236,11 +236,37 @@ def test_camera_reset_keeps_the_direction_and_views_are_presets(qtbot):
     assert np.allclose(camera.GetDirectionOfProjection(), direction)  # still isometric
     window.view_actions["xy"].trigger()
     assert np.allclose(camera.GetDirectionOfProjection(), (0, 0, -1))
+    assert window.scene.view_name() == "xy"
     full = camera.GetParallelScale()
+    window.view_actions["xy"].trigger()  # again: the other side
+    assert np.allclose(camera.GetDirectionOfProjection(), (0, 0, 1))
+    assert window.scene.view_name() == "-xy"
     window.view_actions["xz"].trigger()
-    assert abs(camera.GetDirectionOfProjection()[1]) == 1.0
+    assert np.allclose(camera.GetDirectionOfProjection(), (0, 1, 0))
+    window.view_actions["-xz"].trigger()
+    assert np.allclose(camera.GetDirectionOfProjection(), (0, -1, 0))
     window.view_actions["yz"].trigger()
-    assert abs(camera.GetDirectionOfProjection()[0]) == 1.0
+    assert np.allclose(camera.GetDirectionOfProjection(), (-1, 0, 0))
+    window.view_actions["-yz"].trigger()
+    assert np.allclose(camera.GetDirectionOfProjection(), (1, 0, 0))
+    # The keys work wherever the focus is (not in a text field): from the model tree.
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    window.activateWindow()  # off-screen: shortcuts fire only in the active window
+    QApplication.setActiveWindow(window)
+    window.model_tree.setFocus()
+    QTest.keyClick(window.model_tree, Qt.Key.Key_7)
+    assert window.scene.view_name() is None  # isometric
+    QTest.keyClick(window.model_tree, Qt.Key.Key_1)
+    assert window.scene.view_name() == "xy"
+    window.console.input.setFocus()
+    QTest.keyClick(window.console.input, Qt.Key.Key_2)
+    assert window.scene.view_name() == "xy"  # typed into the console instead
+    assert window.console.input.text() == "2"
+    window.console.input.clear()
+    window.view_actions["xy"].trigger()
     window.view_actions["xy"].trigger()
     window.set_selection([window.session.entity("c-c-lower").id])
     window.zoom_selection_action.trigger()

@@ -505,21 +505,42 @@ class Scene:
         self.plotter.reset_camera()
         self.plotter.render()
 
-    def view_preset(self, name: str) -> None:
-        """Look from +z ("xy", top), -y ("xz", front), +x ("yz", side) or the isometric
-        corner ("iso"), centred on everything."""
-        if name == "xy":
-            self.plotter.view_xy()
-        elif name == "xz":
-            self.plotter.view_xz()
-        elif name == "yz":
-            self.plotter.view_yz()
-        elif name == "iso":
-            self.plotter.view_isometric()
-        else:
+    def view_preset(self, name: str, negative: bool | None = None) -> None:
+        """Look at the xy plane from +z ("xy", top), the xz plane from -y ("xz", front), the
+        yz plane from +x ("yz", side) or from the isometric corner ("iso"), centred on
+        everything; ``negative`` looks from the opposite side, and None flips to it when the
+        view already looks from the preset's side (press the key again to turn around)."""
+        views = {
+            "xy": (self.plotter.view_xy, (0.0, 0.0, -1.0)),
+            "xz": (self.plotter.view_xz, (0.0, 1.0, 0.0)),
+            "yz": (self.plotter.view_yz, (-1.0, 0.0, 0.0)),
+            "iso": (self.plotter.view_isometric, None),
+        }
+        if name not in views:
             raise ValueError(f"unknown view {name!r} (xy, xz, yz or iso)")
+        look, direction = views[name]
+        if negative is None:
+            negative = False
+            if direction is not None:
+                current = self.plotter.renderer.GetActiveCamera().GetDirectionOfProjection()
+                negative = bool(np.allclose(current, direction, atol=1e-9))
+        look(negative=negative)
         self.plotter.reset_camera()
         self.plotter.render()
+
+    def view_name(self) -> str | None:
+        """ "xy", "-xy", "xz", "-xz", "yz", "-yz" when the view looks along an axis, else None."""
+        current = np.asarray(self.plotter.renderer.GetActiveCamera().GetDirectionOfProjection())
+        for name, direction in (
+            ("xy", (0.0, 0.0, -1.0)),
+            ("xz", (0.0, 1.0, 0.0)),
+            ("yz", (-1.0, 0.0, 0.0)),
+        ):
+            if np.allclose(current, direction, atol=1e-9):
+                return name
+            if np.allclose(current, -np.asarray(direction), atol=1e-9):
+                return "-" + name
+        return None
 
     def set_perspective(self, enabled: bool) -> None:
         if enabled:

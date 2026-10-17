@@ -268,8 +268,9 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   drawn live, or pans (View menu); Shift + drag or middle-drag pans; wheel / two-finger scroll
   and right-drag zoom. 3D (switched on when the model gains blocks, volumes or surfaces, or
   by hand): left-drag rotates, Shift + drag pans, Alt + drag zooms to a window. `F` re-centres
-  the view keeping its direction, `Z` zooms to the selection, `1 2 3 7` are the top, front,
-  side and isometric views, `V` toggles perspective, `Esc` cancels.
+  the view keeping its direction, `Z` zooms to the selection, `1 2 3` look at the XY, XZ and
+  YZ planes (again: from the other side), `7` is the isometric view, `V` toggles perspective,
+  `Esc` cancels. The keys work wherever the focus is, except in text fields.
 - Selection by click in any view (3D picks along the view ray), hover highlight, the
   pointer's coordinates in the status bar, and a right-click menu with what applies to the
   selection.

@@ -58,6 +58,9 @@ by scaled Jacobian; the Smoother panel shows the residual history.</sub>
   prism, hexahedron) at orders 1–6, curved onto the geometry with the boundary layer bending
   along, written to Gmsh, CGNS, VTKHDF and HDF5 with node orderings verified against each
   format's own definition.
+- **From a shape to a solver-ready case in a few lines:** NACA airfoils, ellipses, boxes,
+  cylinders, spheres and swept wings as closed bodies; surface meshes on them with shared
+  edges, volumes with boundary layers, boundary types and periodic pairs in one call each.
 - **Scriptable and reproducible:** one Python API for GUI and scripts, undo / redo, a journal
   that replays the session exactly, deterministic results independent of the thread count.
 - **Fast:** OpenMP everywhere it matters; a 1M-cell 2D mesh in 2–5 s; Anderson-accelerated
@@ -73,29 +76,35 @@ by scaled Jacobian; the Smoother panel shows the residual history.</sub>
 | **3D inflation:** prism and hexahedron layers on a sphere and a wing (tetrahedra, pyramids, prisms, hexahedra), ridge fans at the trailing edge. | **CAD import (STEP):** structured and unstructured faces on the imported part, a tetrahedral solid and a fluid volume with wall layers around fillets. |
 | ![Templates and automatic topology](examples/output/10e_templates_auto.png) | ![Wall layers](examples/output/11a_wall_layers.png) |
 | **Templates and automatic topology:** O / butterfly / C / H / body-in-channel templates and cross-field block decompositions of multiply connected domains. | **Orthogonal wall layers:** wall control alone vs 30 marched wall layers at the leading and trailing edges of a C-grid. |
+| ![Airfoil cases](examples/output/12a_airfoil_cases.png) | ![Bodies in a box](examples/output/12b_bodies_in_a_box.png) |
+| **From the standard shapes (2D):** a NACA 2412 in a far field and a periodic NACA 6412 cascade, 40 inflation layers from 2e-5 chord, the cascade's neighbours drawn to show the matching periodic nodes. | **From the standard shapes (3D):** a sphere and a closed swept wing in boxes, prism layers grown off the surface meshes, the trailing-edge fan in hexahedra. |
 
-More pictures: [`examples/output/`](examples/output) (one figure per phase).
+More pictures: [`examples/output/`](examples/output) (one figure per example).
 
 ## Features
 
 ### Geometry
 - Points, lines, circular arcs (centre / three points), polylines, cubic splines, NURBS curves
   and surfaces, revolved / extruded / ruled surfaces, curve chains.
+- **Standard shapes**, each a closed body made in one undo step with named parts: NACA
+  4-digit airfoils (chord, angle of attack, cosine-spaced points, sharp trailing edge),
+  rectangles, circles, exact ellipses, boxes, cylinders and spheres (as two halves, so they
+  can be surface-meshed) and tapered, swept wings with root and tip caps.
 - Airfoil `.dat` (Selig and Lednicer) and CSV point import.
 - STEP / IGES import through OpenCASCADE (optional backend): sewing and healing, faces as
   surfaces, automatic connectors and structured or unstructured domains on every face.
-- Extrusion of any 2D domain: a structured domain becomes a block, an unstructured one a
-  volume of prisms and hexahedra (translate, rotate, normal), with the 2D patches carried
-  over to the side walls and the ends patched as front / back: the one-cell-thick 3D mesh
-  that 2D solvers want.
 - Freehand curves drawn with the mouse, fitted to splines; a stroke released at its start is a
   closed loop, meshed with one click; curve networks with snapping. Double-click a curve to
-  add a point (NURBS: by knot insertion, shape unchanged) and a handle to remove it.
+  add a point (NURBS: by knot insertion, shape unchanged) and a handle to remove it; a closed
+  curve's seam moves as one point.
 
 ### Connectors and distributions
 - Uniform, geometric, tanh (Vinokur), sine distributions with begin / end spacings, growth
   ratios and breakpoints (piecewise distributions with their own spacings).
 - Arc-length or parametric spacing, spacing propagation across junctions, split / join.
+- Changing a connector's points changes the connectors opposite to it in every structured
+  domain it belongs to (and so across blocks), so the topology stays valid; a sketch's
+  connector sets its whole edge family.
 
 ### 2D and surface meshing
 - **Structured domains:** linear and Hermite TFI, elliptic smoothing (Laplace,
@@ -108,7 +117,15 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   recombination, smoothing and edge swapping.
 - **2D inflation layers** (quads in a triangle or quad core) with first height, growth and
   layer count, smoothed normals, fans at sharp corners and trailing edges, and termination where
-  layers would cross or come too close.
+  layers would cross or come too close. The first height is suggested from the boundary
+  spacing when left empty.
+- **Regions between curves:** select an outer boundary and the bodies inside it, and one
+  domain meshes the space between them (the bodies are holes).
+- **Surface meshes of 3D shapes** (`mesh_surfaces`): an unstructured domain on each plane,
+  ruled, extruded or revolved surface, its edge curves found or made and the connectors
+  shared with the neighbouring surfaces, so a closed set of surfaces is a watertight shell.
+  Surfaces of revolution that close at a pole (a sphere) are meshed in a conformal map, so the
+  triangles keep their shape at the poles.
 
 ### 3D meshing
 - **Structured blocks** from six faces, extrusion, revolution, hyperbolic extrusion; 3D
@@ -117,17 +134,23 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
   boundary layers with sliding on planar faces, ridge fans and corner caps; an own optimiser
   (smoothing, swaps) and a quality floor every cell must meet.
 - **Mixed models:** blocks and volumes in one model, conforming through shared faces.
+- **Extrusion of any 2D domain or of the whole 2D model:** structured domains become blocks,
+  unstructured ones volumes of prisms and hexahedra, the 2D patches carried over to the side
+  walls; `extrude_model` makes the one-cell-thick 3D mesh of a 2D case with front and back as
+  a periodic pair or symmetry planes.
 
 ### Multi-block topology
-- Split and join domains and blocks, O-grid (butterfly) conversion, block faces from domains.
+- Split and join domains and blocks, O-grid (butterfly) conversion, block faces from domains,
+  structured ↔ unstructured conversion of a domain on the same connectors.
 - **Smoothing groups (2D and 3D):** elliptic smoothing across block interfaces as if the
   blocks were one grid; boundary nodes sliding on their curves and surfaces; singular points
   (3 or 5 blocks around a vertex); symmetry planes; wall control and wall layers; Anderson
   acceleration with a safeguard.
-- **Sketch topology:** draw a block layout with the mouse (edges drawn onto existing
-  connectors adopt them and share their nodes; any block can be meshed unstructured, with
-  the walls on it as inflation layers); it is fitted to the geometry and
-  meshed. Live editing: drag control points and vertices with immediate previews.
+- **Sketch topology:** draw a block layout with the mouse (blocks drawn onto a sketch's
+  vertices join it; edges drawn onto existing connectors adopt them and share their nodes;
+  any block can be meshed unstructured, with the walls on it as inflation layers); it is
+  fitted to the geometry and meshed. Deleting a block's domain removes the block. Live
+  editing: drag control points and vertices with immediate previews and remeshing.
 - **Templates:** 2D `ogrid`, `butterfly`, `cgrid`, `hgrid`, `body_in_channel` (also
   extruded); 3D `pipe`, `cylinder_in_channel`, `bump_channel`, `wing_in_box` (taper, sweep,
   symmetry planes), `sphere_in_box`.
@@ -137,34 +160,14 @@ More pictures: [`examples/output/`](examples/output) (one figure per phase).
 ### Boundary conditions
 - **Patches** (wall, inlet, outlet, symmetry, farfield, periodic, interface, user) and **zones**,
   validated before export: every boundary in exactly one patch, interfaces detected
-  automatically, clear messages naming the entity and what is wrong.
+  automatically (a connector shared by two domains takes no type), clear messages naming the
+  entity and what is wrong. `set_boundary_type` puts a selection into a patch of a type in
+  one step.
 - **Periodic pairs** (translational and rotational, about any axis) of 2D connectors and 3D
   faces (block faces, volume faces, the ends and side walls of extruded volumes), matched node
-  by node and written as periodic connectivity (CGNS 2D: translational); two selected sides
-  pair in one step.
-- **2D model extruded one cell thick** (`extrude_model`): blocks and volumes with the 2D
-  patches on their sides and the front / back as a periodic pair or symmetry planes, for
-  solvers that want 3D meshes of 2D cases.
-- **Surface meshes of 3D shapes** (Create > Mesh surfaces, `mesh_surfaces`): domains on
-  planes, ruled, extruded and revolved surfaces with their edge curves found or made and the
-  connectors shared, a watertight shell for Volume from faces (a cylinder, a sphere or a wing
-  in a box; poles are meshed as fans).
-- **Picking through surfaces and hiding**: a click picks lines and points before surfaces,
-  so a body inside its far-field box is selected directly; View > Hide selected (H) takes
-  entities out of the view and out of picking, Shift+H shows all.
-- **Standard shapes** (Create > Shapes, `create_airfoil`, `create_rectangle`,
-  `create_ellipse`, `create_box`, `create_cylinder`, `create_sphere`, `create_wing`): NACA
-  4-digit airfoils, exact ellipses, boxes, cylinders and spheres of revolution, tapered
-  swept wings; each one undo step with named parts.
-- **Drag the geometry with the mesh in place**: a selected domain, connector or sketch
-  block shows the handles of what moves it (its curves' points, or the sketch's vertices);
-  dragging one regenerates and remeshes, layers included.
-- **Boundary panel** that follows the model: every boundary with its patch, type and status,
-  the periodic pairs with their transform and whether their nodes match (and why not, in
-  plain words), the interfaces found automatically; Set type, Pair as periodic and Clear
-  type act on the selection; one status line says whether the boundary is ready to export.
-  With the reference grid shown, 2D clicks snap to its minor lines, so drawn sides are
-  exact.
+  by node and written as periodic connectivity (CGNS 2D: translational). `make_periodic_pair`
+  makes and pairs both sides in one step; when the nodes do not match, the report says why
+  (point counts, a transform that misses, different distributions).
 
 ### Quality
 - Scaled Jacobian, equiangle skewness, aspect ratio, minimum / maximum included angle,
@@ -232,7 +235,56 @@ og.smooth_group("c-group")
 print(min(q["scaled_jacobian"].min() for q in map(og.domain_quality, og.names("domain"))))
 ```
 
-The full guide is [`docs/SCRIPTING.md`](docs/SCRIPTING.md); every public method is listed in
+**From the standard shapes: an airfoil in a far field, and a sphere in a box:**
+
+```python
+og = opengrid.Session()
+og.create_airfoil("2412", chord=1.0, angle=4.0, name="naca")  # naca-upper, naca-lower
+og.create_rectangle((0.5, 0.0), 30.0, 20.0, name="far")  # far-bottom, ... far-left
+wall = [
+    og.create_connector(
+        f"naca-{s}",
+        121,
+        {"type": "tanh", "begin_spacing": 2e-3, "end_spacing": 1e-3},
+        name=f"c-{s}",
+    )
+    for s in ("upper", "lower")
+]
+far = [
+    og.create_connector(f"far-{s}", 31, name=f"c-{s}") for s in ("bottom", "right", "top", "left")
+]
+og.create_unstructured_domain(
+    connectors=wall + far,
+    name="flow",
+    generator={
+        "inflation": {"connectors": wall, "first_height": 2e-5, "growth_rate": 1.15, "layers": 40}
+    },
+)
+og.set_boundary_type(wall, "wall")
+og.set_boundary_type(far, "farfield")
+og.export_cgns("airfoil.cgns")
+
+ball = opengrid.Session()
+halves = ball.create_sphere(radius=0.5, name="sphere")[2:]  # sphere-a, sphere-b
+ball.create_box(size=(5, 4, 4), name="box")
+body = ball.mesh_surfaces(halves, spacing=0.04)  # shared edges: a closed shell
+outer = ball.mesh_surfaces(
+    [f"box-{s}" for s in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")], spacing=0.5
+)
+ball.create_volume(
+    outer + body,
+    name="fluid",
+    generator={"max_size": 0.5, "inflation": {"faces": body, "first_height": 2e-3, "layers": 12}},
+)
+ball.set_boundary_type(body, "wall")
+ball.set_boundary_type(outer, "farfield")
+ball.export_gmsh("sphere.msh")
+```
+
+Complete versions of these, with a periodic cascade, the one-cell extrusion and a wing, are
+[`examples/12a_airfoil_cases.py`](examples/12a_airfoil_cases.py) and
+[`examples/12b_bodies_in_a_box.py`](examples/12b_bodies_in_a_box.py). The full guide is
+[`docs/SCRIPTING.md`](docs/SCRIPTING.md); every public method is listed in
 [`docs/API.md`](docs/API.md) (generated from the docstrings).
 
 ## High-order meshes
@@ -287,8 +339,12 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
 
 - Model tree, property panel, quality / smoother / boundary panels, log, Python console.
 - Drawing tools for geometry, connectors, freehand curves and sketch blocks (toolbar icons,
-  keys `S P L A W B N D K`); snapping; live drag previews of handles; double-click adds or
-  removes curve points.
+  keys `S P L A W B N D K`); snapping to points, curve ends and, with the reference grid
+  shown, its lines; live drag previews of handles; double-click adds or removes curve
+  points. A selected domain or connector shows the handles of what moves it (its curves'
+  points, or its sketch's vertices): dragging one regenerates and remeshes.
+- Create > Shapes (a dialog per shape), Create > Mesh surfaces and Volume from faces for 3D
+  bodies; the toolbar's "points" box sets the points of the connectors the tools make.
 - Colour by quality, patches or entities; node display; block cuts and shrunk cells for 3D.
 - **Navigation.** 2D: left-drag (or a three-finger drag on a trackpad) zooms to a window
   drawn live, or pans (View menu); Shift + drag or middle-drag pans; wheel / two-finger scroll
@@ -300,10 +356,18 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   axis view with the coordinates along the edges, or the three axis planes with the
   coordinates along the axes in a tilted view. The keys work wherever the focus is, except in
   text fields.
-- Selection by click in any view (3D picks along the view ray), hover highlight, the
-  pointer's coordinates in the status bar, and a right-click menu with what applies to the
-  selection, including "Boundary type" (the selection joins a wall, inlet, outlet, symmetry,
-  farfield, periodic, interface or user patch) and domain conversion.
+- Selection by click in any view (3D picks along the view ray, lines and points before
+  surfaces, so a body inside its far-field box is clicked directly), hover highlight, the
+  pointer's coordinates in the status bar, View > Hide selected (`H`) and Show all
+  (`Shift+H`), and a right-click menu with what applies to the selection, including
+  "Boundary type", "Pair as periodic" and domain conversion.
+- **Boundary panel:** every boundary with its patch, type and status, the periodic pairs
+  with their transform and whether their nodes match (and why not), the interfaces; one
+  status line says whether the boundary is ready to export. It follows a 2D model as you
+  edit; Set type, Pair as periodic and Clear type act on the selection.
+- Delete takes along what depends on the selection after a confirmation listing it (a curve
+  with its connectors and domains); patches, zones and groups only lose members; deleting a
+  sketch block's domain removes the block.
 - The property panel suggests values: clustering spacings when a distribution type is
   chosen (a quarter of the uniform spacing at the clustered ends, growth 1.2), the first
   layer height of inflation layers (a twentieth of the boundary spacing, used when the field
@@ -318,43 +382,36 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
 
 ## Examples
 
-One demo per phase in [`examples/`](examples), each writing its figures and reports to
-`examples/output/`:
+[`examples/`](examples) holds 31 scripts and 10 golden cases; its
+[README](examples/README.md) lists them by topic. Start with the complete cases:
 
 | Script | What it shows |
 |---|---|
-| `01_geometry.py`, `02_connectors.py` | geometry kernel, project I/O, distributions |
-| `03_airfoil_grids.py`, `03_backward_step.py` | structured O / C grids with wall control, multi-block step |
-| `04_solver_ready.py` | patches, zones, CGNS / Gmsh / VTKHDF export with read-back |
-| `05a_unstructured.py` … `05c_quads.py` | Delaunay, advancing front, quad-dominant meshes |
-| `06_inflation.py` | 2D boundary layers |
-| `07a_blocks.py`, `07b_smoothing.py` | 3D blocks, 3D elliptic smoothing, hyperbolic extrusion |
-| `08a_volumes.py` … `08c_optimisation_mixed.py` | tetrahedral volumes, 3D layers, optimiser, mixed models |
-| `09a_cad_import.py` | STEP / IGES import and meshing |
-| `09b_topology_golden.py` | topology editing and the golden validation cases |
-| `09c_performance.py`, `11b_performance.py` | benchmarks |
-| `10a_multiblock_smoothing.py`, `10b_multiblock_3d.py` | smoothing groups in 2D and 3D |
-| `10c_freehand_live.py`, `10d_sketch_topology.py` | live editing, freehand curves, sketch topology |
-| `10e_templates_auto.py` | templates and automatic topology |
-| `11a_wall_layers.py` | orthogonal wall layers |
-| `11d_gpu.py` | experimental GPU smoothing |
-| `11e_high_order.py`, `11f_high_order_elements.py`, `11g_curved_elements.py` | high-order meshes |
+| [`12a_airfoil_cases.py`](examples/12a_airfoil_cases.py) | airfoil in a far field and a periodic cascade from the standard shapes, inflation layers, boundary types, periodic pair, one-cell extrusion, CGNS / Gmsh |
+| [`12b_bodies_in_a_box.py`](examples/12b_bodies_in_a_box.py) | sphere and swept wing in boxes: surface meshes, volumes with prism layers, patches, CGNS / Gmsh |
+| [`04_solver_ready.py`](examples/04_solver_ready.py) | multi-block step and airfoil C-grid with patches and zones, exports read back |
+| [`10b_multiblock_3d.py`](examples/10b_multiblock_3d.py) | 3D smoothing groups (sphere in a box, O-grid ball) |
+| [`11g_curved_elements.py`](examples/11g_curved_elements.py) | curved high-order elements |
 
-`examples/golden/` holds ten validation cases (unit square, quarter annulus, NACA 0012 grids,
-cylinder O-grid, backward step, hybrid airfoil, duct, annular sector, sphere in a box, wing
-stub) with reference metrics checked by the tests.
+Each writes its figure, projects and journals to `examples/output/`. `examples/golden/`
+holds the ten validation cases of the specification, checked against reference metrics by
+the tests.
 
 ## Validation and testing
 
-- **154 C++ tests** (GoogleTest) and **416 Python tests** (pytest, including offscreen GUI tests
-  with pytest-qt) cover the geometry kernel, distributions, every mesher, smoothing, quality,
-  topology editing, exports read back by their reference readers, journal replay, determinism
-  across thread counts and the golden cases.
+- **154 C++ tests** (GoogleTest) and **532 Python tests** (pytest, including offscreen GUI tests
+  with pytest-qt that drive the menus and the mouse) cover the geometry kernel, distributions,
+  every mesher, smoothing, quality, topology editing, exports read back by their reference
+  readers, journal replay, determinism across thread counts, the golden cases and the
+  complete example cases.
 - High-order node orderings are tested against reference data from Gmsh, against VTK's
   Lagrange cells and against the CGNS SIDS; curved meshes against convergence rates and
   element validity.
-- Strict CI preset (warnings as errors), clang-tidy, clang-format, ruff, and a custom check
-  that forbids inline ternaries (project convention).
+- A strict build preset (`ci`: warnings as errors), clang-tidy, clang-format, ruff, and a
+  custom check that forbids inline ternaries (project convention).
+- `packaging/linux/check_build.sh` builds and tests OpenGrid in a clean Linux container
+  (openSUSE Leap 15.6 on x86_64 by default; any image as argument), the way a user of that
+  system would.
 
 ```bash
 ctest --preset release
@@ -381,12 +438,30 @@ Results are bit-identical for any thread count (`opengrid.set_threads(n)`).
 
 ## Building from source
 
-### conda-forge (recommended)
+### conda-forge (recommended, macOS and Linux)
 ```bash
 conda env create -f environment.yml
 conda activate opengrid
 pip install --no-build-isolation -e .   # rerun after C++ changes
 ```
+
+### Linux (x86_64; checked on openSUSE Leap 15.6)
+- **No compilation:** the self-contained bundle `OpenGrid-<version>-linux-x86_64.tar.gz`
+  (built by `packaging/linux/build_bundle.sh`) holds Python, Qt, VTK, Netgen, OpenCASCADE and
+  OpenGrid. Extract it and run `./opengrid`; no conda, compiler or root needed.
+- **From source in one command:** `packaging/linux/install_from_source.sh` installs Miniforge
+  into a private folder, creates the environment with conda-forge's GCC, builds OpenGrid and
+  adds `opengrid` to `~/.local/bin` and the application menu.
+- **By hand:** as with conda-forge above, plus a C++20 compiler (Leap 15's default GCC 7 is
+  too old):
+  ```bash
+  conda install -n opengrid -c conda-forge cxx-compiler
+  export CXX=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++
+  pip install --no-build-isolation -e .
+  ```
+
+Every step, the system packages for a server without a desktop, and troubleshooting are in
+[`docs/INSTALL_LINUX.md`](docs/INSTALL_LINUX.md).
 
 ### C++ only
 ```bash
@@ -402,7 +477,8 @@ conda deactivate && conda activate opengrid
 ```
 
 ### uv (alternative)
-Needs CMake ≥ 3.28, Ninja, a C++20 compiler, Eigen, HDF5 and CGNS from the system (Homebrew:
+Needs CMake ≥ 3.28, Ninja, a C++20 compiler (GCC ≥ 11, Clang ≥ 15), Eigen, HDF5 and CGNS
+from the system (Homebrew:
 `brew install cmake ninja googletest eigen hdf5 cgns`; Ubuntu: `apt install cmake ninja-build
 libgtest-dev libeigen3-dev libhdf5-dev libcgns-dev`):
 ```bash
@@ -453,9 +529,9 @@ python/opengrid/
   commands/           undoable commands and the journal
   io/                 exporters and importers (CGNS, Gmsh, VTKHDF, Plot3D, Lagrange node orders)
   app/                the PySide6 application
-examples/             one demo per phase, golden cases, output/
+examples/             complete cases, one demo per feature, golden cases, output/
 tests/python/         pytest suite (with reference data in data/)
-packaging/            conda recipe, macOS app bundle and launcher
+packaging/            conda recipe, macOS app bundle and launcher, Linux container check
 docs/                 specification, architecture, roadmap, progress, open issues, API
 tools/                API docs generator, checks, GPU studies
 ```
@@ -463,6 +539,7 @@ tools/                API docs generator, checks, GPU studies
 ## Documentation
 
 - [`docs/SCRIPTING.md`](docs/SCRIPTING.md) — scripting guide
+- [`docs/INSTALL_LINUX.md`](docs/INSTALL_LINUX.md) — Linux: the bundle, the installer, building by hand
 - [`docs/API.md`](docs/API.md) — API reference (generated)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions, algorithms, licensing
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phases and acceptance criteria
@@ -491,12 +568,14 @@ library (GPL); Gmsh's `.msh` format is written by OpenGrid's own code. Full tabl
 
 ## Status and limitations
 
-All planned phases (0–11g) are complete and tested on macOS (Apple silicon). The conda
-environment and a GitHub Actions workflow for macOS and Linux are set up, but Linux has not
-been built yet. Known limitations —
-for example, curved high-order elements are not untangled when they fold, 3D automatic
-topology is not available, Netgen dominates very large tetrahedral meshes, and the GPU path is
-experimental — are collected in [`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).
+All planned phases (0–11g) are complete. OpenGrid is developed on macOS (Apple silicon) and
+checked on Linux x86_64: on openSUSE Leap 15.6 it builds with GCC 15 and warnings as errors,
+and its C++ and Python tests pass; the self-contained Linux bundle also runs on openSUSE Leap
+15.5 and Rocky Linux 8. Those Linux checks ran in containers, not on real x86 hardware with a
+GPU driver. Known limitations, for example that curved high-order elements are not untangled
+when they fold, that 3D automatic topology is not available, that Netgen dominates very large
+tetrahedral meshes, and that the GPU path is experimental, are collected in
+[`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).
 
 ## Licence
 

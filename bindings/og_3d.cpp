@@ -136,7 +136,8 @@ nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>> index_array(
 }
 
 template <std::size_t N>
-using Cells = nb::ndarray<const std::int64_t, nb::shape<-1, N>, nb::c_contig, nb::device::cpu>;
+using Cells = nb::ndarray<const std::int64_t, nb::shape<-1, static_cast<std::ptrdiff_t>(N)>,
+                          nb::c_contig, nb::device::cpu>;
 
 template <std::size_t N>
 std::vector<std::array<std::int64_t, N>> index_input(const Cells<N>& a) {

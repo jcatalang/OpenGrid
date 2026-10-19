@@ -3,3 +3,9 @@
 # PySide6, OCCT) are all built for it on conda-forge.
 python:
   - "3.12"
+# Linux: glibc 2.28 as the oldest the package runs on (openSUSE Leap 15.3, SLES 15 SP3, RHEL 8
+# and later; conda-forge's own baseline). Used through stdlib('c') in the recipe (Linux only).
+c_stdlib:
+  - sysroot
+c_stdlib_version:
+  - "2.28"

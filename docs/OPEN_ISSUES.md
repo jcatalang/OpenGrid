@@ -5,10 +5,21 @@ when the project is complete. Items fixed in a later phase are removed (see `PRO
 history). Phase tags show where each item came from.
 
 ## Not verified
-- **CI and other platforms** [0–9c]:
-  - GitHub Actions has never run (no remote).
-  - The Linux build and the uv-based setup are untested; the conda recipe was built and
-    tested on osx-arm64 only (it should build on Linux unchanged, but has not been run there).
+- **CI and other platforms** [0–9c; updated 2026-10-19]:
+  - There is no CI: the GitHub Actions workflow never ran (Actions is disabled for the private
+    repository) and was removed. Linux is checked by hand with `packaging/linux/check_build.sh`.
+  - Linux x86_64 was checked in Docker containers, emulated on Apple silicon, never on real
+    x86 hardware: on openSUSE Leap 15.6 the C++ build with conda-forge's GCC 15 and warnings as
+    errors, ctest (153 of 154; the GPU test skipped, no OpenCL device), the Python suite
+    (527 passed; skipped: the GPU test without an OpenCL device, the macOS launcher check, the
+    read-back by a `gmsh` executable that was not installed), the conda package (its own tests) and the self-contained bundle, which was
+    also run on openSUSE Leap 15.5 (glibc 2.31) and Rocky Linux 8 (glibc 2.28), and
+    `install_from_source.sh` end to end on a clean Leap 15.6. Not checked: a real GPU driver
+    (NVIDIA / AMD), Wayland, a desktop session with a window manager, the uv route.
+  - Under a bare X server (xvfb-run, no window manager) a window becomes active only when asked
+    (the real-event harness calls `activateWindow()`, else keyboard shortcuts never arrive).
+    Qt's offscreen platform is not used for the Linux tests: pyvistaqt can abort when a window
+    closes there (QOpenGLWidget is not supported offscreen).
 - **Real input devices** [1–3]: real mouse and trackpad interaction is untested (handlers are
   tested in world coordinates), and trackpad pinch-to-zoom is not handled.
 - **No solver has been run** on any exported file [4]. CGNS is checked with cgnscheck and h5py,
@@ -443,6 +454,24 @@ history). Phase tags show where each item came from.
   which crowds the triangles near it (no cleanup: a mesh-improvement pass belongs in the C++
   mesher and is not written); quads touching such a pole become triangles or go. CAD faces
   with degenerate edges are still skipped by the importer.
+- **Automatic topology differs between platforms** [2026-10-19]: the symmetric bracket case
+  (a rounded rectangle with a centred hole) decomposes into four-sided blocks on macOS but
+  not on Linux, where two faces get three corners. The boundary samples differ in their last
+  bits (glibc's `cos` / `sin` against Apple's), and Delaunay refinement and the cross-field
+  tracing amplify that into a different mesh and separatrix layout. Results are deterministic
+  per platform (any thread count) but not identical across platforms. The test is an expected
+  failure on Linux; making the tracing robust to such ties is open, like the two-element case.
+- **Linux bundle** [2026-10-19]: 833 MB to download, 2.9 GB unpacked; about 0.5 GB of it is
+  not needed to run (C++ headers, Clang's libraries pulled in by Qt's packages) and could be
+  trimmed with `conda-pack --ignore-missing-files` after deleting them. The folder's paths are
+  fixed at the first start (conda-unpack): a moved folder mostly works but is not supported;
+  extract it again. It needs glibc 2.28 or newer (the conda-forge sysroot pinned in
+  `packaging/conda/variants.yaml`; its binaries ask for no symbol newer than 2.17). It brings
+  its own Mesa (software OpenGL) besides using the system's driver.
+- **conda-forge's `cxx-compiler` 2.0** [2026-10-19]: installs the compiler under plain names
+  (`c++`, `g++`) without an activation script, so CMake looks for the system's `ar`; without
+  binutils it stops with a message (`CMakeLists.txt`). The installer and the documentation use
+  the prefixed name (`x86_64-conda-linux-gnu-c++`), which finds its own binutils.
 - **Shapes** [2026-10-18]: NACA sections are the 4-digit family only (no 5-digit, 6-series
   or data files: import those as points / splines); a cylinder's caps are discs degenerate at
   their centre (surfaces of revolution of a radius), fine as database surfaces, poor for a

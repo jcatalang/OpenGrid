@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <numbers>
@@ -15,7 +16,7 @@ using og::MeshIndex;
 
 namespace {
 
-using Int = __int128;
+__extension__ typedef __int128 Int;  // a GNU extension (GCC, Clang)
 
 int sign(Int v) {
   if (v > 0) {

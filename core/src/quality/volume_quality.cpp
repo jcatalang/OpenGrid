@@ -282,12 +282,17 @@ VolumeQuality volume_quality(const double* points, std::size_t n_points,
       const std::size_t id = first_face[c] + f;
       const auto& face = t.faces[f];
       std::array<std::int64_t, 4> k{-1, -1, -1, -1};
-      for (std::size_t m = 0; m < face.size(); ++m) {
+      // Faces have 3 or 4 nodes: an insertion sort (std::sort on a part of a std::array trips a
+      // false -Warray-bounds in GCC 15).
+      const std::size_t size = std::min(face.size(), k.size());
+      for (std::size_t m = 0; m < size; ++m) {
         k[m] = node_of[c][face[m]];
+        for (std::size_t j = m; j > 0 && k[j - 1] > k[j]; --j) {
+          std::swap(k[j - 1], k[j]);
+        }
       }
-      std::sort(k.begin(), k.begin() + static_cast<std::ptrdiff_t>(face.size()));
       key[id] = k;
-      key_size[id] = static_cast<std::uint8_t>(face.size());
+      key_size[id] = static_cast<std::uint8_t>(size);
       face_cell[id] = c;
     }
   });

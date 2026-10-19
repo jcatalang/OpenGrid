@@ -1,0 +1,68 @@
+{
+ "blocks": [
+  {"extrusion": null, "faces": [23, 32, 37, 42, 43, 44, 13, 14], "generator": {"backend": "netgen", "grading": 0.3, "inflation": {"faces": [13, 14], "first_height": 0.002, "growth_rate": 1.2, "layers": 12, "slide": true, "total_thickness": null, "transition": true}, "max_size": 0.5, "optimize": true, "pyramids": "auto", "quality_floor": {"max_skewness": 0.95, "min_jacobian": 0.05}}, "id": 45, "name": "fluid", "type": "volume"}
+ ],
+ "connectors": [
+  {"breakpoints": [], "dimension": 40, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 11, "mode": "arc_length", "name": "c-sphere-meridian-b", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 40, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 12, "mode": "arc_length", "name": "c-sphere-meridian-a", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 16, "mode": "arc_length", "name": "c-box-xmin-e0", "propagate_spacing": true, "segments": [{"curve": 15, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 18, "mode": "arc_length", "name": "c-box-xmin-e1", "propagate_spacing": true, "segments": [{"curve": 17, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 20, "mode": "arc_length", "name": "c-box-xmin-e2", "propagate_spacing": true, "segments": [{"curve": 19, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 22, "mode": "arc_length", "name": "c-box-xmin-e3", "propagate_spacing": true, "segments": [{"curve": 21, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 25, "mode": "arc_length", "name": "c-box-xmax-e0", "propagate_spacing": true, "segments": [{"curve": 24, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 27, "mode": "arc_length", "name": "c-box-xmax-e1", "propagate_spacing": true, "segments": [{"curve": 26, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 29, "mode": "arc_length", "name": "c-box-xmax-e2", "propagate_spacing": true, "segments": [{"curve": 28, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 9, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 31, "mode": "arc_length", "name": "c-box-xmax-e3", "propagate_spacing": true, "segments": [{"curve": 30, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 11, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 34, "mode": "arc_length", "name": "c-box-ymin-e0", "propagate_spacing": true, "segments": [{"curve": 33, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 11, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 36, "mode": "arc_length", "name": "c-box-ymin-e2", "propagate_spacing": true, "segments": [{"curve": 35, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 11, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 39, "mode": "arc_length", "name": "c-box-ymax-e1", "propagate_spacing": true, "segments": [{"curve": 38, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 11, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 41, "mode": "arc_length", "name": "c-box-ymax-e3", "propagate_spacing": true, "segments": [{"curve": 40, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"center": [0.0, 0.0, 0.0], "end_angle": 3.141592653589793, "id": 1, "name": "sphere-meridian-a", "normal": [0.0, 1.0, 0.0], "radius": 0.5, "start_angle": 0.0, "type": "arc", "x_axis": [0.0, 0.0, 1.0]},
+  {"center": [0.0, 0.0, 0.0], "end_angle": 3.141592653589793, "id": 2, "name": "sphere-meridian-b", "normal": [0.0, -1.0, 0.0], "radius": 0.5, "start_angle": 0.0, "type": "arc", "x_axis": [0.0, 0.0, 1.0]},
+  {"axis": [0.0, 0.0, 1.0], "axis_point": [0.0, 0.0, 0.0], "curve": 1, "end_angle": 3.141592653589793, "id": 3, "name": "sphere-a", "start_angle": 0.0, "type": "revolved_surface"},
+  {"axis": [0.0, 0.0, 1.0], "axis_point": [0.0, 0.0, 0.0], "curve": 1, "end_angle": 6.283185307179586, "id": 4, "name": "sphere-b", "start_angle": 3.141592653589793, "type": "revolved_surface"},
+  {"id": 5, "name": "box-xmin", "origin": [-2.0, -2.0, -2.0], "type": "plane", "u_vector": [0.0, 0.0, 4.0], "v_vector": [0.0, 4.0, 0.0]},
+  {"id": 6, "name": "box-xmax", "origin": [3.0, -2.0, -2.0], "type": "plane", "u_vector": [0.0, 4.0, 0.0], "v_vector": [0.0, 0.0, 4.0]},
+  {"id": 7, "name": "box-ymin", "origin": [-2.0, -2.0, -2.0], "type": "plane", "u_vector": [5.0, 0.0, 0.0], "v_vector": [0.0, 0.0, 4.0]},
+  {"id": 8, "name": "box-ymax", "origin": [-2.0, 2.0, -2.0], "type": "plane", "u_vector": [0.0, 0.0, 4.0], "v_vector": [5.0, 0.0, 0.0]},
+  {"id": 9, "name": "box-zmin", "origin": [-2.0, -2.0, -2.0], "type": "plane", "u_vector": [0.0, 4.0, 0.0], "v_vector": [5.0, 0.0, 0.0]},
+  {"id": 10, "name": "box-zmax", "origin": [-2.0, -2.0, 2.0], "type": "plane", "u_vector": [5.0, 0.0, 0.0], "v_vector": [0.0, 4.0, 0.0]},
+  {"id": 15, "name": "box-xmin-e0", "p0": [-2.0, -2.0, -2.0], "p1": [-2.0, -2.0, 2.0], "type": "line"},
+  {"id": 17, "name": "box-xmin-e1", "p0": [-2.0, -2.0, 2.0], "p1": [-2.0, 2.0, 2.0], "type": "line"},
+  {"id": 19, "name": "box-xmin-e2", "p0": [-2.0, 2.0, 2.0], "p1": [-2.0, 2.0, -2.0], "type": "line"},
+  {"id": 21, "name": "box-xmin-e3", "p0": [-2.0, 2.0, -2.0], "p1": [-2.0, -2.0, -2.0], "type": "line"},
+  {"id": 24, "name": "box-xmax-e0", "p0": [3.0, -2.0, -2.0], "p1": [3.0, 2.0, -2.0], "type": "line"},
+  {"id": 26, "name": "box-xmax-e1", "p0": [3.0, 2.0, -2.0], "p1": [3.0, 2.0, 2.0], "type": "line"},
+  {"id": 28, "name": "box-xmax-e2", "p0": [3.0, 2.0, 2.0], "p1": [3.0, -2.0, 2.0], "type": "line"},
+  {"id": 30, "name": "box-xmax-e3", "p0": [3.0, -2.0, 2.0], "p1": [3.0, -2.0, -2.0], "type": "line"},
+  {"id": 33, "name": "box-ymin-e0", "p0": [-2.0, -2.0, -2.0], "p1": [3.0, -2.0, -2.0], "type": "line"},
+  {"id": 35, "name": "box-ymin-e2", "p0": [3.0, -2.0, 2.0], "p1": [-2.0, -2.0, 2.0], "type": "line"},
+  {"id": 38, "name": "box-ymax-e1", "p0": [-2.0, 2.0, 2.0], "p1": [3.0, 2.0, 2.0], "type": "line"},
+  {"id": 40, "name": "box-ymax-e3", "p0": [3.0, 2.0, -2.0], "p1": [-2.0, 2.0, -2.0], "type": "line"}
+ ],
+ "domains": [
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.04, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 13, "loops": [[{"connector": 11, "reversed": false}, {"connector": 12, "reversed": true}]], "name": "sphere-a-mesh", "surface": 3, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.04, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 14, "loops": [[{"connector": 12, "reversed": false}, {"connector": 11, "reversed": true}]], "name": "sphere-b-mesh", "surface": 4, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 23, "loops": [[{"connector": 16, "reversed": false}, {"connector": 18, "reversed": false}, {"connector": 20, "reversed": false}, {"connector": 22, "reversed": false}]], "name": "box-xmin-mesh", "surface": null, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 32, "loops": [[{"connector": 25, "reversed": false}, {"connector": 27, "reversed": false}, {"connector": 29, "reversed": false}, {"connector": 31, "reversed": false}]], "name": "box-xmax-mesh", "surface": null, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 37, "loops": [[{"connector": 16, "reversed": false}, {"connector": 36, "reversed": true}, {"connector": 31, "reversed": false}, {"connector": 34, "reversed": true}]], "name": "box-ymin-mesh", "surface": null, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 42, "loops": [[{"connector": 20, "reversed": false}, {"connector": 41, "reversed": true}, {"connector": 27, "reversed": false}, {"connector": 39, "reversed": true}]], "name": "box-ymax-mesh", "surface": null, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 43, "loops": [[{"connector": 22, "reversed": false}, {"connector": 34, "reversed": false}, {"connector": 25, "reversed": false}, {"connector": 41, "reversed": false}]], "name": "box-zmin-mesh", "surface": null, "type": "unstructured_domain"},
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": null, "max_points": 2000000, "max_size": 0.5, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 44, "loops": [[{"connector": 36, "reversed": true}, {"connector": 29, "reversed": true}, {"connector": 39, "reversed": true}, {"connector": 18, "reversed": true}]], "name": "box-zmax-mesh", "surface": null, "type": "unstructured_domain"}
+ ],
+ "format": "opengrid-project",
+ "groups": [],
+ "name_counters": {},
+ "next_id": 48,
+ "patches": [
+  {"id": 46, "members": [{"domain": 13}, {"domain": 14}], "name": "wall", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 47, "members": [{"domain": 23}, {"domain": 32}, {"domain": 37}, {"domain": 42}, {"domain": 43}, {"domain": 44}], "name": "farfield", "patch_type": "farfield", "periodic": null, "type": "patch"}
+ ],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

@@ -61,14 +61,25 @@ Every change (create, modify, rename, delete, split, import, ...) is one command
 The GUI writes the same journal (File → Save journal), so an interactive session can be turned
 into a script and edited.
 
+## Typical workflows
+
+Complete, runnable versions of the most common cases are in `examples/`: start with
+`12a_airfoil_cases.py` (an airfoil in a far field and a periodic cascade, extruded one cell
+thick) and `12b_bodies_in_a_box.py` (a sphere and a wing in boxes, with boundary layers);
+[`examples/README.md`](../examples/README.md) lists every script by topic.
+
 ### Standard shapes
 ```python
-og.create_rectangle((0, 0), 20, 20, name="far")        # far-bottom, far-right, far-top, far-left
+og.create_rectangle((0, 0), 20, 20, name="far")  # far-bottom, far-right, far-top, far-left
 og.create_circle((0, 0), 0.5, name="cyl")
-og.create_ellipse((0, 0), 2.0, 1.0, name="e")           # exact, a rational NURBS
-og.create_airfoil("2412", chord=1.0, angle=4.0, name="naca")   # naca-upper, naca-lower
-og.unstructured_domain_from_curves(["naca-upper", "naca-lower", *og.create_rectangle((0.5, 0), 30, 30)], 81)
-og.create_box(size=(2, 1, 1)); og.create_cylinder(radius=0.5, height=2.0); og.create_sphere(radius=1.0)
+og.create_ellipse((0, 0), 2.0, 1.0, name="e")  # exact, a rational NURBS
+og.create_airfoil("2412", chord=1.0, angle=4.0, name="naca")  # naca-upper, naca-lower
+og.unstructured_domain_from_curves(
+    ["naca-upper", "naca-lower", *og.create_rectangle((0.5, 0), 30, 30)], 81
+)
+og.create_box(size=(2, 1, 1))
+og.create_cylinder(radius=0.5, height=2.0)
+og.create_sphere(radius=1.0)
 og.create_wing("0012", root_chord=1.0, tip_chord=0.5, span=3.0, sweep=20.0, name="wing")
 ```
 Every shape is one undo step and names its parts (`<name>-upper`, `-side-a`, `-xmin`, ...);
@@ -79,20 +90,22 @@ sections are the 4-digit family (closed trailing edge), cosine spaced from the l
 ```python
 og.create_box(size=(4, 4, 4), name="box")
 parts = og.create_cylinder(name="cy")
-outer = og.mesh_surfaces([f"box-{s}" for s in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")], spacing=0.3)
-inner = og.mesh_surfaces([n for n in parts if og.entity(n).kind == "revolved_surface"], spacing=0.05)
-og.create_volume(outer + inner, name="flow")   # tetrahedra between the box and the cylinder
+outer = og.mesh_surfaces(
+    [f"box-{s}" for s in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")], spacing=0.3
+)
+inner = og.mesh_surfaces(
+    [n for n in parts if og.entity(n).kind == "revolved_surface"], spacing=0.05
+)
+og.create_volume(outer + inner, name="flow")  # tetrahedra between the box and the cylinder
 ```
 `mesh_surfaces` puts an unstructured domain on each surface: it finds or makes the surface's
 edge curves (a box face's lines, a cylinder's rims and seams, a wing's leading and trailing
 edges), shares the connectors on them with the neighbouring surfaces, meshes flat surfaces as
 planar domains and curved ones on the surface. The domains of a closed set of surfaces are
 then a watertight shell for `create_volume` (GUI: Create > Mesh surfaces, then Volume from
-faces). A sphere comes as two halves whose poles are meshed as fans (the mesher opens a pole
-into the degenerate side it stands for and cleans the mesh up around it). NURBS surfaces are
-not surface-meshed here yet.
-
-## Typical workflows
+faces). A sphere comes as two halves; surfaces of revolution that close at a pole are meshed
+in a conformal map of the surface, so the triangles fan around the poles with their shape
+kept. NURBS surfaces are not surface-meshed here yet.
 
 ### 2D structured grid with wall spacing
 ```python

@@ -28,6 +28,10 @@ build:
 requirements:
   build:
     - ${{ compiler('cxx') }}
+    # Linux: conda-forge's sysroot sets the oldest glibc the binaries need (c_stdlib_version in
+    # variants.yaml); without it the compiler links against a recent glibc (2.34 was seen).
+    - if: linux
+      then: ${{ stdlib('c') }}
     - cmake >=3.28
     - ninja
     - if: build_platform != target_platform

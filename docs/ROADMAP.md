@@ -12,7 +12,9 @@ Acceptance criteria below are automated (pytest / GoogleTest) unless marked *(ma
 - GUI smoke test (pytest-qt, offscreen): the main window builds; the model tree has the top-level nodes
   Database, Connectors, Domains, Blocks, Patches, Zones; the console evaluates `1+1`.
 - `ruff check`, `clang-format --dry-run --Werror`, `tools/check_no_ternary.py` are clean.
-- CI workflow exists for macos-14 and ubuntu-latest. *(Running it needs a remote.)*
+- CI workflow exists for macos-14 and ubuntu-latest. *(It never ran: GitHub Actions stayed
+  disabled for the private repository. Removed on 2026-10-19 and replaced by the container
+  check `packaging/linux/check_build.sh`; see PROGRESS.)*
 
 ## Phase 1 — 2D geometry kernel + project I/O
 - Curves: point, line, arc, polyline, cubic spline (natural/clamped/Catmull-Rom), NURBS.

@@ -14,6 +14,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# No C++20 modules in OpenGrid: skip the dependency scan CMake >= 3.28 runs for GCC and Clang.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
+# The static libraries need an archiver. CMake looks for one next to the compiler; an unprefixed
+# compiler without binutils on the system (conda-forge's cxx-compiler in a minimal container)
+# leaves none, and the build would only fail at the first library.
+if(NOT CMAKE_AR)
+  message(FATAL_ERROR
+    "No 'ar' archiver found for ${CMAKE_CXX_COMPILER}. Install binutils (openSUSE: zypper install "
+    "binutils; Debian / Ubuntu: apt install binutils), or use conda-forge's prefixed compiler: "
+    "export CXX=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++ (see README.md, Linux).")
+endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)

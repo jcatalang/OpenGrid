@@ -8,6 +8,7 @@ GUI tests call ``handle_click`` / ``handle_press`` in world space and never reac
 which is where the zoom-window bug lived.
 """
 
+import contextlib
 import math
 from unittest import mock
 
@@ -31,6 +32,11 @@ class Live:
         qtbot.addWidget(self.window)
         self.window.resize(1200, 800)
         self.window.show()
+        # Keyboard shortcuts need the active window: offscreen it is the shown one; under a bare
+        # X server (no window manager) Qt asks for the input focus directly.
+        self.window.activateWindow()
+        with contextlib.suppress(Exception):  # the keyboard tests then say what is missing
+            qtbot.waitUntil(self.window.isActiveWindow, timeout=5000)
         viewport = self.window.viewport
         iren = RenderWindowInteractor(viewport, interactor=viewport._Iren)
         viewport.iren = iren
@@ -278,8 +284,9 @@ def test_boundary_dock_buttons(live):
     live.click((1.0, 1.0, 0.0))
     live.qtbot.mouseClick(dock.set_type, Qt.MouseButton.LeftButton)  # the same named patch
     assert [m["connector"] for m in live.og.entity("walls").params["members"]] == [cr, ct]
-    live.qtbot.waitUntil(lambda: "have no type" in dock.status.text(), timeout=3000)
-    assert "2 of 4" in dock.status.text()
+    # The panel refreshes on a timer: wait for the new count (the old status also says
+    # "have no type").
+    live.qtbot.waitUntil(lambda: "2 of 4" in dock.status.text(), timeout=10000)
     live.qtbot.mouseClick(dock.refresh, Qt.MouseButton.LeftButton)
     assert [row[1] for row in dock.rows("Boundaries")].count("walls") == 2
 

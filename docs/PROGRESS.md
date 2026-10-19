@@ -848,6 +848,86 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Repository cleanup, README, complete examples, Linux (x86_64) check (2026-10-19) — requested by the user
+
+The user asked whether the clang files and `.github/workflows` were needed, for the README to
+reflect the latest changes, whether the examples were representative (also for scripting),
+and how to be sure OpenGrid compiles on openSUSE 15 on an Intel Xeon (x86_64).
+
+### Done
+- `.github/workflows/ci.yml` removed: it never ran (GitHub Actions is disabled for the private
+  repository), its macOS job would cost 10x the Linux minutes, and its Linux job had no C++20
+  compiler for distributions with an old system GCC. `.clang-format` and `.clang-tidy` stay at
+  the root: clang-format and clang-tidy (and editors) find them by walking up from each source
+  file, so they must sit above `core/`, `bindings/` and `backends/`. `.gitignore` regrouped (its
+  comments had been sorted away from their patterns).
+- `packaging/linux/check_build.sh [image]`: builds and tests OpenGrid in a clean container
+  (openSUSE Leap 15.6 on x86_64 by default) as a user would: Mesa, Xvfb and fonts from the
+  distribution, Miniforge, `environment.yml` plus conda-forge's `cxx-compiler`, the `ci` preset
+  (warnings as errors), ctest, the Python package built from the same build directory, pytest
+  under `xvfb-run`; Miniforge cached in a Docker volume; PASS / FAIL as the log's last line.
+- Two complete examples on the newest API: `12a_airfoil_cases.py` (a NACA 2412 in a far field
+  and a periodic NACA 6412 cascade, 40 inflation layers from 2e-5 chord, boundary types,
+  `make_periodic_pair`, `extrude_model`, CGNS / Gmsh; 2 s) and `12b_bodies_in_a_box.py` (a
+  sphere and a closed swept wing in boxes, `mesh_surfaces`, volumes with 12 / 8 prism layers
+  and a hexahedral trailing-edge fan, wall / far-field patches; 10 s); figures saved as
+  128-colour PNGs (a third of the size). `examples/README.md` lists every script by topic;
+  `tests/python/test_example_cases.py` builds both cases so they cannot rot.
+- Every example was run from a scratch copy: all 30 scripts and 10 golden cases exit cleanly
+  (`00_launch.py` opens the application and waits, by design; the automatic topology of the
+  two-element airfoil in `10e` fails as recorded in OPEN_ISSUES and its strict xfail).
+- README: the newest features moved to the sections they belong to (they had been appended
+  under Boundary conditions), a shapes-to-solver snippet (run as written), the gallery's new
+  row, the examples by topic, test counts, a Linux / openSUSE build section with the packages
+  and compiler minimums verified in the container, the status. SCRIPTING: the shape and
+  surface-mesh sections moved under Typical workflows (they sat under Commands), a stale
+  sentence about the deleted pole cleanup replaced, a pointer to the complete examples.
+
+### Linux (x86_64): build, tests, bundle, installer
+The user's target is openSUSE 15 on an Intel Xeon, with nothing to install by hand (Miniforge
+fine if a script installs it). Everything below ran in Docker containers on the Mac, emulated
+x86_64 (Docker Desktop raised to 12 GB and 8 CPUs for it).
+- **The first build found real portability bugs** (conda-forge's GCC 15.3, the `ci` preset,
+  warnings as errors; Apple Clang never showed them): three C++ tests used `std::sort`,
+  `std::clamp`, `std::reverse`, `std::min_element` without `<algorithm>` (libc++ includes it
+  transitively, libstdc++ does not); `__int128` under `-Wpedantic`; a sign conversion in
+  `bindings/og_3d.cpp` (nanobind's `shape` takes signed sizes); `-Wshadow` warnings inside
+  nanobind's headers (now system headers: `NB_SUPPRESS_WARNINGS`); GCC false positives:
+  `-Warray-bounds` in `std::sort` on part of a `std::array` (`volume_quality.cpp`, now an
+  insertion sort of the 3-4 face nodes) and `-Wstringop-overflow` on vector assignments in a
+  test (now `std::copy`). CMake 4 scanned every file for C++20 modules (off:
+  `CMAKE_CXX_SCAN_FOR_MODULES`). With conda-forge's `cxx-compiler` 2.0 (plain `c++`, no
+  activation) CMake found no `ar` in a minimal system: `CMakeLists.txt` now stops with a
+  message naming binutils or the prefixed compiler. After the fixes: 0 warnings, ctest 153 of
+  154 (the GPU test skipped: no OpenCL device). macOS: 154 of 154, 0 warnings.
+- **Python suite on Linux** (Leap 15.6, xvfb-run), first full run: 520 passed, 8 failed, 3
+  skipped, 1 expected failure, in 3 h emulated. The failures: macOS tar's `._` files in the
+  copied source (the ternary check read one; the scripts now set `COPYFILE_DISABLE=1`); five
+  real-event tests whose keyboard shortcuts never arrived because, without a window manager,
+  the window never became active (the harness now calls `activateWindow()` and waits; Qt then
+  sets the X input focus itself; making Qt's offscreen platform the Linux default instead was
+  tried and abandoned: pyvistaqt can abort when a window closes there); a boundary-panel test
+  racing the panel's refresh timer (waits for the new count); the worker test counting timer
+  ticks over 0.3 s, which a slow machine misses (the worker now waits for five ticks: no
+  timing); and the automatic topology of the symmetric bracket case, which decomposes on macOS
+  but not with glibc's `cos` / `sin` (last-bit differences in the boundary samples amplified
+  by refinement and tracing; deterministic per platform: an expected failure on Linux,
+  OPEN_ISSUES). Rerun with every fix: 527 passed, 2 expected failures (the two-element
+  airfoil everywhere, the bracket on Linux), 3 skipped (no OpenCL device, the macOS launcher
+  check, no `gmsh` executable), none failed, in 1 h 29 min emulated.
+- **The conda package and the self-contained bundle**: rattler-build compiles the recipe with
+  conda-forge's sysroot pinned to glibc 2.28 (`variants.yaml`; without it `_core` needed glibc
+  2.34, which Leap 15.3-15.5 lack); its own tests (imports, OpenMP, the smoke test with a
+  Netgen volume) pass. The bundle: 833 MB, 2.9 GB unpacked; its binaries need no glibc symbol
+  newer than 2.17. `test_bundle.sh` in clean containers (no conda, no compiler, only Mesa,
+  fonts and Xvfb): openSUSE Leap 15.6 (glibc 2.38), Leap 15.5 (2.31) and Rocky Linux 8 (2.28)
+  all PASS: the imports, `12a` (2D), `12b` (Netgen volumes), `09a` (STEP / IGES), the
+  application window, a project opened and coloured by quality (the same 0.36 / 0.92 scaled
+  Jacobian as on macOS), a moved folder, `install.sh`.
+- **`install_from_source.sh`** in a clean Leap 15.6: Miniforge downloaded into
+  `~/.local/share/opengrid/miniforge`, the environment, conda-forge's GCC 15.3, the build,
+  the launchers; `opengrid-python` then ran `12a`: PASS in 11 minutes emulated.
+
 ## Spheres mesh in a conformal plane (2026-10-18) — the user: "stuck here, too slow"
 
 Meshing the sphere at the suggested spacing (about 4 000 triangles per half) hung: the

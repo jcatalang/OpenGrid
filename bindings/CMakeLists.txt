@@ -7,14 +7,16 @@ execute_process(
   OUTPUT_VARIABLE nanobind_ROOT)
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(_core NB_STATIC og_core.cpp og_3d.cpp)
+# NB_SUPPRESS_WARNINGS: nanobind's and Python's headers are system headers (GCC warns about
+# shadowing in them under -Wshadow; their warnings are not ours to fix).
+nanobind_add_module(_core NB_STATIC NB_SUPPRESS_WARNINGS og_core.cpp og_3d.cpp)
 target_link_libraries(_core PRIVATE og_core og_options)
 
 install(TARGETS _core LIBRARY DESTINATION opengrid)
 
 # Optional CAD import module (backends/occt).
 if(TARGET og_occt)
-  nanobind_add_module(_occt NB_STATIC og_occt.cpp)
+  nanobind_add_module(_occt NB_STATIC NB_SUPPRESS_WARNINGS og_occt.cpp)
   target_link_libraries(_occt PRIVATE og_occt og_options)
   install(TARGETS _occt LIBRARY DESTINATION opengrid)
 endif()

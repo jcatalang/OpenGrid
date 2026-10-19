@@ -1,0 +1,7 @@
+#!/bin/bash
+# The bundled Python with OpenGrid, for scripts:
+#   ./opengrid-python examples/12a_airfoil_cases.py
+#   ./opengrid-python -c "import opengrid; print(opengrid.core_version())"
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+source "$HERE/opengrid-env.sh"
+exec python "$@"

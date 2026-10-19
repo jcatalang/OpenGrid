@@ -1,6 +1,7 @@
 // Phase 9c: parallel loops, Anderson acceleration, volume quality metrics.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -35,7 +36,9 @@ std::vector<double> jacobi(int depth, int threads, int& iterations) {
   std::vector<double> g(n);
   iterations = 0;
   for (int k = 0; k < 200000; ++k) {
-    g = u;
+    // Same-size copies: GCC 15 misreads the vector assignments as overflowing
+    // (-Wstringop-overflow).
+    std::copy(u.begin(), u.end(), g.begin());
     double change = 0.0;
     for (std::size_t i = 1; i + 1 < n; ++i) {
       g[i] = 0.5 * (u[i - 1] + u[i + 1]);
@@ -48,7 +51,7 @@ std::vector<double> jacobi(int depth, int threads, int& iterations) {
     if (depth > 0) {
       anderson.step(u, g);
     }
-    u = g;
+    std::copy(g.begin(), g.end(), u.begin());
   }
   return u;
 }

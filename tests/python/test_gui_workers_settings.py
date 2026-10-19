@@ -2,11 +2,11 @@
 runs (window layout, view options, recent files, the last directory)."""
 
 import threading
-import time
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings, QTimer
+from PySide6.QtWidgets import QWidget
 
 from opengrid.app.main_window import MainWindow
 from opengrid.app.worker import run_blocking
@@ -15,14 +15,30 @@ PROJECT = Path(__file__).resolve().parents[2] / "examples" / "output" / "04_airf
 
 
 def test_run_blocking_keeps_the_gui_thread_alive(qtbot):
-    window = MainWindow(off_screen=True)
+    # A plain parent: run_blocking needs no 3D view, and a main window's first paint (a VTK
+    # render) inside the measured 0.3 s takes longer than that on a slow (emulated) machine.
+    window = QWidget()
     qtbot.addWidget(window)
+    # The worker returns only once the GUI thread has ticked five times: it can only finish if
+    # events are processed while the worker blocks (no timing involved, so slow machines pass).
     ticks = []
+    ticked = threading.Event()
+
+    def tick():
+        ticks.append(1)
+        if len(ticks) >= 5:
+            ticked.set()
+
+    def wait_for_ticks():
+        if ticked.wait(60.0):
+            return 42
+        return None
+
     timer = QTimer(window)
     timer.setInterval(10)
-    timer.timeout.connect(lambda: ticks.append(1))
+    timer.timeout.connect(tick)
     timer.start()
-    result = run_blocking(window, "Sleeping…", lambda: time.sleep(0.3) or 42, grace_ms=50)
+    result = run_blocking(window, "Waiting…", wait_for_ticks, grace_ms=60000)
     timer.stop()
     assert result == 42
     assert len(ticks) >= 5  # events were processed meanwhile
@@ -47,7 +63,6 @@ def test_run_blocking_keeps_the_gui_thread_alive(qtbot):
         == "stopped"
     )
     assert stop.is_set()
-    window.close()
 
 
 def test_long_operations_refresh_once_and_report_errors(qtbot):

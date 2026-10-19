@@ -1,0 +1,18 @@
+import opengrid
+
+og = opengrid.Session()
+og.create_arc(center=(0.0, 0.0, 0.0), radius=0.5, normal=(0.0, 1.0, 0.0), x_axis=(0.0, 0.0, 1.0), start_angle=0.0, end_angle=3.141592653589793, name='sphere-meridian-a')
+og.create_arc(center=(0.0, 0.0, 0.0), radius=0.5, normal=(0.0, -1.0, 0.0), x_axis=(0.0, 0.0, 1.0), start_angle=0.0, end_angle=3.141592653589793, name='sphere-meridian-b')
+og.create_revolved_surface(curve='sphere-meridian-a', axis_point=(0.0, 0.0, 0.0), axis=(0.0, 0.0, 1.0), start_angle=0.0, end_angle=3.141592653589793, name='sphere-a')
+og.create_revolved_surface(curve='sphere-meridian-a', axis_point=(0.0, 0.0, 0.0), axis=(0.0, 0.0, 1.0), start_angle=3.141592653589793, end_angle=6.283185307179586, name='sphere-b')
+og.create_plane(origin=(-2.0, -2.0, -2.0), u_vector=(0.0, 0.0, 4.0), v_vector=(0.0, 4.0, 0.0), name='box-xmin')
+og.create_plane(origin=(3.0, -2.0, -2.0), u_vector=(0.0, 4.0, 0.0), v_vector=(0.0, 0.0, 4.0), name='box-xmax')
+og.create_plane(origin=(-2.0, -2.0, -2.0), u_vector=(5.0, 0.0, 0.0), v_vector=(0.0, 0.0, 4.0), name='box-ymin')
+og.create_plane(origin=(-2.0, 2.0, -2.0), u_vector=(0.0, 0.0, 4.0), v_vector=(5.0, 0.0, 0.0), name='box-ymax')
+og.create_plane(origin=(-2.0, -2.0, -2.0), u_vector=(0.0, 4.0, 0.0), v_vector=(5.0, 0.0, 0.0), name='box-zmin')
+og.create_plane(origin=(-2.0, -2.0, 2.0), u_vector=(5.0, 0.0, 0.0), v_vector=(0.0, 4.0, 0.0), name='box-zmax')
+og.mesh_surfaces(['sphere-a', 'sphere-b'], spacing=0.04, points=None, generator=None)
+og.mesh_surfaces(['box-xmin', 'box-xmax', 'box-ymin', 'box-ymax', 'box-zmin', 'box-zmax'], spacing=0.5, points=None, generator=None)
+og.create_volume(faces=('box-xmin-mesh', 'box-xmax-mesh', 'box-ymin-mesh', 'box-ymax-mesh', 'box-zmin-mesh', 'box-zmax-mesh', 'sphere-a-mesh', 'sphere-b-mesh'), extrusion=None, generator={'backend': 'netgen', 'max_size': 0.5, 'grading': 0.3, 'pyramids': 'auto', 'inflation': {'faces': ('sphere-a-mesh', 'sphere-b-mesh'), 'first_height': 0.002, 'growth_rate': 1.2, 'total_thickness': None, 'layers': 12, 'transition': True, 'slide': True}, 'optimize': True, 'quality_floor': {'min_jacobian': 0.05, 'max_skewness': 0.95}}, name='fluid')
+og.set_boundary_type(['sphere-a-mesh', 'sphere-b-mesh'], 'wall', name=None)
+og.set_boundary_type(['box-xmin-mesh', 'box-xmax-mesh', 'box-ymin-mesh', 'box-ymax-mesh', 'box-zmin-mesh', 'box-zmax-mesh'], 'farfield', name=None)

@@ -58,9 +58,9 @@ def match_text(matched) -> str:
     if nodes is not None:
         return f"match: {nodes} nodes, {matched.faces} faces"
     count = len(matched)
-    unit = "connectors"
+    unit = "curves"
     if count == 1:
-        unit = "connector"
+        unit = "curve"
     return f"match: {count} {unit} node by node"
 
 
@@ -97,7 +97,7 @@ class BoundaryDock(QWidget):
         self.set_type.setToolTip("The selected boundaries join a patch of this type")
         self.pair = QPushButton("Pair as periodic")
         self.pair.setToolTip(
-            "The two selected sides (two connectors; 3D: two faces, or one extruded volume for "
+            "The two selected sides (two curves; 3D: two faces, or one extruded volume for "
             "its ends) become a periodic pair"
         )
         self.clear = QPushButton("Clear type")

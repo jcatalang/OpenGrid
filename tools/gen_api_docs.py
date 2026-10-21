@@ -62,6 +62,7 @@ GROUPS = [
             "create_domain",
             "create_unstructured_domain",
             "unstructured_domain_from_curves",
+            "structured_domain_from_curves",
             "set_domain_generator",
             "set_unstructured_generator",
             "rotate_domain",

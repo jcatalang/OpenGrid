@@ -46,7 +46,7 @@ SHAPES = {
             Field("height", "height", "1", "number"),
             NAME,
         ),
-        "Four lines: bottom, right, top, left (one connector each, or a sketch block on them)",
+        "Four lines: bottom, right, top, left (points on each, or a sketch block on them)",
     ),
     "circle": ShapeSpec(
         "Circle",

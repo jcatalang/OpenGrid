@@ -11,7 +11,15 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-gui = ["PySide6>=6.6", "vtk>=9.3", "pyvista>=0.43", "pyvistaqt>=0.11", "qtpy"]
+gui = [
+    "PySide6>=6.6",
+    "vtk>=9.3",
+    "pyvista>=0.43",
+    "pyvistaqt>=0.11",
+    "qtpy",
+    "qtconsole",
+    "ipykernel",
+]
 test = ["pytest", "pytest-qt", "meshio>=5.3", "h5py"]
 
 [project.scripts]
@@ -30,6 +38,8 @@ OG_BUILD_PYTHON = "ON"
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
 qt_api = "pyside6"
+# ipykernel's own request handlers (the IPython console's in-process kernel).
+filterwarnings = ["ignore:For consistency across implementations:PendingDeprecationWarning"]
 
 [tool.ruff]
 line-length = 100

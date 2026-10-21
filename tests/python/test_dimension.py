@@ -121,7 +121,7 @@ def test_panel_dimension_propagates(qtbot):
     editor.setValue(41)
     assert panel.apply()
     assert dims(og)["c-mid"] == 41 and dims(og)["c-t"] == 41
-    assert "2 opposite connector(s) followed: c-mid, c-t" in window.log_panel.toPlainText()
+    assert "2 opposite curve(s) followed: c-mid, c-t" in window.log_panel.toPlainText()
     assert og.domain_grid("d1").shape[:2] == (16, 41)
     window.close()
 

@@ -254,14 +254,14 @@ def test_undo_redo_connector_commands():
     names = og.create_connectors_on_curves(
         ["upper", "lower"], 31, {"type": "tanh", "begin_spacing": 1e-3}
     )
-    assert names == ["connector-1", "connector-2"]
+    assert names == ["curve-1", "curve-2"]  # automatic names of points: curves
     og.undo()
     assert og.store.snapshot() == before
     og.redo()
-    og.set_dimension("connector-1", 51)
-    assert len(og.connector_nodes("connector-1").points) == 51
+    og.set_dimension("curve-1", 51)
+    assert len(og.connector_nodes("curve-1").points) == 51
     og.undo()
-    assert len(og.connector_nodes("connector-1").points) == 31
+    assert len(og.connector_nodes("curve-1").points) == 31
 
 
 def test_stretching_ratio_report():

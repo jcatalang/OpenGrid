@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSpinBox,
+    QTabWidget,
     QToolBar,
     QWidget,
 )
@@ -30,16 +31,19 @@ from opengrid.app.boundary_dock import (
     UNASSIGNED_COLOR,
     BoundaryDock,
 )
-from opengrid.app.console import PythonConsole
+from opengrid.app.console import make_console
 from opengrid.app.icons import icon
 from opengrid.app.log_panel import LogPanel
 from opengrid.app.model_tree import ModelTree
 from opengrid.app.property_panel import PropertyPanel
 from opengrid.app.quality_dock import METRICS, QualityDock, worst_cell
 from opengrid.app.scene import Scene, pick_entity
+from opengrid.app.script_panel import ScriptPanel
 from opengrid.app.smoother_dock import SmootherDock
 from opengrid.app.tools import TOOLS, Tool, snap, snap_targets
+from opengrid.app.trace import SessionTrace, new_trace_path
 from opengrid.app.zoom_box import ZoomBox
+from opengrid.model.curves import CurveIndex
 from opengrid.model.entities import SURFACE_KINDS
 from opengrid.model.patches import PATCH_TYPES
 from opengrid.validation import ValidationError
@@ -71,9 +75,14 @@ SETTINGS_ORGANIZATION = "OpenGrid"
 SETTINGS_APPLICATION = "OpenGrid"
 RECENT_FILES = 8
 TOOLBAR_ICON_SIZE = 20
-WINDOW_STATE_KEY = "window/state_v2"  # bumped when the default toolbar layout changes
+WINDOW_STATE_KEY = "window/state_v3"  # bumped when the default toolbar or dock layout changes
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
+CONSOLE_BANNER = (
+    "OpenGrid console. og: this window's session (every change shows in the window), "
+    "window: the window, opengrid: the package, trace_path: the Python of everything done "
+    "in this window (the Script tab). Example: og.create_line((0, 0), (1, 0))"
+)
 CURVE_KINDS = ("line", "arc", "polyline", "spline", "nurbs")
 MESHED_KINDS = ("domain", "unstructured_domain", "block", "volume")
 INSERTABLE_FIELD = {"polyline": "points", "spline": "points", "nurbs": "control_points"}
@@ -251,8 +260,27 @@ class MainWindow(QMainWindow):
         self.model_tree = ModelTree()
         self.property_panel = PropertyPanel(session)
         self.log_panel = LogPanel()
-        self.console = PythonConsole(
-            namespace={"opengrid": opengrid, "og": session, "window": self}
+        # Everything done in the window, as Python (app/trace.py); a window that is never
+        # shown (the tests) writes it to a folder of its own, removed when it closes.
+        self._trace_dir = None
+        if off_screen:
+            import tempfile
+
+            self._trace_dir = Path(tempfile.mkdtemp(prefix="opengrid-trace-"))
+            trace_path = self._trace_dir / "session.py"
+        else:
+            trace_path = new_trace_path()
+        self.trace = SessionTrace(session, trace_path)
+        self.script_panel = ScriptPanel(self.trace)
+        self.script_panel.save_requested.connect(self.save_trace)
+        self.console = make_console(
+            namespace={
+                "opengrid": opengrid,
+                "og": session,
+                "window": self,
+                "trace_path": str(trace_path),
+            },
+            banner=CONSOLE_BANNER,
         )
 
         model_dock = self._add_dock("Model", self.model_tree, Qt.DockWidgetArea.LeftDockWidgetArea)
@@ -260,10 +288,6 @@ class MainWindow(QMainWindow):
         properties_dock = self._add_dock(
             "Properties", self.property_panel, Qt.DockWidgetArea.LeftDockWidgetArea, scroll=True
         )
-        console_dock = self._add_dock(
-            "Console", self.console, Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        log_dock = self._add_dock("Log", self.log_panel, Qt.DockWidgetArea.BottomDockWidgetArea)
         self.quality_dock = QualityDock()
         self.smoother_dock = SmootherDock(session)
         quality_dock = self._add_dock(
@@ -280,9 +304,21 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(quality_dock, self.boundary_dock_widget)
         quality_dock.raise_()
         self.quality_dock_widget = quality_dock
-        self.tabifyDockWidget(log_dock, console_dock)
-        console_dock.raise_()
+        # The console, the script and the log share the lower right corner, under the panels
+        # (the viewport keeps the whole height): tabs in one dock (a second group of tabified
+        # docks leaves a stray tab bar over the viewport in Qt 6.11).
+        self.console_tabs = QTabWidget()
+        self.console_tabs.setDocumentMode(True)
+        self.console_tabs.addTab(self.console, "Console")
+        self.console_tabs.addTab(self.script_panel, "Script")
+        self.console_tabs.addTab(self.log_panel, "Log")
+        console_dock = self._add_dock(
+            "Console", self.console_tabs, Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.console_dock_widget = console_dock
         self.resizeDocks([model_dock, properties_dock], [320, 480], Qt.Orientation.Vertical)
+        self.resizeDocks([quality_dock, console_dock], [480, 360], Qt.Orientation.Vertical)
+        self.resizeDocks([model_dock, quality_dock], [360, 460], Qt.Orientation.Horizontal)
 
         self._create_actions()
         self._create_menus()
@@ -312,6 +348,7 @@ class MainWindow(QMainWindow):
         self._hover_timer.timeout.connect(self._update_hover)
         self.property_panel.message.connect(self._on_panel_message)
         self.property_panel.smooth_requested.connect(self.run_smoother)
+        self.property_panel.points_requested.connect(self.give_points)
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
         self.quality_dock.metric_changed.connect(self._on_metric_changed)
         self.quality_dock.locate_requested.connect(self.show_worst_cell)
@@ -451,20 +488,20 @@ class MainWindow(QMainWindow):
         self.viewport.addAction(self.cancel_action)
 
         self.connectors_action = self._action(
-            "Connectors on curves",
+            "Points on curves",
             self.create_connectors_on_selection,
-            tip="One connector on each selected curve",
+            tip="Give each selected curve without points the 'points' box's points",
         )
         self.chain_action = self._action(
-            "Chain connector",
+            "Chain of curves",
             self.create_chain_connector_on_selection,
-            tip="One connector along the selected curves (ordered end to end)",
+            tip="One curve of points along the selected curves (ordered end to end)",
         )
-        self.color_action = QAction("Colour connectors by stretching ratio", self)
+        self.color_action = QAction("Colour curves by stretching ratio", self)
         self.color_action.setCheckable(True)
         self.color_action.setChecked(True)
         self.color_action.toggled.connect(self.set_color_by_stretching)
-        self.nodes_action = QAction("Show connector nodes", self)
+        self.nodes_action = QAction("Show curve points", self)
         self.nodes_action.setCheckable(True)
         self.nodes_action.setChecked(True)
         self.nodes_action.toggled.connect(self.set_show_nodes)
@@ -472,12 +509,14 @@ class MainWindow(QMainWindow):
         self.unstructured_action = self._action(
             "Unstructured domain",
             self.create_unstructured_on_selection,
-            tip="Triangulated domain bounded by the selected connectors (closed loops)",
+            tip="Triangulated domain bounded by the selected curves (closed loops; curves without "
+            "points get the 'points' box's)",
         )
         self.domain_action = self._action(
             "Structured domain",
             self.create_domain_on_selection,
-            tip="Structured domain from the selected connectors (edges assembled automatically)",
+            tip="Structured domain bounded by the selected curves (sides found automatically; "
+            "curves without points get the 'points' box's)",
         )
         self.block_action = self._action(
             "Block from 6 faces",
@@ -499,7 +538,7 @@ class MainWindow(QMainWindow):
             "Smoothing group",
             self.create_group_on_selection,
             tip="Smooth the selected structured domains together as one grid (interfaces move); "
-            "selected connectors become walls",
+            "selected curves become walls",
         )
         self.volume_action = self._action(
             "Volume from faces",
@@ -510,12 +549,12 @@ class MainWindow(QMainWindow):
             "&Mesh surfaces…",
             self.mesh_selected_surfaces,
             tip="Surface meshes (unstructured domains) on the selected surfaces, their edges "
-            "and connectors shared, ready for Volume from faces",
+            "and curves shared, ready for Volume from faces",
         )
         self.periodic_pair_action = self._action(
             "Pair as periodic",
             self.pair_selection_as_periodic,
-            tip="The two selected sides (two connectors; 3D: two faces, or one extruded volume "
+            tip="The two selected sides (two curves; 3D: two faces, or one extruded volume "
             "for its ends) become a periodic pair; two selected periodic patches are paired",
         )
         self.extrude_model_action = self._action(
@@ -533,7 +572,7 @@ class MainWindow(QMainWindow):
         self.quality_action = QAction("Colour domains by quality", self)
         self.quality_action.setCheckable(True)
         self.quality_action.toggled.connect(self.set_quality_colouring)
-        self.patch_color_action = QAction("Colour connectors by patch", self)
+        self.patch_color_action = QAction("Colour curves by patch", self)
         self.patch_color_action.setCheckable(True)
         self.patch_color_action.toggled.connect(self.set_patch_colouring)
         self.export_cgns_action = self._action("Export CGNS…", self.export_cgns)
@@ -676,7 +715,7 @@ class MainWindow(QMainWindow):
         self.sketch_unstructured_action = QAction("Unstructured sketch blocks", self)
         self.sketch_unstructured_action.setCheckable(True)
         self.sketch_unstructured_action.setStatusTip(
-            "New sketch blocks are meshed unstructured on their connectors (the sketch's walls "
+            "New sketch blocks are meshed unstructured on their curves (the sketch's walls "
             "on them become inflation layers) instead of structured"
         )
         self.sketch_unstructured_action.toggled.connect(self._on_sketch_unstructured)
@@ -740,14 +779,14 @@ class MainWindow(QMainWindow):
 
         topology_menu = self.menuBar().addMenu("&Topology")
         self.topology_actions = {
-            "split_connector": self._action("Split connector at node…", self.split_connector),
-            "join_connectors": self._action("Join two connectors", self.join_connectors),
+            "split_connector": self._action("Split curve at point…", self.split_connector),
+            "join_connectors": self._action("Join two curves", self.join_connectors),
             "split_domain": self._action("Split structured domain…", self.split_domain),
             "join_domains": self._action("Join two structured domains", self.join_domains),
             "convert_domain": self._action(
                 "Convert domain (structured <-> unstructured)",
                 self.convert_selected_domain,
-                tip="The selected domain changes kind on the same connectors (an unstructured "
+                tip="The selected domain changes kind on the same curves (an unstructured "
                 "one needs a single loop of four edges)",
             ),
             "split_block": self._action("Split block…", self.split_block),
@@ -835,10 +874,10 @@ class MainWindow(QMainWindow):
         self.dimension_box.setRange(2, 100000)
         self.dimension_box.setValue(DEFAULT_DIMENSION)
         self.dimension_box.setToolTip(
-            "Points of the connectors the toolbar makes: Connectors on curves and Chain "
-            "connector (per connector), Unstructured domain and Domains from curves (per "
-            "curve), Sketch block (per edge); the layers of Extrude domain. Change a "
-            "connector's points later in its property panel."
+            "Points given to curves that have none: Points on curves and Chain of curves (per "
+            "curve), Structured / Unstructured domain and Domains from curves (per curve), "
+            "Sketch block (per edge); the layers of Extrude domain. Change a curve's points "
+            "later in its property panel."
         )
         toolbar.addWidget(self.dimension_box)
         toolbar.addSeparator()
@@ -1066,7 +1105,7 @@ class MainWindow(QMainWindow):
             )
             if created:
                 log.info("freehand: %s", ", ".join(created))
-                # The new curves are the selection: "Connectors on curves" or
+                # The new curves are the selection: "Points on curves" or
                 # "Unstructured domain" apply to them directly.
                 self.set_selection([self.session.store.get(n).id for n in created])
             return created or []
@@ -1099,10 +1138,11 @@ class MainWindow(QMainWindow):
                 return
 
     def domains_from_selected_curves(self) -> list[str]:
-        from opengrid.model.connectors import CURVE_KINDS
-
-        curves = [n for n in self.selected_names() if self.session.store.get(n).kind in CURVE_KINDS]
+        curves = self._selected_unmeshed_curves()  # (its points come from the network)
         if not curves:
+            if self._selected_curves():
+                self._has_points_message()
+                return []
             self.statusBar().showMessage(self._selection_hint("the curves of the network"), 5000)
             return []
         total = sum(self.session.length(c) for c in curves)
@@ -1190,14 +1230,16 @@ class MainWindow(QMainWindow):
         z = 0 plane otherwise (Scene.pick_display / pick_entity)."""
         if self._ray_picking():
             entity_id, _point = self.scene.pick_display(x, y)
-            if entity_id is not None and entity_id not in self.session.store:
+            if entity_id is None or entity_id not in self.session.store:
                 return None
-            return entity_id
-        tolerance = PICK_PIXELS * self.scene.world_per_pixel()
-        name = pick_entity(self.session, self.scene.display_to_world(x, y), tolerance)
-        if name is None:
-            return None
-        return self.session.store.get(name).id
+        else:
+            tolerance = PICK_PIXELS * self.scene.world_per_pixel()
+            name = pick_entity(self.session, self.scene.display_to_world(x, y), tolerance)
+            if name is None:
+                return None
+            entity_id = self.session.store.get(name).id
+        # A curve's shape and its points are one curve: the points stand for it.
+        return CurveIndex(self.session.store).representative(entity_id)
 
     def _update_coordinates(self, x: float, y: float) -> None:
         """World coordinates of the pointer in the status bar (2D views: the z = 0 plane)."""
@@ -1224,7 +1266,7 @@ class MainWindow(QMainWindow):
             (self.chain_action, curves),
             (self.network_action, curves),
             (self.unstructured_action, curves or connectors),
-            (self.domain_action, connectors),
+            (self.domain_action, connectors or curves),
             (self.extrude_action, structured or "unstructured_domain" in kinds),
             (self.group_action, structured),
             (self.block_action, structured),
@@ -1494,7 +1536,16 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------- model / selection
     def set_selection(self, ids) -> None:
-        ids = [i for i in ids if i in self.session.store]
+        # A curve's shape and its points are one curve, selected as its points (the panel
+        # shows both; model/curves.py).
+        index = CurveIndex(self.session.store)
+        chosen = []
+        for entity_id in ids:
+            if entity_id in self.session.store:
+                representative = index.representative(entity_id)
+                if representative not in chosen:
+                    chosen.append(representative)
+        ids = chosen
         self.selected_ids = list(ids)
         self.scene.set_selection(ids)
         if self.scene.hovered in ids:
@@ -1979,14 +2030,22 @@ class MainWindow(QMainWindow):
         ), "all domains"
 
     def create_domain_on_selection(self) -> str | None:
-        connectors = []
-        for name in self.selected_names():
-            if self.session.store.get(name).kind == "connector":
-                connectors.append(name)
-        if not connectors:
-            self.statusBar().showMessage(self._selection_hint("the connectors of the domain"), 5000)
+        """Structured domain bounded by the selected curves; those without points get the
+        'points' box's, in the same undo step."""
+        connectors = self._selected_of_kind("connector")
+        curves = self._selected_unmeshed_curves()
+        if not connectors and not curves:
+            self.statusBar().showMessage(self._selection_hint("the curves of the domain"), 5000)
             return None
-        name = self._run(lambda: self.session.create_structured_domain(connectors=connectors))
+        if curves:
+            dimension = self.dimension_box.value()
+            name = self._run(
+                lambda: self.session.structured_domain_from_curves(
+                    curves, dimension, connectors=connectors
+                )
+            )
+        else:
+            name = self._run(lambda: self.session.create_structured_domain(connectors=connectors))
         if name:
             ni, nj = self.session.domain_dimensions(name)
             log.info("created %s (%d x %d)", name, ni, nj)
@@ -2020,13 +2079,13 @@ class MainWindow(QMainWindow):
         return name
 
     def create_unstructured_on_selection(self) -> str | None:
-        """Unstructured domain from the selected connectors; selected curves first get a
-        connector each ('points' box points), all in one undo step."""
+        """Unstructured domain bounded by the selected curves; those without points get the
+        'points' box's, all in one undo step."""
         connectors = self._selected_of_kind("connector")
-        curves = self._selected_curves()
+        curves = self._selected_unmeshed_curves()
         if not connectors and not curves:
             self.statusBar().showMessage(
-                self._selection_hint("the connectors or curves of the boundary loops"), 5000
+                self._selection_hint("the curves of the boundary loops"), 5000
             )
             return None
         if curves:
@@ -2177,6 +2236,7 @@ class MainWindow(QMainWindow):
                 return None
         summary = self._run_long("Exporting VTKHDF…", lambda: self.session.export_vtkhdf(path))
         if summary:
+            self.trace.note(f"og.export_vtkhdf({str(path)!r})")
             log.info("exported %s: %s", path, summary)
         return summary
 
@@ -2226,6 +2286,10 @@ class MainWindow(QMainWindow):
             lambda: self.session.export_high_order(path, order=order, nodes=nodes, curved=curved),
         )
         if summary:
+            self.trace.note(
+                f"og.export_high_order({str(path)!r}, order={order}, nodes={nodes!r}, "
+                f"curved={curved})"
+            )
             log.info("exported %s: %s", path, summary)
         return summary
 
@@ -2266,6 +2330,9 @@ class MainWindow(QMainWindow):
             lambda: self.session.export_curved_high_order(path, order=order, nodes=nodes),
         )
         if summary:
+            self.trace.note(
+                f"og.export_curved_high_order({str(path)!r}, order={order}, nodes={nodes!r})"
+            )
             log.info("exported %s: %s", path, summary)
         return summary
 
@@ -2278,6 +2345,7 @@ class MainWindow(QMainWindow):
             if not path:
                 return False
         self._run_long("Exporting Plot3D…", lambda: self.session.export_plot3d(path, binary=binary))
+        self.trace.note(f"og.export_plot3d({str(path)!r}, binary={binary})")
         log.info("exported %s", path)
         return True
 
@@ -2316,7 +2384,7 @@ class MainWindow(QMainWindow):
         if len(members) != 2:
             self.statusBar().showMessage(
                 self._selection_hint(
-                    "the two sides: two connectors (3D: two faces, or one extruded volume)"
+                    "the two sides: two curves (3D: two faces, or one extruded volume)"
                 ),
                 6000,
             )
@@ -2447,9 +2515,7 @@ class MainWindow(QMainWindow):
         members = self._patch_members_from_selection()
         if not members:
             self.statusBar().showMessage(
-                self._selection_hint(
-                    "the boundary connectors (3D: domains, block faces or volumes)"
-                ),
+                self._selection_hint("the boundary curves (3D: domains, block faces or volumes)"),
                 5000,
             )
             return None
@@ -2474,7 +2540,7 @@ class MainWindow(QMainWindow):
         members = self._patch_members_from_selection()
         if not members:
             self.statusBar().showMessage(
-                self._selection_hint("the boundaries to clear (connectors; 3D: faces)"), 5000
+                self._selection_hint("the boundaries to clear (curves; 3D: faces)"), 5000
             )
             return None
         changed = self._run(lambda: self.session.clear_boundary_type(members))
@@ -2496,9 +2562,7 @@ class MainWindow(QMainWindow):
             return None
         created = self._run(lambda: self.session.create_patch(name, patch_type, connectors))
         if created:
-            log.info(
-                "created patch %s (%s) with %d connector(s)", created, patch_type, len(connectors)
-            )
+            log.info("created patch %s (%s) with %d curve(s)", created, patch_type, len(connectors))
             self.validate_boundary()
         return created
 
@@ -2506,7 +2570,7 @@ class MainWindow(QMainWindow):
         connectors = self._patch_members_from_selection()
         if not connectors:
             self.statusBar().showMessage(
-                self._selection_hint("connectors, domains or extruded volumes"), 5000
+                self._selection_hint("curves, domains or extruded volumes"), 5000
             )
             return False
         done = self._run(lambda: self.session.add_to_patch(name, connectors))
@@ -2577,6 +2641,7 @@ class MainWindow(QMainWindow):
                 return None
         summary = self._run_long("Exporting CGNS…", lambda: self.session.export_cgns(path))
         if summary:
+            self.trace.note(f"og.export_cgns({str(path)!r})")
             log.info("exported %s: %s", path, summary)
         self.validate_boundary()
         return summary
@@ -2588,14 +2653,19 @@ class MainWindow(QMainWindow):
                 return None
         summary = self._run_long("Exporting Gmsh…", lambda: self.session.export_gmsh(path))
         if summary:
+            self.trace.note(f"og.export_gmsh({str(path)!r})")
             log.info("exported %s: %s", path, summary)
         self.validate_boundary()
         return summary
 
     # -------------------------------------------------------------- connectors
     def create_connectors_on_selection(self) -> list[str]:
-        curves = self._selected_curves()
+        """Points ('points' box) on each selected curve that has none yet."""
+        curves = self._selected_unmeshed_curves()
         if not curves:
+            if self._selected_curves():
+                self._has_points_message()
+                return []
             self.statusBar().showMessage(self._selection_hint("one or more curves"), 5000)
             return []
         names = self._run(
@@ -2606,9 +2676,27 @@ class MainWindow(QMainWindow):
             self.set_selection([self.session.store.get(n).id for n in names])
         return names or []
 
+    def give_points(self, curve: str) -> list[str]:
+        """Points ('points' box) on one curve without points (its panel's button)."""
+        names = self._run(
+            lambda: self.session.create_connectors_on_curves([curve], self.dimension_box.value())
+        )
+        if names:
+            log.info("%s: %d points", names[0], self.dimension_box.value())
+            self.set_selection([self.session.store.get(names[0]).id])
+        return names or []
+
     def create_chain_connector_on_selection(self) -> str | None:
-        curves = self._selected_curves()
+        """One curve of points along the selected curves (without points yet), end to end."""
+        curves = self._selected_unmeshed_curves()
         if not curves:
+            if self._selected_curves():
+                self.statusBar().showMessage(
+                    "The selected curves have points already: join them instead "
+                    "(Topology > Join two curves)",
+                    6000,
+                )
+                return None
             self.statusBar().showMessage("Select the curves of the chain first", 5000)
             return None
         name = self._run(
@@ -2689,6 +2777,13 @@ class MainWindow(QMainWindow):
             if len(indices) >= len(store.get(sketch_name).params["blocks"]):
                 plain.append(sketch_name)
                 del blocks[sketch_name]
+        # A curve is its points and its shape: both go (the shape is never listed alone).
+        shown = list(plain)
+        index = CurveIndex(store)
+        for name in shown:
+            curve = index.geometry_of.get(store.get(name).id)
+            if curve is not None and curve not in owners and store.get(curve).name not in plain:
+                plain.append(store.get(curve).name)
         extra = []
         if plain:
             try:
@@ -2697,7 +2792,7 @@ class MainWindow(QMainWindow):
                 log.warning("%s", error)
                 self.statusBar().showMessage(str(error).splitlines()[0], 8000)
                 return
-            if extra and not self._confirm_deletion(plain, extra):
+            if extra and not self._confirm_deletion(shown, extra):
                 return
         with self.batch_updates():
             for sketch_name, indices in blocks.items():
@@ -2713,7 +2808,7 @@ class MainWindow(QMainWindow):
                 count = self._run(lambda: self.session.delete(plain, dependents=True))
         if plain and not count:
             return
-        text = f"Deleted {', '.join(plain)}"
+        text = f"Deleted {', '.join(shown)}"
         if extra:
             text += f" and {len(extra)} dependent entities"
         if blocks:
@@ -2721,7 +2816,7 @@ class MainWindow(QMainWindow):
                 f"block(s) {', '.join(map(str, sorted(i)))} of {s}" for s, i in blocks.items()
             )
             if plain:
-                text += f"; deleted {', '.join(plain)}"
+                text += f"; deleted {', '.join(shown)}"
         log.info("%s", text)
         self.statusBar().showMessage(text, 8000)
 
@@ -2829,7 +2924,7 @@ class MainWindow(QMainWindow):
         from opengrid.model.connectors import CURVE_KINDS
         from opengrid.model.entities import SURFACE_KINDS
 
-        sketch = self._one("sketch", "sketch (and the curves, connectors or surfaces to assign)")
+        sketch = self._one("sketch", "sketch (and the curves or surfaces to assign)")
         if sketch is None:
             return None
         geometry = [
@@ -2838,9 +2933,7 @@ class MainWindow(QMainWindow):
             if self.session.store.get(n).kind in (*CURVE_KINDS, "connector", *SURFACE_KINDS)
         ]
         if not geometry:
-            self.statusBar().showMessage(
-                "Select curves, connectors or surfaces with the sketch", 5000
-            )
+            self.statusBar().showMessage("Select curves or surfaces with the sketch", 5000)
             return None
         name = self._run_long(
             "Assigning the geometry…", lambda: self.session.assign_sketch_geometry(sketch, geometry)
@@ -2851,9 +2944,30 @@ class MainWindow(QMainWindow):
         return name
 
     def _selected_curves(self) -> list[str]:
+        """The shapes (database curves) of the selected curves, with or without points."""
+        from opengrid.model.connectors import CURVE_KINDS
+
+        store = self.session.store
+        index = CurveIndex(store)
+        names = []
+        for entity_id in self.selected_ids:
+            entity = store.get(entity_id)
+            if entity.kind in CURVE_KINDS:
+                names.append(entity.name)
+            elif entity_id in index.geometry_of:
+                names.append(store.get(index.geometry_of[entity_id]).name)
+        return names
+
+    def _selected_unmeshed_curves(self) -> list[str]:
+        """The selected curves that have no points yet (their database curves)."""
         from opengrid.model.connectors import CURVE_KINDS
 
         return [n for n in self.selected_names() if self.session.store.get(n).kind in CURVE_KINDS]
+
+    def _has_points_message(self) -> None:
+        self.statusBar().showMessage(
+            "The selected curves have points already: change them in the Properties panel", 6000
+        )
 
     def template_from_selection(self, kind: str) -> str | None:
         """A 2D template from the selected curves (the body, or the boundary)."""
@@ -2933,12 +3047,12 @@ class MainWindow(QMainWindow):
             self.set_selection(ids)
 
     def split_connector(self, index: int | None = None) -> list[str] | None:
-        name = self._one("connector", "connector")
+        name = self._one("connector", "curve with points")
         if name is None:
             return None
         n = len(self.session.connector_nodes(name).points)
         if index is None:
-            index = self._ask_int("Split connector", f"Node (1 … {n - 2}):", 1, n - 2)
+            index = self._ask_int("Split curve", f"At point (1 … {n - 2}):", 1, n - 2)
             if index is None:
                 return None
         names = self._run(lambda: self.session.split_connector(name, index))
@@ -2946,7 +3060,7 @@ class MainWindow(QMainWindow):
         return names
 
     def join_connectors(self) -> str | None:
-        names = self._two("connector", "connectors sharing an end")
+        names = self._two("connector", "curves (with points) sharing an end")
         if names is None:
             return None
         joined = self._run(lambda: self.session.join_connectors(*names))
@@ -3108,6 +3222,7 @@ class MainWindow(QMainWindow):
         except OSError as error:
             self._report_error("Cannot save project", error)
             return False
+        self.trace.note(f"og.save({str(path)!r})")
         self._saved_journal_length = len(self.session.commands.journal.lines)
         self._update_title()
         self._add_recent(path)
@@ -3207,6 +3322,19 @@ class MainWindow(QMainWindow):
         self.session.save_journal(path)
         log.info("journal saved to %s", path)
 
+    def save_trace(self, path: str | None = None) -> str | None:
+        """Save the Python trace of this window (everything done in it, File > New and Open
+        included) as a script."""
+        if path is None:
+            path, _filter = self._save_dialog(
+                self, "Save the script", "opengrid_session.py", "Python script (*.py)"
+            )
+            if not path:
+                return None
+        Path(path).write_text(self.trace.text(), encoding="utf-8")
+        log.info("script saved to %s", path)
+        return str(path)
+
     def _report_error(self, title: str, error: Exception) -> None:
         log.error("%s: %s", title, error)
         if self.isVisible() and not self._off_screen:
@@ -3294,5 +3422,12 @@ class MainWindow(QMainWindow):
         logging.getLogger("opengrid").removeHandler(self.log_panel.handler)
         if self._on_model_changed in self.session.commands._listeners:
             self.session.commands.remove_listener(self._on_model_changed)
+        if self.trace._on_change in self.session.commands._listeners:
+            self.session.commands.remove_listener(self.trace._on_change)
+        self.console.shutdown()
+        if self._trace_dir is not None:
+            import shutil
+
+            shutil.rmtree(self._trace_dir, ignore_errors=True)
         self.viewport.close()
         super().closeEvent(event)

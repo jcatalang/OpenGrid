@@ -17,7 +17,15 @@ def window(qtbot):
 
 def test_model_tree_categories(window):
     assert window.model_tree.category_names() == list(CATEGORIES)
-    assert CATEGORIES == ("Database", "Connectors", "Domains", "Blocks", "Patches", "Zones")
+    assert CATEGORIES == (
+        "Curves", "Surfaces", "Points", "Domains", "Blocks", "Patches", "Zones"
+    )  # fmt: skip
+    # Points and Surfaces show only when there are some.
+    tree = window.model_tree
+    assert tree.category_item("Points").isHidden() and tree.category_item("Surfaces").isHidden()
+    window.session.create_point((0, 0))
+    assert not tree.category_item("Points").isHidden()
+    assert tree.entity_names("Points") == ["point-1"]
 
 
 def test_console_evaluates(window):

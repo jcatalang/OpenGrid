@@ -153,13 +153,13 @@ def test_delete_in_the_gui(qtbot, monkeypatch):
     monkeypatch.setattr(
         window, "_confirm_deletion", lambda names, extra: asked.append((names, extra)) or False
     )
-    window.set_selection(ids("q-b"))
+    window.set_selection(ids("q-b"))  # the shape of curve q-cb: the curve is selected
     window.delete_selected()
-    assert asked == [(["q-b"], ["q-cb", "q"])] and "q" in og.store
+    assert asked == [(["q-cb"], ["q"])] and "q" in og.store
     monkeypatch.setattr(window, "_confirm_deletion", lambda names, extra: True)
     window.delete_selected()
     assert "q" not in og.store and "q-cb" not in og.store and "q-b" not in og.store
-    assert "Deleted q-b and 2 dependent entities" in window.statusBar().currentMessage()
+    assert "Deleted q-cb and 1 dependent entities" in window.statusBar().currentMessage()
     # A domain alone needs no confirmation.
     og.undo()
     window.set_selection(ids("q"))

@@ -848,6 +848,65 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## One "curve" in the window, the IPython console in the lower right, the Script tab (2026-10-21) — requested by the user
+The user found the database curves and the connectors redundant (a sketch's edges appeared
+twice in the tree, `sketch-1-e0-1` and `sketch-1-c0-1`) and asked for one concept called
+curves; the console in the lower right corner instead of the whole bottom, IPython instead of
+plain Python; and the commands done by hand traced as Python in a temporary file, reachable
+from the console.
+- **Curves** (`model/curves.py`, `CurveIndex`). The model keeps its two layers (the database
+  curve is the shape that handles, templates and surfaces use; the connector holds the points
+  that domains and patches use), and the window shows a curve: a connector covering one whole
+  database curve, the only one on it, is one item with that curve. The tree has a Curves
+  category instead of Database and Connectors (one row per curve, named after its points,
+  "line, 21 pts"; a shape's own name is added, "line rectangle-1-bottom, 21 pts", unless it
+  is automatic or a sketch's), and Surfaces and Points categories that show only when not
+  empty. Picking or selecting the shape selects the curve (`MainWindow.set_selection`,
+  `pick_at`); the property panel shows the shape's parameters (`shape:<field>` editors, a
+  sketch's read-only) and the points together, one Apply; a curve without points has a "Give
+  it points" button; deleting a curve takes its shape. Points along part of a curve or along
+  several curves are curves of their own ("6 pts, part of a line", "21 pts, along 2
+  curves"). The actions that give points (Points on curves, Chain of curves, Domains from
+  curves) take only the curves without points and say so otherwise; Structured domain now
+  works on curves without points too (`Session.structured_domain_from_curves`, new: the sides
+  are found on trial points in a transaction that is rolled back, then everything is created
+  as one undo step, as `unstructured_domain_from_curves` did). Automatic connector names are
+  `curve-<n>` (`store.NAME_PREFIX`; counters still per kind, replays unchanged). The
+  window's texts say curve(s) where they said connector(s). The API keeps its names.
+- **Console** (`app/console.py`). `make_console` gives Jupyter's Qt console on an in-process
+  IPython kernel (qtconsole + ipykernel, now in `environment.yml`, the conda recipe and the
+  `gui` extra; without them, or with `OPENGRID_PLAIN_CONSOLE`, the plain console). One kernel
+  per process (IPython's shell is a singleton; per-window kernels left asyncio tasks pending
+  at exit), started when a console is first shown or used, so windows that are never shown
+  (the tests) start none; each console binds `og`, `window`, `opengrid`, `trace_path` again
+  when it gets the focus or runs code. Found by the keyboard test: qtconsole's text area does
+  not claim plain keys, so `2` typed in it switched the view; the console now accepts the
+  shortcut override of keys without Ctrl / Alt / Meta, as a line edit does. `run_line` returns
+  the printed text, the value or the traceback (from the kernel's messages). The tip IPython
+  prints at start is off.
+- **Script tab** (`app/trace.py`, `app/script_panel.py`). `SessionTrace` writes the session's
+  journal to `<temp>/opengrid-traces/session-<time>-<pid>.py` as it grows (a week's traces
+  kept), continued across File > New (`og.new()`) and Open (`og.load(...)`; `Session.load`
+  now puts that line in the new journal before telling the listeners), plus the exports and
+  saves the window makes (`note`). The Script tab shows it with Python colours, Copy, Save
+  as… and Open file; `trace_path` in the console. The trace replays (`opengrid.replay`) to
+  the session it followed (test).
+- **Layout.** Console, Script and Log are tabs of one dock in the right area, under Quality
+  / Smoother / Boundary; the viewport keeps the window's height; default widths 360 / 460 px
+  (`window/state_v3`: the saved layout of earlier versions is not restored). Three tabified
+  docks were tried first: Qt 6.11 leaves a stale tab bar over the viewport when a second
+  group of tabified docks is formed before the window is shown (reproduced in a bare
+  QMainWindow, also on the native macOS platform), hence the tab widget.
+- Tests: `test_curves_view.py` (pairing rules, texts, automatic names and replays,
+  `structured_domain_from_curves` with undo / redo / replay / refusal, the one-row selection,
+  the combined panel moving the shape and changing the points in one Apply, Give it points,
+  deleting a curve, Structured domain on curves in the window), `test_console_trace.py` (the
+  trace across New / Open / save and its replay, old traces removed, the Script tab after
+  drawing, saving and typing, the dock layout, the IPython console, the plain fallback);
+  existing tests follow the new names and texts. macOS: 544 passed, 1 expected failure; lint
+  clean. The Linux bundle in `packaging/dist/linux` predates this round (rebuild it with
+  `build_bundle.sh` to get the curves, the IPython console and the Script tab there).
+
 ## Repository cleanup, README, complete examples, Linux (x86_64) check (2026-10-19) — requested by the user
 
 The user asked whether the clang files and `.github/workflows` were needed, for the README to

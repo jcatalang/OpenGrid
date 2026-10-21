@@ -1,18 +1,26 @@
-"""Model tree: entities grouped as database, connectors, domains, blocks, patches, zones."""
+"""Model tree: entities grouped as curves, surfaces, points, domains, blocks, patches, zones.
+
+A curve and the connector of its points are one row (``model/curves.py``)."""
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
-# Top-level categories, in display order (hierarchy, see docs/SPEC.md).
+from opengrid.model.curves import CurveIndex
+from opengrid.model.entities import SURFACE_KINDS
 from opengrid.validation import ValidationError
 
-CATEGORIES = ("Database", "Connectors", "Domains", "Blocks", "Patches", "Zones")
+# Top-level categories, in display order. Points and Surfaces show only when there are some.
+CATEGORIES = ("Curves", "Surfaces", "Points", "Domains", "Blocks", "Patches", "Zones")
+HIDDEN_WHEN_EMPTY = ("Surfaces", "Points")
 ENTITY_ID_ROLE = Qt.ItemDataRole.UserRole
 
 
-def connector_info(session, entity) -> str:
-    """'<n> pts', with a warning sign if the connector has warnings or exceeds the threshold."""
-    text = f"{entity.params['dimension']} pts"
+def connector_info(session, entity, index: CurveIndex | None = None) -> str:
+    """'line, 21 pts' (the curve's kind when it is one with its points), with a warning sign
+    if the points have warnings or exceed the stretching threshold."""
+    if index is None:
+        index = CurveIndex(session.store)
+    text = index.describe(entity)
     nodes = session.connector_nodes(entity.name)
     if nodes.warnings or nodes.max_stretching_ratio > session.stretching_threshold:
         text += "  ⚠"
@@ -72,20 +80,29 @@ class ModelTree(QTreeWidget):
         return self._category_items[name]
 
     def populate(self, session) -> None:
-        """Rebuild the Database and Connectors categories (entity ids kept as item data)."""
+        """Rebuild the categories (entity ids kept as item data; a curve's row stands for
+        its database curve and its connector)."""
         self.blockSignals(True)
         self._entity_items.clear()
-        database = self._category_items["Database"]
-        connectors = self._category_items["Connectors"]
+        curves = self._category_items["Curves"]
+        surfaces = self._category_items["Surfaces"]
+        points = self._category_items["Points"]
         domains = self._category_items["Domains"]
         blocks = self._category_items["Blocks"]
         patches = self._category_items["Patches"]
         zones = self._category_items["Zones"]
-        for category in (database, connectors, domains, blocks, patches, zones):
+        categories = (curves, surfaces, points, domains, blocks, patches, zones)
+        for category in categories:
             category.takeChildren()
+        index = CurveIndex(session.store)
         for entity in session.store:
             if entity.kind == "connector":
-                item = QTreeWidgetItem(connectors, [entity.name, connector_info(session, entity)])
+                info = connector_info(session, entity, index)
+                item = QTreeWidgetItem(curves, [entity.name, info])
+            elif entity.kind in SURFACE_KINDS:
+                item = QTreeWidgetItem(surfaces, [entity.name, entity.kind.replace("_", " ")])
+            elif entity.kind == "point":
+                item = QTreeWidgetItem(points, [entity.name, "point"])
             elif entity.kind == "domain":
                 item = QTreeWidgetItem(domains, [entity.name, domain_info(session, entity)])
             elif entity.kind == "unstructured_domain":
@@ -132,16 +149,22 @@ class ModelTree(QTreeWidget):
             elif entity.kind == "zone":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(zones, [entity.name, f"{count} domain(s)"])
-            else:
-                item = QTreeWidgetItem(database, [entity.name, entity.kind])
+            else:  # a database curve: listed when no connector stands for it
+                if not index.is_listed(entity):
+                    continue
+                item = QTreeWidgetItem(curves, [entity.name, index.describe(entity)])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
-        for category in (database, connectors, domains, blocks, patches, zones):
+        for curve, connector in index.connector_of.items():
+            self._entity_items[curve] = self._entity_items[connector]  # selecting either
+        for category in categories:
             category.setText(1, f"{category.childCount()}")
+            name = category.text(0)
+            category.setHidden(name in HIDDEN_WHEN_EMPTY and category.childCount() == 0)
         self.resizeColumnToContents(0)
         self.blockSignals(False)
 
-    def entity_names(self, category: str = "Database") -> list[str]:
+    def entity_names(self, category: str = "Curves") -> list[str]:
         parent = self._category_items[category]
         return [parent.child(i).text(0) for i in range(parent.childCount())]
 
@@ -166,11 +189,11 @@ class ModelTree(QTreeWidget):
 
 def patch_summary(entity, store) -> str:
     """The tree's text for a patch: its type, the partner of a periodic one (or NOT PAIRED),
-    and what it holds ("wall, 2 connectors"; 3D: faces)."""
+    and what it holds ("wall, 2 curves"; 3D: faces)."""
     from opengrid.model.patches import partner_of
 
     members = entity.params["members"]
-    unit = "connector"
+    unit = "curve"
     if any("connector" not in m for m in members):
         unit = "face"
     if len(members) != 1:

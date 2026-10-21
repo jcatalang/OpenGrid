@@ -84,6 +84,15 @@ class Change:
         return sorted(self.before)
 
 
+# Automatic names: "<prefix>-<n>", the prefix being the kind but for connectors, which the
+# window shows as curves (a curve's points: model/curves.py).
+NAME_PREFIX = {"connector": "curve"}
+
+
+def name_prefix(kind: str) -> str:
+    return NAME_PREFIX.get(kind, kind)
+
+
 class Store:
     def __init__(self):
         self._entities: dict[int, Entity] = {}
@@ -219,11 +228,12 @@ class Store:
         self._detach(entity.id)
 
     def unique_name(self, kind: str) -> str:
-        """Next free automatic name ``<kind>-<n>``; counters only ever increase."""
+        """Next free automatic name ``<kind>-<n>`` (connectors: ``curve-<n>``); counters only
+        ever increase."""
         counter = self.name_counters.get(kind, 0)
         while True:
             counter += 1
-            name = f"{kind}-{counter}"
+            name = f"{name_prefix(kind)}-{counter}"
             if name not in self._names:
                 break
         self.name_counters[kind] = counter
@@ -233,7 +243,7 @@ class Store:
     def _bump_counter(self, kind: str, name: str) -> None:
         """An explicit name of the automatic form '<kind>-<n>' advances that counter, so a
         journal replay (which always passes explicit names) ends with identical counters."""
-        prefix = f"{kind}-"
+        prefix = f"{name_prefix(kind)}-"
         suffix = name[len(prefix) :]
         if name.startswith(prefix) and suffix.isdigit() and suffix.isascii():
             number = int(suffix)

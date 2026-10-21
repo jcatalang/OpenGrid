@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from opengrid.api import Session
 from opengrid.model.blocks import EXTRUSION_MODES
 from opengrid.model.connectors import CURVE_KINDS, DISTRIBUTION_TYPES, EXPLICIT, SPACING_MODES
+from opengrid.model.curves import CurveIndex
 from opengrid.model.domains import (
     CONTROLS,
     DEFAULT_ELLIPTIC,
@@ -837,7 +838,7 @@ class UnstructuredEditor(QWidget):
             if store is not None and ref in store:
                 names.append(store.get(ref).name)
         self.walls = QLineEdit(", ".join(names))
-        self.walls.setPlaceholderText("wall connectors (none: no layers)")
+        self.walls.setPlaceholderText("wall curves (none: no layers)")
         self.first_height = QLineEdit(format_optional(inflation["first_height"]))
         self.layer_growth = QLineEdit(format_number(inflation["growth_rate"]))
         self.layers = QSpinBox()
@@ -896,7 +897,7 @@ class UnstructuredEditor(QWidget):
         ids = []
         for name in names:
             if self.store is None or name not in self.store:
-                raise ParseError(f"inflation walls: no connector {name!r}")
+                raise ParseError(f"inflation walls: no curve with points {name!r}")
             ids.append(self.store.get(name).id)
         first = parse_optional(self.first_height.text(), "first height")
         if first is None:
@@ -1061,12 +1062,17 @@ class PropertyPanel(QWidget):
 
     message = Signal(str, bool)
     smooth_requested = Signal(str)
+    points_requested = Signal(str)  # a curve without points: give it the toolbar's points
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
         self.session = session
         self.entity_id: int | None = None
         self._editors: dict[str, tuple[str, QWidget]] = {}
+        # A curve with points is its connector (the entity shown) and its shape (a database
+        # curve, model/curves.py): the shape's editors are "shape:<field>".
+        self.shape_id: int | None = None
+        self.shape_changes: dict = {}
 
         self._layout = QVBoxLayout(self)
         self._title = QLabel("No selection")
@@ -1110,12 +1116,18 @@ class PropertyPanel(QWidget):
             self.revert_button.setEnabled(False)
             return
         entity = self.session.store.get(self.entity_id)
+        index = CurveIndex(self.session.store)
+        self.shape_id = index.geometry_of.get(entity.id)
         self._title.setText(f"<b>{entity.kind}</b>  (id {entity.id})")
+        if entity.kind == "connector" or entity.kind in CURVE_KINDS:
+            self._title.setText(f"<b>curve</b>  ({_curve_title(entity, index)}, id {entity.id})")
         name_edit = QLineEdit(entity.name)
         self._form.addRow("name", name_edit)
         self._editors["name"] = ("name", name_edit)
         if entity.kind == "connector":
-            self._connector_rows(entity)
+            if self.shape_id is not None:
+                self._shape_rows(self.session.store.get(self.shape_id), index)
+            self._connector_rows(entity, with_segments=self.shape_id is None)
             self.apply_button.setEnabled(True)
             self.revert_button.setEnabled(True)
             return
@@ -1161,8 +1173,26 @@ class PropertyPanel(QWidget):
         if entity.kind in CURVE_KINDS:
             length = self.session.length(entity.name)
             self._form.addRow("length", QLabel(f"{length:.10g}"))
+            if entity.id not in index.users:
+                button = QPushButton("Give it points")
+                button.setToolTip("The toolbar's 'points' box's number of points, uniform")
+                button.clicked.connect(lambda: self.points_requested.emit(entity.name))
+                self._form.addRow("points", button)
         self.apply_button.setEnabled(True)
         self.revert_button.setEnabled(True)
+
+    def _shape_rows(self, shape, index) -> None:
+        """The editors of a curve's shape (its database curve); a sketch's are its own."""
+        if shape.id in index.generated():
+            label = QLabel(f"{shape.kind}, from the sketch (move its vertices)")
+            label.setWordWrap(True)
+            self._form.addRow("shape", label)
+            return
+        self._form.addRow("shape", QLabel(f"{shape.kind} {shape.name}"))
+        for field, kind in FIELDS[shape.kind]:
+            editor = self._make_editor(kind, shape.params[field])
+            self._form.addRow(field, editor)
+            self._editors["shape:" + field] = (kind, editor)
 
     def _unstructured_rows(self, entity) -> None:
         lines = []
@@ -1285,7 +1315,7 @@ class PropertyPanel(QWidget):
         self._form.addRow("walls", walls)
         self._editors["walls"] = ("group_walls", walls)
         slide = QLineEdit(format_slide(params["slide"], store))
-        slide.setToolTip("auto (every non-wall boundary connector), none, or connector names")
+        slide.setToolTip("auto (every non-wall boundary curve), none, or curve names")
         self._form.addRow("slide", slide)
         self._editors["slide"] = ("slide", slide)
         for field in ("omega", "tolerance"):
@@ -1394,7 +1424,7 @@ class PropertyPanel(QWidget):
         members = QPlainTextEdit("\n".join(names))
         placeholder = f"one {key} name per line"
         if entity.kind == "patch":
-            placeholder = "one connector, domain, block.face or volume.top / .bottom per line"
+            placeholder = "one curve, domain, block.face or volume.top / .bottom per line"
         members.setPlaceholderText(placeholder)
         self._form.addRow("members", members)
         self._editors["members"] = (f"members:{key}", members)
@@ -1452,15 +1482,16 @@ class PropertyPanel(QWidget):
         except ValidationError as error:
             self._show_error(str(error))
 
-    def _connector_rows(self, entity) -> None:
+    def _connector_rows(self, entity, with_segments: bool = True) -> None:
         params = entity.params
-        pieces = []
-        for segment in params["segments"]:
-            curve = self.session.store.get(segment["curve"]).name
-            pieces.append(f"{curve} [{segment['t0']:g} → {segment['t1']:g}]")
-        segments = QLabel("\n".join(pieces))
-        segments.setWordWrap(True)
-        self._form.addRow("segments", segments)
+        if with_segments:  # points along pieces of curves (not one whole curve)
+            pieces = []
+            for segment in params["segments"]:
+                curve = self.session.store.get(segment["curve"]).name
+                pieces.append(f"{curve} [{segment['t0']:g} → {segment['t1']:g}]")
+            segments = QLabel("\n".join(pieces))
+            segments.setWordWrap(True)
+            self._form.addRow("along", segments)
         nodes = self.session.connector_nodes(entity.name)
         for field, kind in CONNECTOR_FIELDS:
             context = None
@@ -1575,6 +1606,7 @@ class PropertyPanel(QWidget):
         entity = self.session.store.get(self.entity_id)
         new_name = None
         changes = {}
+        self.shape_changes = {}
         for field, (kind, editor) in self._editors.items():
             if field == "name":
                 text = editor.text().strip()
@@ -1583,6 +1615,13 @@ class PropertyPanel(QWidget):
                 continue
             if kind == "boundary":
                 continue  # applied as its own command (apply)
+            if field.startswith("shape:"):
+                shape = self.session.store.get(self.shape_id)
+                key = field[len("shape:") :]
+                value = self._read_editor(key, kind, editor)
+                if value != shape.params[key]:
+                    self.shape_changes[key] = value
+                continue
             value = self._read_editor(field, kind, editor)
             if value != entity.params[field]:
                 changes[field] = value
@@ -1752,7 +1791,10 @@ class PropertyPanel(QWidget):
                 # The points propagate through structured domains; a sketch's connector takes
                 # its points and distribution from the sketch, so its edits go there.
                 dimension = changes.pop("dimension", entity.params["dimension"])
+        shape_changes = dict(self.shape_changes)
         try:
+            if shape_changes:  # the curve's shape first: its points follow it
+                self.session.modify(self.session.store.get(self.shape_id).name, **shape_changes)
             if generator is not None:
                 self.session.set_unstructured_generator(name, generator)
                 for warning in self.session.last_warnings:
@@ -1765,7 +1807,7 @@ class PropertyPanel(QWidget):
                     self.message.emit(warning, False)
                 if len(followed) > 1:
                     self.message.emit(
-                        f"{len(followed) - 1} opposite connector(s) followed: "
+                        f"{len(followed) - 1} opposite curve(s) followed: "
                         + ", ".join(n for n in followed if n != name),
                         False,
                     )
@@ -1784,6 +1826,7 @@ class PropertyPanel(QWidget):
             and boundary is None
             and dimension is None
             and generator is None
+            and not shape_changes
         ):
             self.message.emit("No changes", False)
             return False
@@ -1802,6 +1845,15 @@ class PropertyPanel(QWidget):
     def _show_error(self, text: str) -> None:
         self._error.setText(text)
         self.message.emit(text, True)
+
+
+def _curve_title(entity, index: CurveIndex) -> str:
+    """'line, 21 pts', 'arc, no points', '21 pts, part of a line' (the shape's own name is
+    in its row)."""
+    shape_id = index.geometry_of.get(entity.id)
+    if shape_id is not None:
+        return f"{index.store.get(shape_id).kind}, {entity.params['dimension']} pts"
+    return index.describe(entity)
 
 
 def parse_sketch_lines(text: str, kind: str, entity) -> tuple:

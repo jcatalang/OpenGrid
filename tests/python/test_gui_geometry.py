@@ -37,7 +37,8 @@ def test_line_tool_with_snapping(window):
     line = window.session.entity("line-1")
     assert line.params["p1"] == (1.0, 1.0, 0.0)
     assert window.tool.points == []
-    assert window.model_tree.entity_names() == ["anchor", "line-1"]
+    assert window.model_tree.entity_names() == ["line-1"]
+    assert window.model_tree.entity_names("Points") == ["anchor"]
 
 
 def test_snap_to_curve_end(window):

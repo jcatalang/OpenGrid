@@ -26,6 +26,16 @@ referring to the one below:
 | 3D | `block` (structured: six faces or an extrusion), `volume` (closed shell of domains: tetrahedra, boundary layers, pyramids) | `create_block`, `create_extruded_block`, `create_volume` |
 | Boundary conditions | `patch` (typed group of boundary connectors / faces), `zone` | `create_patch`, `set_boundary_type`, `create_zone`, `pair_periodic` |
 
+**Curves in the window, two entities here.** The application shows a curve and its points
+as one item (one row named after the connector, one selection, one property panel, one
+deletion) when a connector covers one whole curve and is the only one on it. A script works
+with both: the database curve is the shape (what `move_handle`, templates and
+`create_connectors_on_curves` take), the connector its points (what domains, patches and
+`set_dimension` take). Automatic connector names are `curve-1`, `curve-2`, ...
+`structured_domain_from_curves(curves, dimension)` and
+`unstructured_domain_from_curves(curves, dimension)` give curves their points and build the
+domain in one undo step, as the window's Structured / Unstructured domain do on curves.
+
 Meshes are not stored: they are computed from the parameters when asked for (`domain_grid`,
 `unstructured_mesh`, `block_grid`, `volume_mesh`) and cached until something they depend on
 changes. The same parameters always give the same mesh (deterministic algorithms).
@@ -59,7 +69,12 @@ Every change (create, modify, rename, delete, split, import, ...) is one command
 - `og.save("model.ogp")` / `og.load(...)` write and read the canonical project file.
 
 The GUI writes the same journal (File → Save journal), so an interactive session can be turned
-into a script and edited.
+into a script and edited. Its **Script** tab (beside the console, in the lower right corner)
+shows the window's trace as it grows: the journal of every model it had (File > New and
+Open appear as `og.new()` / `og.load(...)`) plus the exports and saves, in a temporary file
+whose path is `trace_path` in the console (copy it, save it, or replay it with
+`python file.py`). The console is IPython (Jupyter's Qt console on an in-process kernel)
+when `qtconsole` and `ipykernel` are installed, a plain Python console otherwise.
 
 ## Typical workflows
 

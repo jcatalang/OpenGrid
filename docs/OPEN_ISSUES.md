@@ -51,6 +51,33 @@ history). Phase tags show where each item came from.
   dialog of long operations has no Cancel button except where the operation can stop (the
   smoother); the model tree is rebuilt on every command (fine to a few thousand entities).
 - **3D cut plane** [7a]: fixed normal (x) at the model centre.
+- **Curves in the window** [2026-10-21]:
+  - A curve is one item in the window only. The model and the API keep a database curve
+    (its shape) and a connector (its points), so a script, the journal, the Script tab and
+    some validation messages still name both (`create_line` then `create_connector`,
+    "patch members are connectors"). Renaming the API too was not done: it would break every
+    script and journal.
+  - Only one-to-one pairs are merged: points on part of a curve, or along several curves,
+    are curves of their own, and the shape under them is not listed (it is still picked in
+    the viewport and edited through its handles).
+  - Editing a curve's shape and its points in one Apply is two undo steps (shape, then
+    points), like a modify followed by a rename.
+  - Renaming a curve renames its points; the shape keeps its name (shown in the tree next to
+    the points when it is not automatic).
+  - Drawing a curve does not give it points: they come when a domain is made on it, from
+    Points on curves or from its panel's "Give it points".
+- **Console and Script tab** [2026-10-21]:
+  - One IPython kernel per process (IPython's shell is a singleton): with several windows,
+    `og` and `window` follow the window whose console got the focus last; variables typed in
+    one console are seen by the others.
+  - Code typed in the console runs on the GUI thread (a long call freezes the window until
+    it returns), as with the plain console.
+  - The trace (`<temp>/opengrid-traces/`) has the model's commands plus the window's exports
+    and saves; selection, views and smoothing runs that change no model are not in it. Traces
+    older than a week are removed when a window starts.
+  - Qt 6.11 leaves a stray tab bar over the viewport when a second group of tabified docks is
+    built before the window is shown; Console / Script / Log are therefore tabs inside one
+    dock (they cannot be torn off separately).
 
 ## Structured 2D
 - **Hermite TFI** [3]: can fold C-type grids; the C-grid demo uses plain TFI.

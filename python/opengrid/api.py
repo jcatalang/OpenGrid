@@ -33,7 +33,7 @@ from opengrid.model.blocks import BlockEvaluator
 from opengrid.model.connectors import CURVE_KINDS, ConnectorEvaluator, ConnectorNodes, order_chain
 from opengrid.model.domains import DomainEvaluator, SmoothingResult, assemble_edges
 from opengrid.model.groups import GroupEvaluator, GroupResult
-from opengrid.model.store import Entity, Store
+from opengrid.model.store import Entity, Store, name_prefix
 from opengrid.model.unstructured import UnstructuredEvaluator, assemble_loops
 from opengrid.model.volumes import VolumeEvaluator
 from opengrid.validation import Issue, ValidationError
@@ -681,22 +681,11 @@ class Session:
             connectors = [connectors]
         polylines = {}
         labels = {}
-        items = []
-        counter = self.store.name_counters.get("connector", 0)
-        for curve in curves:
-            entity = self.store.get(curve)
-            if entity.kind not in CURVE_KINDS:
-                raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a curve")])
-            while True:
-                counter += 1
-                connector_name = f"connector-{counter}"
-                if connector_name not in self.store:
-                    break
-            geometry = self.store.geometry(entity.id)
+        items = self._connector_items(curves, dimension, distribution)
+        for (_kind, params, connector_name), curve in zip(items, curves, strict=True):
+            geometry = self.store.geometry(params["segments"])
             polylines[connector_name] = geometry.eval_many(np.linspace(0.0, 1.0, 65))
-            labels[connector_name] = f"{connector_name} (on {entity.name})"
-            params = {"segments": entity.name, "dimension": dimension, "distribution": distribution}
-            items.append(("connector", params, connector_name))
+            labels[connector_name] = f"{connector_name} (on {self.store.get(curve).name})"
         for connector in connectors:
             entity = self.store.get(connector)
             if entity.kind != "connector":
@@ -710,6 +699,63 @@ class Session:
         items.append(("unstructured_domain", params, name))
         label = f"Unstructured domain from {len(curves)} curves"
         return self.commands.run(CreateEntities(items, label=label))[-1]
+
+    def structured_domain_from_curves(
+        self,
+        curves,
+        dimension: int,
+        connectors=(),
+        generator=None,
+        distribution="uniform",
+        name: str | None = None,
+    ) -> str:
+        """Structured domain bounded by curves: points on each curve (``dimension``, as
+        ``create_connectors_on_curves``) and the existing ``connectors`` assembled into its
+        four sides as ``create_structured_domain`` does, as one undo step (the GUI's
+        "Structured domain" on curves without points). Returns the domain's name."""
+        if isinstance(curves, str):
+            curves = [curves]
+        if isinstance(connectors, str):
+            connectors = [connectors]
+        items = self._connector_items(curves, dimension, distribution)
+        names = [connector for _kind, _params, connector in items] + list(connectors)
+        # The sides are found on the new points: tried in a transaction that is rolled back
+        # (a fresh evaluator, so no cache outlives it), then created for real in one step.
+        self.store.begin()
+        try:
+            CreateEntities(items, label="trial").execute(self.store)
+            assembled = assemble_edges(self.store, ConnectorEvaluator(self.store), names)
+            edges = [
+                [
+                    {"connector": self.store.get(i["connector"]).name, "reversed": i["reversed"]}
+                    for i in edge
+                ]
+                for edge in assembled
+            ]
+        finally:
+            self.store.rollback()
+        params = {"edges": edges, "generator": generator, "surface": None}
+        items.append(("domain", params, name))
+        label = f"Structured domain from {len(curves)} curves"
+        return self.commands.run(CreateEntities(items, label=label))[-1]
+
+    def _connector_items(self, curves, dimension: int, distribution) -> list[tuple]:
+        """CreateEntities items of one connector per curve, with the automatic names they
+        will have (the store's counters are not advanced here)."""
+        items = []
+        counter = self.store.name_counters.get("connector", 0)
+        for curve in curves:
+            entity = self.store.get(curve)
+            if entity.kind not in CURVE_KINDS:
+                raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a curve")])
+            while True:
+                counter += 1
+                connector_name = f"{name_prefix('connector')}-{counter}"
+                if connector_name not in self.store:
+                    break
+            params = {"segments": entity.name, "dimension": dimension, "distribution": distribution}
+            items.append(("connector", params, connector_name))
+        return items
 
     def set_unstructured_generator(self, name: str, generator=None, **changes) -> str:
         """Change generator settings of an unstructured domain (``generator``, a dict, and
@@ -2217,9 +2263,8 @@ class Session:
     def load(self, path) -> None:
         """Replace the model by a project file. Clears undo history; journal restarts from it."""
         store = project.load(path)
-        self._replace_store(store)
         self.project_path = Path(path)
-        self.commands.journal.append(f"og.load({str(path)!r})")
+        self._replace_store(store, journal_start=f"og.load({str(path)!r})")
 
     def new(self) -> None:
         """Start an empty model (clears the undo history)."""
@@ -2242,7 +2287,9 @@ class Session:
         self.connectors.invalidate()
         self.domains.invalidate()
 
-    def _replace_store(self, store: Store) -> None:
+    def _replace_store(self, store: Store, journal_start: str | None = None) -> None:
+        """Swap in a model and a fresh command stack (its journal starting with
+        ``journal_start``), then tell the listeners (before, the journal is complete)."""
         listeners = list(self.commands._listeners)
         self.store = store
         self.connectors = ConnectorEvaluator(store)
@@ -2255,6 +2302,8 @@ class Session:
         self.groups.blocks = self.blocks
         self.volumes = VolumeEvaluator(self)
         self.commands = CommandStack(store)
+        if journal_start is not None:
+            self.commands.journal.append(journal_start)
         for listener in listeners:
             self.commands.add_listener(listener)
             listener(None)

@@ -1282,9 +1282,11 @@ faces), with boundary faces preserved bit-for-bit.
 ## 8. GUI architecture
 
 - `MainWindow` (QMainWindow): central `pyvistaqt.QtInteractor` viewport; docks for the model
-  tree (Database / Connectors / Domains / Blocks / Patches / Zones), property panel, log panel
-  and an embedded Python console (namespace pre-populated with `opengrid` and, from Phase 1,
-  the session's `og` API object).
+  tree (Curves / Surfaces / Points / Domains / Blocks / Patches / Zones; a database curve and
+  the connector of its points are one curve, `model/curves.py`) and the property panel on the
+  left, the quality / smoother / boundary panels on the right with, under them, the console
+  (IPython on an in-process kernel, `app/console.py`; namespace `og`, `window`, `opengrid`,
+  `trace_path`), the Script tab (the session's trace, `app/trace.py`) and the log.
 - The GUI observes the model through a `ModelChanged` signal emitted by the CommandStack
   after each command/undo/redo; views redraw from the store. Views never mutate the model.
 - High-DPI: Qt6 is HiDPI-aware by default; VTK render window DPI is set from the screen's

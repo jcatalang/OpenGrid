@@ -264,8 +264,8 @@ def test_unstructured_domain_from_curves_is_one_step_and_names_open_ends():
     og = opengrid.Session()
     og.create_circle((0, 0), 1.0, name="c")
     name = og.unstructured_domain_from_curves("c", 61)
-    assert og.names("connector") == ["connector-1"]
-    assert og.entity("connector-1").params["dimension"] == 61
+    assert og.names("connector") == ["curve-1"]
+    assert og.entity("curve-1").params["dimension"] == 61
     assert "triangles" in og.domain_status(name)
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
     og.undo()

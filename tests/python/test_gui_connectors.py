@@ -28,13 +28,22 @@ def _ids(window, *names):
 def test_connectors_on_selected_curves(window):
     window.set_selection(_ids(window, "a", "b"))
     window.dimension_box.setValue(11)
+    assert window.model_tree.entity_names() == ["a", "b", "c"]
+    assert window.model_tree.category_item("Curves").child(0).text(1) == "line, no points"
     names = window.create_connectors_on_selection()
-    assert names == ["connector-1", "connector-2"]
-    assert window.model_tree.entity_names("Connectors") == names
+    assert names == ["curve-1", "curve-2"]
+    # One row per curve: its shape and its points are one item, named after the points.
+    assert window.model_tree.entity_names() == ["c", *names]
+    assert window.model_tree.category_item("Curves").child(1).text(1) == "line a, 11 pts"
     assert window.selected_names() == names
-    assert len(window.session.connector_nodes("connector-1").points) == 11
+    assert len(window.session.connector_nodes("curve-1").points) == 11
+    # Picking the shape selects the curve; asking again for points changes nothing.
+    window.set_selection(_ids(window, "a"))
+    assert window.selected_names() == ["curve-1"]
+    assert window.create_connectors_on_selection() == []
+    assert "have points already" in window.statusBar().currentMessage()
     window.undo()
-    assert window.model_tree.entity_names("Connectors") == []
+    assert window.model_tree.entity_names() == ["a", "b", "c"]
 
 
 def test_chain_connector_from_selection(window):
@@ -152,10 +161,15 @@ def test_distribution_suggestions_and_boundary_type_in_the_panel(window):
 def test_stretching_warning_and_threshold(window):
     window.session.create_connector("a", 21, {"type": "geometric", "growth_ratio": 1.4}, name="ca")
     assert "max stretching ratio 1.4 exceeds 1.3" in window.log_panel.toPlainText()
-    item_text = window.model_tree.category_item("Connectors").child(0).text(1)
-    assert "⚠" in item_text
+
+    def row_text(name):
+        curves = window.model_tree.category_item("Curves")
+        rows = [curves.child(i) for i in range(curves.childCount())]
+        return next(row.text(1) for row in rows if row.text(0) == name)
+
+    assert "⚠" in row_text("ca")
     window.set_threshold(1.5)
-    assert "⚠" not in window.model_tree.category_item("Connectors").child(0).text(1)
+    assert "⚠" not in row_text("ca")
 
 
 def test_colouring_and_nodes_toggle(window):

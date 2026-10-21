@@ -415,14 +415,11 @@ def test_actions_explain_a_wrong_selection(live):
     window.unstructured_action.trigger()
     assert (
         window.statusBar().currentMessage()
-        == "d is a domain: select the connectors or curves of the boundary loops"
+        == "d is a domain: select the curves of the boundary loops"
     )
     window.set_selection([])
     window.unstructured_action.trigger()
-    assert (
-        window.statusBar().currentMessage()
-        == "Select the connectors or curves of the boundary loops first"
-    )
+    assert window.statusBar().currentMessage() == "Select the curves of the boundary loops first"
     assert live.og.names("unstructured_domain") == []
 
 
@@ -484,14 +481,15 @@ def test_context_menu_offers_what_applies_to_the_selection(live):
     window.set_selection([])
     names = labels(window.context_menu())
     assert "Delete" not in names and "Reset camera" in names and "Topology" in names
-    window.set_selection([og.entity("b").id])  # a curve
+    free = og.create_line((5, 5), (6, 5))
+    window.set_selection([og.entity(free).id])  # a curve without points
     names = labels(window.context_menu())
-    assert "Connectors on curves" in names and "Structured domain" not in names
+    assert "Points on curves" in names and "Structured domain" in names
     assert "Zoom to selection" in names and "Delete" in names
     window.set_selection([og.entity("cr").id])  # a connector
     names = labels(window.context_menu())
     assert "Structured domain" in names and "Unstructured domain" in names
-    assert "Connectors on curves" not in names
+    assert "Points on curves" not in names
     window.set_selection([og.entity("d").id])  # a domain
     names = labels(window.context_menu())
     assert "Extrude domain" in names and "Smoothing group" in names

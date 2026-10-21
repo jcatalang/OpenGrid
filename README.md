@@ -200,8 +200,11 @@ a launcher of this environment (always the current code), with the OpenGrid icon
 
 ## Scripting
 
-The GUI and scripts share one API (`opengrid.Session`); the GUI's Python console exposes the
-open model as `og`.
+The GUI and scripts share one API (`opengrid.Session`); the GUI's IPython console exposes
+the open model as `og`, and its Script tab shows everything done in the window as the
+`Session` calls that redo it (a replayable script, also in a temporary file: `trace_path`).
+In the window a curve and its points are one item; in the API they are a database curve
+(the shape) and a connector (the points), as below.
 
 **An O-grid around a cylinder, ready for a solver:**
 
@@ -337,14 +340,26 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
 
 ## The desktop application
 
-- Model tree, property panel, quality / smoother / boundary panels, log, Python console.
-- Drawing tools for geometry, connectors, freehand curves and sketch blocks (toolbar icons,
-  keys `S P L A W B N D K`); snapping to points, curve ends and, with the reference grid
-  shown, its lines; live drag previews of handles; double-click adds or removes curve
-  points. A selected domain or connector shows the handles of what moves it (its curves'
-  points, or its sketch's vertices): dragging one regenerates and remeshes.
+- Model tree (curves, surfaces, domains, blocks, patches, zones), property panel and the
+  quality / smoother / boundary panels; in the lower right corner, under them, an **IPython
+  console** (completion, `?` help, magics; `og` is the open model), the **Script** tab and
+  the log.
+- **Curves.** A curve and its points are one item: one row in the tree, named after its
+  points (`curve-1`, with its kind and point count: `line, 21 pts`), one selection, one
+  property panel with the shape's parameters and the points' number and distribution, and
+  one deletion. A curve gets points (the toolbar's "points" box) when a domain is made on
+  it, from Create > Points on curves, or from its panel's "Give it points".
+- **Script.** Everything done in the window, drawn, edited, undone, exported or typed in the
+  console, is shown as the Python that redoes it, kept in a temporary file (`trace_path` in
+  the console; File > New and Open continue it): copy it, save it, or replay it with
+  `python script.py`.
+- Drawing tools for points, curves, freehand curves and sketch blocks (toolbar icons, keys
+  `S P L A W B N D K`); snapping to points, curve ends and, with the reference grid shown, its
+  lines; live drag previews of handles; double-click adds or removes curve points. A selected
+  domain or curve shows the handles of what moves it (its shape's points, or its sketch's
+  vertices): dragging one regenerates and remeshes.
 - Create > Shapes (a dialog per shape), Create > Mesh surfaces and Volume from faces for 3D
-  bodies; the toolbar's "points" box sets the points of the connectors the tools make.
+  bodies; Structured and Unstructured domain work on the selected curves directly.
 - Colour by quality, patches or entities; node display; block cuts and shrunk cells for 3D.
 - **Navigation.** 2D: left-drag (or a three-finger drag on a trackpad) zooms to a window
   drawn live, or pans (View menu); Shift + drag or middle-drag pans; wheel / two-finger scroll
@@ -366,12 +381,12 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   status line says whether the boundary is ready to export. It follows a 2D model as you
   edit; Set type, Pair as periodic and Clear type act on the selection.
 - Delete takes along what depends on the selection after a confirmation listing it (a curve
-  with its connectors and domains); patches, zones and groups only lose members; deleting a
-  sketch block's domain removes the block.
+  with its domains); patches, zones and groups only lose members; deleting a sketch block's
+  domain removes the block.
 - The property panel suggests values: clustering spacings when a distribution type is
   chosen (a quarter of the uniform spacing at the clustered ends, growth 1.2), the first
   layer height of inflation layers (a twentieth of the boundary spacing, used when the field
-  is left empty), and a connector's boundary type.
+  is left empty), and a curve's boundary type.
 - Long operations (volume meshing, templates, CAD import, high-order elements, exports) run in
   a worker thread behind a busy dialog; the window keeps repainting.
 - Undo / redo of every action (an edit plus a rename in the property panel is one step; Enter

@@ -229,6 +229,13 @@ loops (the largest = outer), then the domain, as one undo step (the GUI's
 meet exactly (``create_freehand`` with ``close_tolerance`` closes a stroke). Returns
 the domain's name; ``generator`` as in ``create_unstructured_domain``.
 
+### `structured_domain_from_curves(curves, dimension: int, connectors=(), generator=None, distribution='uniform', name: str | None = None) -> str`
+
+Structured domain bounded by curves: points on each curve (``dimension``, as
+``create_connectors_on_curves``) and the existing ``connectors`` assembled into its
+four sides as ``create_structured_domain`` does, as one undo step (the GUI's
+"Structured domain" on curves without points). Returns the domain's name.
+
 ### `set_domain_generator(name: str, **changes) -> str`
 
 Update generator settings, e.g. ``set_domain_generator("d", method="hermite_tfi")`` or

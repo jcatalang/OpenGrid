@@ -264,11 +264,11 @@ def test_camera_reset_keeps_the_direction_and_views_are_presets(qtbot):
     assert window.scene.view_name() is None  # isometric
     QTest.keyClick(window.model_tree, Qt.Key.Key_1)
     assert window.scene.view_name() == "xy"
-    window.console.input.setFocus()
-    QTest.keyClick(window.console.input, Qt.Key.Key_2)
+    console_input = window.console.focus_input()
+    QTest.keyClick(console_input, Qt.Key.Key_2)
     assert window.scene.view_name() == "xy"  # typed into the console instead
-    assert window.console.input.text() == "2"
-    window.console.input.clear()
+    assert window.console.input_text() == "2"
+    window.console.clear_input()
     window.view_actions["xy"].trigger()
     window.view_actions["xy"].trigger()
     window.set_selection([window.session.entity("c-c-lower").id])
@@ -313,7 +313,7 @@ def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
     live.click((6.0, -4.0, 0.0), shift=True)  # Shift + empty: the selection stays
     assert window.selected_names() == [block]
     live.click((2.0, 0.5, 0.5))  # the ray through this point runs on through line-1 (y = z = 0)
-    assert window.selected_names() == ["line-1"]
+    assert window.selected_names() == ["curve-1"]  # line-1 with its points: curve-1
     # Picking what is under the pointer also works from the API (display coordinates).
     point = live.display((2.0, 0.7, 0.3))
     x = point.x()

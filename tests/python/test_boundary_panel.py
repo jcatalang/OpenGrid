@@ -109,15 +109,11 @@ def test_clear_boundary_type_and_tree_labels():
     assert og.entity("wall").params["members"] == ({"connector": og.entity("c-top").id},)
     from opengrid.app.model_tree import patch_summary
 
-    assert patch_summary(og.entity("wall"), og.store) == "wall, 1 connector"
-    assert (
-        patch_summary(og.entity("periodic-1a"), og.store) == "periodic ↔ periodic-1b, 1 connector"
-    )
-    assert (
-        patch_summary(og.entity("periodic-1b"), og.store) == "periodic ↔ periodic-1a, 1 connector"
-    )
+    assert patch_summary(og.entity("wall"), og.store) == "wall, 1 curve"
+    assert patch_summary(og.entity("periodic-1a"), og.store) == "periodic ↔ periodic-1b, 1 curve"
+    assert patch_summary(og.entity("periodic-1b"), og.store) == "periodic ↔ periodic-1a, 1 curve"
     og.create_patch("lonely", "periodic", [])
-    assert patch_summary(og.entity("lonely"), og.store) == "periodic, NOT PAIRED, 0 connectors"
+    assert patch_summary(og.entity("lonely"), og.store) == "periodic, NOT PAIRED, 0 curves"
     from opengrid.project.ogp import to_json
 
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
@@ -167,7 +163,7 @@ def test_boundary_panel_follows_the_model(window, qtbot):
     (pair_row,) = dock.rows("Periodic pairs")
     assert pair_row[0] == "periodic-1a ↔ periodic-1b"
     assert pair_row[1] == "translation (2, 0, 0)"
-    assert pair_row[3] == "match: 1 connector node by node"
+    assert pair_row[3] == "match: 1 curve node by node"
     assert "All 4 boundaries have a type, 1 periodic pair(s) match" in dock.status.text()
     # Clicking a row selects the boundary; the pair row selects the source patch.
     dock._on_item_clicked(dock.tree.topLevelItem(0).child(1), 0)

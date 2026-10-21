@@ -99,3 +99,29 @@ def test_extruded_volume_faces(live):
     assert "side wall" in window.property_panel._title.text()
     window._set_type_from_dock("outlet", "")
     assert og.entity("outlet").params["members"] == (side,)
+
+
+def test_faces_pair_as_periodic(live, tmp_path):
+    """The user's case (2026-10-21): two side faces of an extruded box paired, then the
+    bottom (its base domain) with the top; the Boundary panel follows and the pairs export."""
+    window, og = live.window, live.og
+    block = _box(og)
+    block_id = og.entity(block).id
+    live.widget.render()
+    sides = [_face_at(og, block, 1, 0.0), _face_at(og, block, 1, 1.0)]
+    window.set_selection([], faces=[{"block": block_id, "face": f} for f in sides])
+    assert window.pair_selection_as_periodic()
+    base = og.entity(block).params["extrusion"]["domain"]
+    window.set_selection([base], faces=[{"block": block_id, "face": _face_at(og, block, 2, 1.0)}])
+    assert window.pair_selection_as_periodic()
+    report = og.boundary_report()
+    assert len(report.periodic) == 2 and all(
+        type(match).__name__ == "FaceMatch" for _s, _t, match in report.periodic
+    )
+    dock = window.boundary_dock
+    live.qtbot.waitUntil(lambda: len(dock.rows("Periodic pairs")) == 2, timeout=3000)
+    assert not dock.stale
+    others = [_face_at(og, block, 0, 0.0), _face_at(og, block, 0, 2.0)]
+    og.set_boundary_type([{"block": block, "face": f} for f in others], "wall")
+    summary = og.export_cgns(tmp_path / "box.cgns")
+    assert summary["connections"] == 4  # two pairs, both ways

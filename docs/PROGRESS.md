@@ -898,6 +898,13 @@ on a face of an extruded box selected nothing: how are boundary conditions set i
   tab's runs, failures, read-only trace and shared names (`test_console_trace.py`), the
   preview and the bold selection (`test_curves_view.py`); the 3D picking test now expects
   faces, then the block. macOS: 553 passed, 1 expected failure; lint clean.
+- Follow-up (the user asked whether Pair as periodic works with faces): it did (their case,
+  replayed from its trace: both pairs matched face to face, CGNS 4 periodic connections,
+  Gmsh 2 links), but the Boundary panel still showed the 2D sketch's report ("no type yet"
+  on the curves) under "press Refresh". The panel now reruns a 3D report after each change
+  (it reuses the meshes drawn in the view) unless the last one took more than a second
+  (`SLOW_REPORT_SECONDS`), and a stale panel clears its rows. Test: the user's workflow in
+  the window (`test_faces_pair_as_periodic`). 554 passed, 1 expected failure.
 
 ## One "curve" in the window, the IPython console in the lower right, the Script tab (2026-10-21) — requested by the user
 The user found the database curves and the connectors redundant (a sketch's edges appeared

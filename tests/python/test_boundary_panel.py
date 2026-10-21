@@ -188,13 +188,19 @@ def test_boundary_panel_follows_the_model(window, qtbot):
     qtbot.waitUntil(lambda: "1 periodic pair(s) do not match" in dock.status.text(), timeout=3000)
     assert "same number of points" in dock.rows("Periodic pairs")[0][3]
     assert dock.rows("Boundaries")[1][3] == "ok"  # the connector itself is assigned
-    # A 3D model: the panel waits for Refresh.
+    # A 3D model: the panel follows it too (no rows of the 2D model left over) ...
     og.undo()
     og.undo()
     og.make_periodic_pair(["c-left"], ["c-right"])
     assert window.extrude_model(thickness=0.1, ends="periodic")
+    qtbot.waitUntil(lambda: "ready to export" in dock.status.text(), timeout=3000)
+    assert all("-ext." in row[0] for row in dock.rows("Boundaries"))
+    # ... unless its check is slow: then it waits for Refresh, its old rows cleared.
+    window._report_seconds = 5.0
+    og.create_patch("extra", "wall", [])
     qtbot.waitUntil(lambda: "press Refresh" in dock.status.text(), timeout=3000)
-    assert dock.stale
+    assert dock.stale and dock.rows("Boundaries") == []
+    og.undo()
     dock.refresh.click()
     assert not dock.stale and "ready to export" in dock.status.text()
     assert [row[0] for row in dock.rows("Periodic pairs")] == [

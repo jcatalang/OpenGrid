@@ -75,6 +75,10 @@ history). Phase tags show where each item came from.
     lists them) and Delete does not apply to them.
   - Colour by patch in 3D finds the boundary faces by meshing the model once (when switched
     on or refreshed); after that it follows the patches.
+  - The Boundary panel reruns a 3D check after each change only while one check takes under
+    a second; on larger models it waits for Refresh (and shows no rows meanwhile).
+  - A click on the bottom of a box extruded from a domain may select that domain rather than
+    the block's `kmin` face (both are drawn there); either works as the patch member.
 - **Console and Script tab** [2026-10-21]:
   - Code run from the Script tab runs on the GUI thread, like the console; lines that ran
     cannot be edited there (edit the saved script and run it, or use undo).

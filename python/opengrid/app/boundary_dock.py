@@ -300,9 +300,13 @@ class BoundaryDock(QWidget):
         self.status.setStyleSheet(f"color: {color}; font-weight: bold")
 
     def mark_stale(self) -> None:
-        """A 3D model changed: the report is not recomputed by itself."""
+        """A large 3D model changed: the report is not recomputed by itself, and the rows of
+        the previous one go (they would describe another model)."""
         self.stale = True
-        self.status.setText("The model changed: press Refresh (it meshes the blocks and volumes)")
+        self.tree.clear()
+        self.status.setText(
+            "The model changed: press Refresh (the check of this 3D model takes a while)"
+        )
         self.status.setStyleSheet("")
 
     def rows(self, group: str) -> list[list[str]]:

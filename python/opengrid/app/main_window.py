@@ -78,6 +78,9 @@ TOOLBAR_ICON_SIZE = 20
 WINDOW_STATE_KEY = "window/state_v3"  # bumped when the default toolbar or dock layout changes
 PROJECT_FILTER = "OpenGrid project (*.ogp)"
 DEFAULT_DIMENSION = 21
+# A 3D boundary report slower than this is not rerun after each change (the Boundary panel
+# then waits for Refresh).
+SLOW_REPORT_SECONDS = 1.0
 CONSOLE_BANNER = (
     "OpenGrid console. og: this window's session (every change shows in the window), "
     "window: the window, opengrid: the package, trace_path: the Python of everything done "
@@ -342,6 +345,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.coordinates_label)
         self._last_pointer: tuple[float, float] | None = None
         self._right_press_position: tuple[float, float] | None = None
+        self._report_seconds = 0.0  # how long the last 3D boundary report took
         self._boundary_timer = QTimer(self)  # the Boundary panel follows the model (coalesced)
         self._boundary_timer.setSingleShot(True)
         self._boundary_timer.setInterval(100)
@@ -1670,9 +1674,9 @@ class MainWindow(QMainWindow):
         self._boundary_timer.start()
 
     def _refresh_boundary(self) -> None:
-        """The Boundary panel after a change: recomputed for a 2D model (cheap), marked stale
-        for a 3D one (its report meshes every block and volume: Refresh runs it)."""
-        if self.session.is_3d():
+        """The Boundary panel after a change: recomputed (a 3D report reuses the meshes drawn
+        in the view), unless the last 3D report was slow: then it waits for Refresh."""
+        if self.session.is_3d() and self._report_seconds > SLOW_REPORT_SECONDS:
             self.boundary_dock.mark_stale()
             return
         try:
@@ -2671,7 +2675,12 @@ class MainWindow(QMainWindow):
         return created
 
     def validate_boundary(self):
+        import time
+
+        started = time.perf_counter()
         report = self.session.boundary_report()
+        if self.session.is_3d():
+            self._report_seconds = time.perf_counter() - started
         self.boundary_dock.show_report(report, self.session.store)
         if self.scene.patch_colors is not None:
             self.scene.patch_colors = self._patch_colors(report)

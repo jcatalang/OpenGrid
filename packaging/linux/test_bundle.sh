@@ -7,6 +7,9 @@
 #   packaging/linux/test_bundle.sh [archive] [image]   # default: the newest archive in
 #                                                      # packaging/dist/linux, openSUSE Leap 15.6
 #   packaging/linux/test_bundle.sh "" rockylinux:8      # glibc 2.28, the bundle's minimum
+#   packaging/linux/test_bundle.sh "" registry.suse.com/suse/sle15:15.3   # SLES 15 SP3
+# Images whose repositories have no desktop packages (SLES base images) get the headless
+# checks only: imports, meshing, exports.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/packaging/dist/linux"
@@ -22,9 +25,13 @@ step() { echo "== $(date +%H:%M:%S) $*"; }
 step "$(. /etc/os-release && echo "$PRETTY_NAME"), $(uname -m), glibc $(ldd --version | head -1 | awk '{print $NF}')"
 step "desktop packages only (Mesa, fonts, X11 helpers) and a virtual display"
 if command -v zypper >/dev/null; then
-  zypper --non-interactive --quiet refresh
-  zypper --non-interactive --quiet install --no-recommends tar gzip which xauth Mesa-libGL1 \
-    Mesa-libEGL1 Mesa-dri libxkbcommon-x11-0 fontconfig dejavu-fonts xvfb-run
+  zypper --non-interactive --quiet refresh || echo "   (repositories not reachable)"
+  if ! command -v tar >/dev/null || ! command -v gzip >/dev/null; then
+    zypper --non-interactive --quiet install --no-recommends tar gzip which
+  fi
+  zypper --non-interactive --quiet install --no-recommends xauth Mesa-libGL1 Mesa-libEGL1 \
+    Mesa-dri libxkbcommon-x11-0 fontconfig dejavu-fonts xvfb-run \
+    || echo "   no desktop packages in this image's repositories: headless checks only"
 elif command -v dnf >/dev/null; then
   dnf install -y -q tar gzip which mesa-libGL mesa-libEGL mesa-dri-drivers libxkbcommon-x11 \
     fontconfig dejavu-sans-fonts xorg-x11-server-Xvfb xorg-x11-xauth >/dev/null
@@ -43,7 +50,25 @@ tar -xzf /bundle.tar.gz
 B="$(ls -d /home/user/OpenGrid-*-linux-x86_64)"
 cd "$B"
 step "first start and the imports"
-./opengrid-python -c "import opengrid, opengrid._core as c, opengrid._occt, netgen.meshing, PySide6, vtk; print('   OpenGrid', opengrid.__version__, '- core', opengrid.core_version(), '- CGNS', c.cgns_available(), '- OpenMP', c.openmp_enabled(), '- threads', opengrid.threads())"
+./opengrid-python -c "import opengrid, opengrid._core as c, opengrid._occt, netgen.meshing; print('   OpenGrid', opengrid.__version__, '- core', opengrid.core_version(), '- CGNS', c.cgns_available(), '- OpenMP', c.openmp_enabled(), '- threads', opengrid.threads())"
+step "headless: a 2D case extruded, CGNS and Gmsh (no display, no OpenGL)"
+./opengrid-python - <<'PY'
+import opengrid
+og = opengrid.Session()
+box = og.create_rectangle(width=2.0, height=1.0, name="box")
+body = og.create_ellipse(center=(0.0, 0.0), a=0.3, b=0.15, name="body")
+og.unstructured_domain_from_curves([*box, body], 31, name="flow")
+walls = og.names("connector")
+og.set_boundary_type(walls[4:], "wall")
+og.set_boundary_type(walls[:4], "farfield")
+og.extrude_model(0.05)
+print("   ", og.export_cgns("/tmp/headless.cgns"), og.export_gmsh("/tmp/headless.msh"))
+PY
+if ! command -v xvfb-run >/dev/null; then
+  step "done (headless checks only)"
+  exit 0
+fi
+./opengrid-python -c "import PySide6, vtk; print('   Qt and VTK load')"
 step "2D: airfoil cases (shapes, inflation, periodic pair, extrusion, CGNS / Gmsh)"
 ./opengrid-python examples/12a_airfoil_cases.py | tail -3
 step "3D: bodies in a box (surface meshes, Netgen volumes with prism layers)"

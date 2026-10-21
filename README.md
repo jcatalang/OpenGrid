@@ -619,8 +619,8 @@ use (curves as one item, 3D boundary faces, the Script tab). OpenGrid is develop
 (Apple silicon) and checked on Linux x86_64: on openSUSE Leap 15.6 it builds with GCC 15 and
 warnings as errors, and its C++ and Python tests pass; the self-contained Linux bundle also
 runs on openSUSE Leap 15.5 and Rocky Linux 8. Those Linux checks ran in containers, not on
-real x86 hardware with a GPU driver, and predate the latest application changes (rebuild the
-bundle with `packaging/linux/build_bundle.sh`). Known limitations, for example that curved
+real x86 hardware with a GPU driver; the GitHub workflow **Linux bundle** (run by hand) builds
+the current bundle and runs the tests on x86_64 Linux. Known limitations, for example that curved
 high-order elements are not untangled when they fold, that 3D automatic topology is not
 available, that Netgen dominates very large tetrahedral meshes, and that the GPU path is
 experimental, are collected in [`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).

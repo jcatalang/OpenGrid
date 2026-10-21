@@ -4,13 +4,16 @@
 # (conda-pack), with launchers. The target machine needs nothing else: no conda, no compiler,
 # no root (only glibc >= 2.28 and an OpenGL driver for the window, which every desktop has).
 #
-#   packaging/linux/build_bundle.sh            # -> packaging/dist/linux/
+#   packaging/linux/build_bundle.sh            # -> packaging/dist/linux/ (in Docker)
 #   OG_DETACH=1 packaging/linux/build_bundle.sh   # in the background (docker logs -f ...)
+#   OG_NATIVE=1 packaging/linux/build_bundle.sh   # directly on this Linux x86_64 machine
 #
-# Runs in a Docker container (openSUSE Leap 15.6 x86_64, emulated on Apple silicon): the conda
-# package from packaging/conda/recipe.yaml (rattler-build, conda-forge's GCC), a fresh runtime
-# environment with it, conda-pack, the launchers. Then check it with
-# packaging/linux/test_bundle.sh in a clean container.
+# The conda package from packaging/conda/recipe.yaml (rattler-build, conda-forge's GCC), a
+# fresh runtime environment with it, conda-pack, the launchers; in a Docker container
+# (openSUSE Leap 15.6 x86_64; emulated, hence slow, on Apple silicon) or, with OG_NATIVE, on
+# the machine itself (a Linux x86_64 with internet: the GitHub workflow
+# .github/workflows/linux-bundle.yml does this). Then check it with
+# packaging/linux/test_bundle.sh in clean containers.
 set -euo pipefail
 IMAGE="${OG_IMAGE:-opensuse/leap:15.6}"
 PLATFORM="${OG_PLATFORM:-linux/amd64}"
@@ -31,7 +34,11 @@ step "$(. /etc/os-release && echo "$PRETTY_NAME"), $(uname -m)"
 command -v tar >/dev/null && command -v gzip >/dev/null || {
   zypper --non-interactive --quiet refresh && zypper --non-interactive --quiet install tar gzip curl
 }
-CONDA=/opt/miniforge
+# Paths: the container's, or (OG_NATIVE) folders of the checkout given by the caller.
+CONDA="${OG_CONDA:-/opt/miniforge}"
+WORK="${OG_WORK:-/work}"
+BUILD="${OG_BUILD:-/build}"
+OUTDIR="${OG_OUT:-/out}"
 if [ ! -x "$CONDA/bin/conda" ]; then
   step "Miniforge"
   curl -fsSL -o /tmp/miniforge.sh \
@@ -43,31 +50,35 @@ if [ ! -x "$CONDA/envs/pack/bin/rattler-build" ]; then
   step "tools: rattler-build, conda-pack"
   conda create -y -q -n pack -c conda-forge --override-channels rattler-build conda-pack
 fi
-mkdir -p /work /build && tar -xzf /source.tar.gz -C /work
+mkdir -p "$WORK" "$BUILD"
+if [ -z "${OG_NATIVE:-}" ]; then
+  tar -xzf /source.tar.gz -C "$WORK"
+fi
+rm -rf "$BUILD/channel" "$BUILD/env" "$BUILD/env.tar.gz" "$BUILD"/OpenGrid-*-linux-x86_64
 step "conda package (rattler-build; its own build and test environments)"
-"$CONDA/envs/pack/bin/rattler-build" build --recipe /work/packaging/conda/recipe.yaml \
-  -m /work/packaging/conda/variants.yaml -c conda-forge --output-dir /build/channel \
-  > /build/rattler.log 2>&1 || { tail -60 /build/rattler.log; exit 1; }
-ls /build/channel/linux-64/
+"$CONDA/envs/pack/bin/rattler-build" build --recipe "$WORK/packaging/conda/recipe.yaml" \
+  -m "$WORK/packaging/conda/variants.yaml" -c conda-forge --output-dir "$BUILD/channel" \
+  > "$BUILD/rattler.log" 2>&1 || { tail -60 "$BUILD/rattler.log"; exit 1; }
+ls "$BUILD/channel/linux-64/"
 step "runtime environment"
-conda create -y -q -p /build/env --override-channels -c "file:///build/channel" -c conda-forge \
+conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" -c conda-forge \
   "opengrid=$OG_VERSION" python=3.12
 step "conda-pack"
-"$CONDA/envs/pack/bin/conda-pack" -p /build/env -o /build/env.tar.gz --quiet
+"$CONDA/envs/pack/bin/conda-pack" -p "$BUILD/env" -o "$BUILD/env.tar.gz" --quiet
 NAME="OpenGrid-$OG_VERSION-linux-x86_64"
-B="/build/$NAME"
+B="$BUILD/$NAME"
 mkdir -p "$B/env"
-tar -xzf /build/env.tar.gz -C "$B/env"
+tar -xzf "$BUILD/env.tar.gz" -C "$B/env"
 step "launchers, examples, README"
-cp -r /work/packaging/linux/bundle/. "$B/"
+cp -r "$WORK/packaging/linux/bundle/." "$B/"
 chmod +x "$B/opengrid" "$B/opengrid-python" "$B/install.sh"
-cp /work/docs/images/opengrid_icon.png "$B/opengrid.png"
+cp "$WORK/docs/images/opengrid_icon.png" "$B/opengrid.png"
 mkdir -p "$B/examples" "$B/tests"
-(cd /work/examples && find . -name "*.py" -not -path "./output/*" -exec cp --parents {} "$B/examples/" \;)
-cp /work/examples/README.md "$B/examples/"
+(cd "$WORK/examples" && find . -name "*.py" -not -path "./output/*" -exec cp --parents {} "$B/examples/" \;)
+cp "$WORK/examples/README.md" "$B/examples/"
 mkdir -p "$B/examples/output"
-cp -r /work/tests/data "$B/tests/"
-mkdir -p "$B/tests/python" && cp /work/tests/python/*.py "$B/tests/python/"
+cp -r "$WORK/tests/data" "$B/tests/"
+mkdir -p "$B/tests/python" && cp "$WORK"/tests/python/*.py "$B/tests/python/"
 echo "$OG_VERSION" > "$B/VERSION"
 step "the oldest glibc the bundle runs on"
 # The newest GLIBC_2.x symbol version any binary needs (conda's binutils, a Python dependency
@@ -99,11 +110,21 @@ print(text)
 print(f"   needs glibc >= {best[0]}.{best[1]} (newest in {where})", file=sys.stderr)
 SCAN
 step "archive"
-tar -C /build -czf "/out/$NAME.tar.gz" "$NAME"
-cp /build/channel/linux-64/opengrid-*.conda /out/
-du -sh "$B" "/out/$NAME.tar.gz"
+tar -C "$BUILD" -czf "$OUTDIR/$NAME.tar.gz" "$NAME"
+cp "$BUILD"/channel/linux-64/opengrid-*.conda "$OUTDIR/"
+du -sh "$B" "$OUTDIR/$NAME.tar.gz"
 step "done"
 INSIDE
+if [ -n "${OG_NATIVE:-}" ]; then
+  if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
+    echo "OG_NATIVE needs a Linux x86_64 machine (elsewhere, leave it unset: Docker)" >&2
+    exit 1
+  fi
+  OG_VERSION="$VERSION" OG_NATIVE=1 OG_CONDA="${OG_CONDA:-$HOME/.local/share/opengrid/bundle-conda}" \
+    OG_WORK="$ROOT" OG_BUILD="$ROOT/build/bundle" OG_OUT="$OUT" \
+    bash "$ROOT/build/linux-check/bundle_inside.sh" 2>&1 | tee "$OUT/build.log"
+  exit "${PIPESTATUS[0]}"
+fi
 NAME="opengrid-linux-bundle"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 ARGS=(--name "$NAME" --platform "$PLATFORM" -e OG_VERSION="$VERSION"

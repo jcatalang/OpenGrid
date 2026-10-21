@@ -866,9 +866,14 @@ run `install_from_source.sh` there (no curl / internet).
   copied by hand (`MINIFORGE_INSTALLER`), and when a download or conda fails says that the
   machine needs internet (or `https_proxy`) and points to the bundle. `docs/INSTALL_LINUX.md`:
   a machine without internet takes the bundle (copied with scp or a USB disk).
-- The bundle in `packaging/dist/linux` is still the one from 2026-10-19 (no Docker builds on
-  this Mac any more, at the user's request: emulated x86_64 is too slow). 554 passed, 1
-  expected failure; lint clean.
+- No more Docker on this Mac (the user: emulated x86_64 is too slow). The user chose GitHub
+  Actions for the bundle: `.github/workflows/linux-bundle.yml` (run by hand) builds it on an
+  x86_64 runner with `OG_NATIVE=1 packaging/linux/build_bundle.sh` (the container script's
+  steps, run on the machine), uploads it as the artifact OpenGrid-linux-x86_64, tests it with
+  `test_bundle.sh` in openSUSE Leap 15.6, SLES 15 SP6 (BCI) and SP3 and Rocky Linux 8
+  containers (images without desktop packages get headless checks: imports, a 2D case
+  extruded, CGNS / Gmsh), and in a second job builds with warnings as errors and runs ctest
+  and pytest under Xvfb. 554 passed, 1 expected failure on macOS; lint clean.
 
 ## Boundary types on 3D faces, the Script tab runs code, bold selection, points before meshing, conversion of sketch domains (2026-10-21) — requested by the user
 The user asked for the Script tab to be editable with new lines run in the window, selected

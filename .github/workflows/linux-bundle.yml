@@ -1,0 +1,99 @@
+# The self-contained Linux bundle, built and tested on GitHub's x86_64 Linux machines (native:
+# minutes, where an emulated container on Apple silicon takes hours). Started by hand:
+# Actions > Linux bundle > Run workflow. The bundle is the run's artifact
+# "OpenGrid-linux-x86_64" (a zip holding OpenGrid-<version>-linux-x86_64.tar.gz): copy it to
+# the Linux machine, extract, ./opengrid (docs/INSTALL_LINUX.md).
+name: Linux bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "Also build with warnings as errors and run the C++ and Python tests"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache conda and rattler downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/opengrid/bundle-conda/pkgs
+            ~/.cache/rattler
+          key: bundle-${{ hashFiles('packaging/conda/recipe.yaml', 'packaging/conda/variants.yaml') }}
+          restore-keys: bundle-
+      - name: Build the bundle (rattler-build, conda-pack)
+        run: OG_NATIVE=1 packaging/linux/build_bundle.sh
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGrid-linux-x86_64
+          path: packaging/dist/linux/OpenGrid-*-linux-x86_64.tar.gz
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Test it in clean containers (no conda, no compiler)
+        run: |
+          for image in opensuse/leap:15.6 registry.suse.com/bci/bci-base:15.6 \
+                       registry.suse.com/suse/sle15:15.3 rockylinux:8; do
+            echo "::group::$image"
+            packaging/linux/test_bundle.sh "" "$image"
+            echo "::endgroup::"
+          done
+      - name: Upload the test logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-tests
+          path: |
+            packaging/dist/linux/*.log
+            packaging/dist/linux/*.png
+          retention-days: 30
+
+  tests:
+    if: ${{ inputs.tests }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Desktop libraries and a virtual display (the GUI tests)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 \
+            libxcb-randr0 libxcb-shape0 libdbus-1-3 fontconfig fonts-dejavu-core xvfb xauth
+      - name: Cache conda downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/miniforge/pkgs
+          key: tests-${{ hashFiles('environment.yml') }}
+          restore-keys: tests-
+      - name: Environment (environment.yml and conda-forge's GCC)
+        run: |
+          curl -fsSL -o miniforge.sh \
+            https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+          bash miniforge.sh -b -u -p ~/miniforge
+          source ~/miniforge/etc/profile.d/conda.sh
+          conda env create -q -n opengrid -f environment.yml
+          conda install -y -q -n opengrid -c conda-forge --override-channels cxx-compiler
+      - name: Build (warnings as errors) and C++ tests
+        run: |
+          source ~/miniforge/etc/profile.d/conda.sh && conda activate opengrid
+          export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"
+          cmake --preset ci
+          cmake --build --preset ci -j "$(nproc)"
+          ctest --preset ci -j "$(nproc)" --output-on-failure
+      - name: Python tests (GUI tests under a virtual display)
+        run: |
+          source ~/miniforge/etc/profile.d/conda.sh && conda activate opengrid
+          export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"
+          pip install --no-build-isolation -q -C build-dir=build/ci .
+          xvfb-run -a -s "-screen 0 1600x1200x24" python -m pytest -q -p no:cacheprovider tests/python

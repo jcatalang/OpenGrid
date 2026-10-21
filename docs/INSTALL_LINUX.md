@@ -40,7 +40,8 @@ the glibc version first and says so when it is too old. Scripts run without a di
 **Getting the bundle.** On GitHub: Actions > **Linux bundle** > Run workflow. It builds the
 bundle on GitHub's x86_64 Linux machines, tests it in clean openSUSE Leap 15.6, SLES 15 SP6
 and SP3 and Rocky Linux 8 containers, and runs the C++ and Python test suites (about half an
-hour). The run's artifact **OpenGrid-linux-x86_64** is a zip holding the `.tar.gz`.
+hour). The run's artifact **OpenGrid-linux-x86_64** is a zip holding the `.tar.gz` (kept 30
+days; with the GitHub CLI: `gh run download <run id> -n OpenGrid-linux-x86_64`).
 On any Linux x86_64 machine with internet: `OG_NATIVE=1 packaging/linux/build_bundle.sh`
 (no Docker; `packaging/linux/test_bundle.sh [archive] [image]` then checks it in a clean
 container).

@@ -874,6 +874,16 @@ run `install_from_source.sh` there (no curl / internet).
   containers (images without desktop packages get headless checks: imports, a 2D case
   extruded, CGNS / Gmsh), and in a second job builds with warnings as errors and runs ctest
   and pytest under Xvfb. 554 passed, 1 expected failure on macOS; lint clean.
+- First runs on GitHub (x86_64, native): the bundle builds in 7 minutes (hours emulated);
+  its container tests all PASS: openSUSE Leap 15.6 (glibc 2.38) and Rocky Linux 8 (2.28) in
+  full (imports, 2D, Netgen 3D, CAD, the window, a project coloured by quality, a moved
+  folder, install.sh), SLES 15 SP6 and SP3 headless (their base images have no desktop
+  packages); the binaries need glibc >= 2.17. The first run ran out of disk while archiving
+  (fixed: preinstalled toolchains removed, intermediate environments deleted). Strict build
+  (warnings as errors, conda-forge GCC) and ctest 154 / 154 in 3 minutes; pytest 550 passed,
+  3 skipped, 2 expected failures in 7 minutes. The first run's pytest stopped once between
+  77% and 90% (not reproduced in the next run; the workflow now dumps every thread's stack
+  after 3 minutes in a test).
 
 ## Boundary types on 3D faces, the Script tab runs code, bold selection, points before meshing, conversion of sketch domains (2026-10-21) — requested by the user
 The user asked for the Script tab to be editable with new lines run in the window, selected

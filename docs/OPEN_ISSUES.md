@@ -79,6 +79,12 @@ history). Phase tags show where each item came from.
     a second; on larger models it waits for Refresh (and shows no rows meanwhile).
   - A click on the bottom of a box extruded from a domain may select that domain rather than
     the block's `kmin` face (both are drawn there); either works as the patch member.
+- **Linux on GitHub Actions** [2026-10-21]:
+  - The SLES 15 SP3 / SP6 base images have no desktop packages: the bundle is checked there
+    headless only (imports, meshing, exports); the window is checked on openSUSE Leap 15.6
+    (SLES 15 SP6's base) and Rocky Linux 8. Not yet on a real SLES desktop or a real Xeon.
+  - One run's Python tests stopped once in the 77–90% range (test_periodic_3d … test_templates)
+    and the next run passed; if it happens again, the stack dump after 3 minutes names it.
 - **Console and Script tab** [2026-10-21]:
   - Code run from the Script tab runs on the GUI thread, like the console; lines that ran
     cannot be edited there (edit the saved script and run it, or use undo).

@@ -12,10 +12,13 @@ C++20 geometry and meshing core, Python bindings (nanobind), a PySide6 + VTK des
 application, and a Python scripting API that the GUI itself uses: everything you do is an
 undoable command recorded in a replayable Python journal.
 
-![OpenGrid main window: NACA 0012 C-grid with wall layers, coloured by scaled Jacobian, with the multi-block smoother's convergence](examples/output/phase11a_main_window.png)
+![OpenGrid main window: a NACA 2412 in a far field with 40 inflation layers, coloured by scaled Jacobian; the curves, the selected curve's panel, the Boundary panel ready to export and the Script tab](examples/output/main_window.png)
 
-<sub>NACA 0012 C-grid (12 blocks smoothed as one group, 30 wall layers from 1e-5 chords) coloured
-by scaled Jacobian; the Smoother panel shows the residual history.</sub>
+<sub>A NACA 2412 in a far field (example 12a: 40 inflation layers from 2e-5 chord, triangles
+outside) coloured by scaled Jacobian. Left: the curves with their points and the selected
+curve's shape and distribution; right: the Boundary panel (every boundary typed, ready to
+export) and the Script tab, where everything done in the window appears as Python and new
+lines run with Ctrl+Enter.</sub>
 
 ---
 
@@ -63,6 +66,8 @@ by scaled Jacobian; the Smoother panel shows the residual history.</sub>
   edges, volumes with boundary layers, boundary types and periodic pairs in one call each.
 - **Scriptable and reproducible:** one Python API for GUI and scripts, undo / redo, a journal
   that replays the session exactly, deterministic results independent of the thread count.
+  In the application, an IPython console and a Script tab that shows everything done in the
+  window as Python and runs the lines you add.
 - **Fast:** OpenMP everywhere it matters; a 1M-cell 2D mesh in 2–5 s; Anderson-accelerated
   elliptic smoothing.
 
@@ -98,7 +103,10 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
   add a point (NURBS: by knot insertion, shape unchanged) and a handle to remove it; a closed
   curve's seam moves as one point.
 
-### Connectors and distributions
+### Curves, their points and distributions
+- A curve is its shape (a line, arc, spline, ...) and its points; the application shows them
+  as one item, the API as a database curve and a connector on it. `preview_points` (pink
+  dots in the window) shows where points would land before anything is meshed or applied.
 - Uniform, geometric, tanh (Vinokur), sine distributions with begin / end spacings, growth
   ratios and breakpoints (piecewise distributions with their own spacings).
 - Arc-length or parametric spacing, spacing propagation across junctions, split / join.
@@ -141,7 +149,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
 
 ### Multi-block topology
 - Split and join domains and blocks, O-grid (butterfly) conversion, block faces from domains,
-  structured ↔ unstructured conversion of a domain on the same connectors.
+  structured ↔ unstructured conversion of a domain on the same connectors (a sketch's domain
+  through its sketch).
 - **Smoothing groups (2D and 3D):** elliptic smoothing across block interfaces as if the
   blocks were one grid; boundary nodes sliding on their curves and surfaces; singular points
   (3 or 5 blocks around a vertex); symmetry planes; wall control and wall layers; Anderson
@@ -167,7 +176,8 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
   faces (block faces, volume faces, the ends and side walls of extruded volumes), matched node
   by node and written as periodic connectivity (CGNS 2D: translational). `make_periodic_pair`
   makes and pairs both sides in one step; when the nodes do not match, the report says why
-  (point counts, a transform that misses, different distributions).
+  (point counts, a transform that misses, different distributions). In the application the
+  faces of blocks and volumes are picked with a click and typed or paired from the panels.
 
 ### Quality
 - Scaled Jacobian, equiangle skewness, aspect ratio, minimum / maximum included angle,
@@ -390,8 +400,9 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   "Boundary type", "Pair as periodic" and domain conversion.
 - **Boundary panel:** every boundary with its patch, type and status, the periodic pairs
   with their transform and whether their nodes match (and why not), the interfaces; one
-  status line says whether the boundary is ready to export. It follows a 2D model as you
-  edit; Set type, Pair as periodic and Clear type act on the selection.
+  status line says whether the boundary is ready to export. It follows the model as you
+  edit (a 3D model whose check takes over a second: on Refresh); Set type, Pair as periodic
+  and Clear type act on the selection, curves and faces alike.
 - Delete takes along what depends on the selection after a confirmation listing it (a curve
   with its domains); patches, zones and groups only lose members; deleting a sketch block's
   domain removes the block.
@@ -426,7 +437,7 @@ the tests.
 
 ## Validation and testing
 
-- **154 C++ tests** (GoogleTest) and **532 Python tests** (pytest, including offscreen GUI tests
+- **154 C++ tests** (GoogleTest) and **554 Python tests** (pytest, including offscreen GUI tests
   with pytest-qt that drive the menus and the mouse) cover the geometry kernel, distributions,
   every mesher, smoothing, quality, topology editing, exports read back by their reference
   readers, journal replay, determinism across thread counts, the golden cases and the
@@ -555,7 +566,8 @@ python/opengrid/
   model/              entity store, evaluators, groups, templates, high-order elements, curving
   commands/           undoable commands and the journal
   io/                 exporters and importers (CGNS, Gmsh, VTKHDF, Plot3D, Lagrange node orders)
-  app/                the PySide6 application
+  app/                the PySide6 application (window, scene, panels, IPython console,
+                      the Script tab and its trace)
 examples/             complete cases, one demo per feature, golden cases, output/
 tests/python/         pytest suite (with reference data in data/)
 packaging/            conda recipe, macOS app bundle and launcher, Linux container check
@@ -588,6 +600,7 @@ tools/                API docs generator, checks, GPU studies
 | OpenCASCADE | STEP / IGES import | LGPL-2.1 with exception (dynamic, optional) |
 | OpenMP runtime | parallel loops | Apache-2.0 with LLVM exception |
 | NumPy, h5py, meshio | arrays, HDF5, test read-back | BSD-3, BSD-3, MIT |
+| IPython, qtconsole, ipykernel | the application's console (optional) | BSD-3 |
 
 Deliberately not used: TetGen (AGPL), Triangle (non-free), GPL parts of CGAL and the Gmsh
 library (GPL); Gmsh's `.msh` format is written by OpenGrid's own code. Full table:
@@ -595,14 +608,16 @@ library (GPL); Gmsh's `.msh` format is written by OpenGrid's own code. Full tabl
 
 ## Status and limitations
 
-All planned phases (0–11g) are complete. OpenGrid is developed on macOS (Apple silicon) and
-checked on Linux x86_64: on openSUSE Leap 15.6 it builds with GCC 15 and warnings as errors,
-and its C++ and Python tests pass; the self-contained Linux bundle also runs on openSUSE Leap
-15.5 and Rocky Linux 8. Those Linux checks ran in containers, not on real x86 hardware with a
-GPU driver. Known limitations, for example that curved high-order elements are not untangled
-when they fold, that 3D automatic topology is not available, that Netgen dominates very large
-tetrahedral meshes, and that the GPU path is experimental, are collected in
-[`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).
+All planned phases (0–12) are complete, and the application has been reworked since from
+use (curves as one item, 3D boundary faces, the Script tab). OpenGrid is developed on macOS
+(Apple silicon) and checked on Linux x86_64: on openSUSE Leap 15.6 it builds with GCC 15 and
+warnings as errors, and its C++ and Python tests pass; the self-contained Linux bundle also
+runs on openSUSE Leap 15.5 and Rocky Linux 8. Those Linux checks ran in containers, not on
+real x86 hardware with a GPU driver, and predate the latest application changes (rebuild the
+bundle with `packaging/linux/build_bundle.sh`). Known limitations, for example that curved
+high-order elements are not untangled when they fold, that 3D automatic topology is not
+available, that Netgen dominates very large tetrahedral meshes, and that the GPU path is
+experimental, are collected in [`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).
 
 ## Licence
 

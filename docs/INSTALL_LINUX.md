@@ -60,8 +60,8 @@ bash Miniforge3-Linux-x86_64.sh -b -p ~/miniforge3
 source ~/miniforge3/etc/profile.d/conda.sh
 ```
 
-**The environment** (Python 3.12, Qt, VTK, Netgen, OpenCASCADE, HDF5, CGNS, Eigen, CMake,
-Ninja, the test tools) **and a compiler:**
+**The environment** (Python 3.12, Qt, VTK, IPython for the console, Netgen, OpenCASCADE,
+HDF5, CGNS, Eigen, CMake, Ninja, the test tools) **and a compiler:**
 ```bash
 cd OpenGrid
 conda env create -f environment.yml

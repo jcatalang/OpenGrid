@@ -9,6 +9,9 @@ python examples/12a_airfoil_cases.py      # writes its figure, projects and mesh
 python -m opengrid examples/output/12a_cascade_2d.ogp   # open a result in the application
 ```
 
+In the application, the Script tab shows everything done in the window as the same kind of
+Python, and runs new lines written at its end: a way to turn clicks into a script like these.
+
 The projects (`.ogp`) and journals (`*_journal.py`, the replayable script of what was done)
 of each run are in [`output/`](output); the meshes (CGNS, Gmsh, VTKHDF) are written there
 too but not committed. Several scripts take `--gui` to open their model in the application.

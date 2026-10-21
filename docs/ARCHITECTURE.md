@@ -1289,6 +1289,15 @@ faces), with boundary faces preserved bit-for-bit.
   `trace_path`), the Script tab (the session's trace, `app/trace.py`) and the log.
 - The GUI observes the model through a `ModelChanged` signal emitted by the CommandStack
   after each command/undo/redo; views redraw from the store. Views never mutate the model.
+- Selection (`MainWindow.set_selection(ids, faces)`): entity ids, a curve standing for its
+  database curve and connector (`model/curves.py`), and faces of blocks and volumes as
+  patch members (`{"block": id, "face": "imin"}`, ...). The scene draws blocks and volumes
+  from their boundary faces with a per-cell face tag, so a ray pick names the face; patch
+  actions take entities and faces alike.
+- The Script tab (`app/script_panel.py`) runs code typed after the trace statement by
+  statement in the console's namespace (`MainWindow.run_script`); `SessionTrace.typed`
+  records each statement as written instead of the commands it ran, so the trace stays a
+  replayable script.
 - High-DPI: Qt6 is HiDPI-aware by default; VTK render window DPI is set from the screen's
   device pixel ratio.
 

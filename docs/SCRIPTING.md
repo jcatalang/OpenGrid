@@ -35,6 +35,9 @@ with both: the database curve is the shape (what `move_handle`, templates and
 `structured_domain_from_curves(curves, dimension)` and
 `unstructured_domain_from_curves(curves, dimension)` give curves their points and build the
 domain in one undo step, as the window's Structured / Unstructured domain do on curves.
+`og.preview_points("line-1", 21)` (a curve without points) or `og.preview_points("curve-1",
+dimension=41, distribution=...)` (a connector with edits) returns where the points would
+go and changes nothing (the window's pink preview).
 
 Meshes are not stored: they are computed from the parameters when asked for (`domain_grid`,
 `unstructured_mesh`, `block_grid`, `volume_mesh`) and cached until something they depend on
@@ -258,6 +261,7 @@ sketch's block sends the settings to the sketch: the triangulation settings to i
 (shared by its unstructured blocks), the inflation to walls on the block's edges.
 
 ### Boundary types in one step, and changing a domain's kind
+
     og.set_boundary_type(["c-bottom", "c-top"], "wall")   # they join the "wall" patch (made if absent)
     og.set_boundary_type(["c-left"], "inlet", name="in")   # a named patch of that type
     og.convert_domain("d")   # structured <-> unstructured on the same connectors (name kept)
@@ -265,9 +269,15 @@ sketch's block sends the settings to the sketch: the triangulation settings to i
 A member belongs to one patch: `set_boundary_type` takes it out of any other, and
 `clear_boundary_type(members)` takes members out of every patch. A connector shared by two
 domains is an interface, found automatically: putting it in a patch is refused, saying so.
-Conversion needs a single loop of four edges for the structured direction and is refused
-for sketch domains (set the sketch's unstructured blocks), group members and faces of
-blocks or volumes.
+Conversion needs a single loop of four edges for the structured direction. A sketch's
+domain converts through its sketch (its block joins or leaves the sketch's `unstructured`
+blocks); a domain smoothed in a group needs `leave_groups=True` (it leaves the group, which
+goes if left empty); faces of blocks or volumes are refused.
+
+3D boundary members are faces: `{"block": "b", "face": "imin"}` (`imin` … `kmax`),
+`{"volume": "v", "face": "top"}` / `"bottom"` (extruded volumes; their side walls are the
+curves they were extruded from), or the domains bounding a volume. In the window a click
+on a block or volume selects such a face.
 
     og.make_periodic_pair(["c-left"], ["c-right"])        # patches periodic-1a / periodic-1b, paired (GUI: Pair as periodic)
     og.make_periodic_pair(["c-bottom"], ["c-top"], name="span")   # span-a / span-b

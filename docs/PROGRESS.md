@@ -848,6 +848,57 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Boundary types on 3D faces, the Script tab runs code, bold selection, points before meshing, conversion of sketch domains (2026-10-21) — requested by the user
+The user asked for the Script tab to be editable with new lines run in the window, selected
+curves in bold (colours already mean boundary types), a preview of where points land before
+meshing, said converting a structured domain to unstructured did not work, and that a click
+on a face of an extruded box selected nothing: how are boundary conditions set in 3D?
+- **3D faces** (`app/scene.py`, `MainWindow._select_face`). Clicks found nothing on a block:
+  when no curve or point was under the pointer, the second picking pass took every actor,
+  and the reference grid's lines in front of the faces caught the ray. It now picks among
+  the model's entities only. Blocks and volumes are drawn from their boundary faces with a
+  "face" cell tag (`Scene._boundary_faces`: a block's six faces, a volume's mesh faces: ends,
+  side walls, bounding domains), so a click selects that face as a patch member (`{"block":
+  id, "face": "imin"}`, `{"volume": id, "face": "top"}`, a side wall `{"connector": id}`):
+  filled and outlined in bold; Shift adds faces; a second click on the selected face selects
+  the block (and the face's panel has a "Select block-1" button). The face's panel shows its
+  points, patch and a boundary type (Apply: `set_boundary_type` / `clear_boundary_type`);
+  the Boundary panel's Set type and the right-click menu take selected faces; the Boundary
+  panel's 3D rows now select their faces (`BoundaryReport.members`, `api._face_member`);
+  Colour by patch fills 3D faces with their patch colours, unassigned ones red
+  (`Scene.show_patch_faces`, kept current from the patches after each edit). The selection
+  keeps its faces across model changes (a block that goes takes its faces along).
+- **Script tab** (`app/script_panel.py`: `ScriptEditor`; `MainWindow.run_script`;
+  `SessionTrace.typed`). What already ran is read-only (typing over it writes at the end;
+  Backspace / Delete / Cut stop at it; the editor's own undo is off), the lines after it are
+  tinted and run with Ctrl+Enter, Shift+Enter or Run: statement by statement in the
+  console's namespace (IPython's: names defined in either are seen by the other), inside one
+  refresh; each statement that runs joins the trace as written (not as the calls it made:
+  variables and loops survive, and the trace still replays); the first that fails stops,
+  and it and what follows stay for editing, with the error under the editor (what ran before
+  the error in a failing statement is recorded as its calls). Printed text goes to the Log.
+  The window's own actions join the trace before the lines not run yet.
+- **Bold selection** (`SELECTED_CURVE_WIDTH` 9 px, was 4 like the plain connectors): selected
+  curves and points-curves are drawn bold, in the selection colour, or in their patch colour
+  when colouring by patch.
+- **Points before meshing** (`Session.preview_points`, `connectors.preview_points`: the C++
+  node distribution on normalised trial parameters, nothing stored). Selected curves without
+  points show pink dots where the "points" box would put them (they follow the box); in a
+  curve's panel, editing the number of points, the mode, the distribution or the breakpoints
+  previews the new points before Apply.
+- **Conversion** (`Session.convert_domain`). The user's domain was a sketch's, which was
+  refused ("list its block in the sketch's unstructured blocks instead"); it now converts
+  through its sketch (`edit_sketch(unstructured=...)`, both ways, name kept). A domain in a
+  smoothing group is converted with `leave_groups=True` (it leaves the group; a group left
+  empty goes), which the window asks before (`_confirm_leave_groups`).
+- Tests: `test_faces_3d.py` (a block face made an inlet from its panel, an outlet from the
+  Boundary panel, the right-click menu, the Boundary panel's rows selecting faces, patch
+  fills; an extruded volume's top and side wall), `test_convert_domain.py` (sketch domains
+  both ways with undo and replay, a grouped domain, the window's confirmation), the Script
+  tab's runs, failures, read-only trace and shared names (`test_console_trace.py`), the
+  preview and the bold selection (`test_curves_view.py`); the 3D picking test now expects
+  faces, then the block. macOS: 553 passed, 1 expected failure; lint clean.
+
 ## One "curve" in the window, the IPython console in the lower right, the Script tab (2026-10-21) — requested by the user
 The user found the database curves and the connectors redundant (a sketch's edges appeared
 twice in the tree, `sketch-1-e0-1` and `sketch-1-c0-1`) and asked for one concept called

@@ -157,6 +157,10 @@ class BoundaryReport:
     periodic: list = field(default_factory=list)
     assignment: dict = field(default_factory=dict)  # boundary label -> patch name or None
     ids: dict = field(default_factory=dict)  # boundary label -> entity id to select
+    # 3D: boundary label -> the face as a patch member, with ids ({"block": id, "face":
+    # "imin"}, {"volume": id, "face": "top"}, {"connector": id}, {"domain": id}): what the
+    # window selects for that row
+    members: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:

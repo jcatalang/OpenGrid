@@ -46,6 +46,11 @@ SKETCH_COLOR = "#ff6fd8"
 HOVER_COLOR = "#ffffff"
 TESSELLATION_TOLERANCE = 2e-4
 PICK_PIXELS = 8.0  # ray picking: within this many pixels of a line or point
+# A selected curve is drawn bold (in the selection colour, or in its patch colour when the
+# curves are coloured by patch: the boundary types stay visible).
+SELECTED_CURVE_WIDTH = 9.0
+FACE_COLOR = SELECTED_COLOR  # a selected block / volume face
+POINTS_PREVIEW_COLOR = "#ff79c6"  # where the points of curves without points would go
 
 # Entity kinds drawn as one actor each; the others (points, curves, connectors) share layers.
 ENTITY_KINDS = ("domain", "unstructured_domain", "block", "volume", "sketch", *SURFACE_KINDS)
@@ -87,6 +92,7 @@ class Scene:
         self.selected_ids: set[int] = set()
         self._entity_actors: dict[int, list] = {}  # entity id -> its actors (per-entity kinds)
         self._layers: dict[str, object] = {}  # merged layer name -> actor
+        self._layer_data: dict[str, object] = {}  # merged layer name -> the mesh it draws
         self._overlays: dict[str, object] = {}  # tool preview, snap marker, handles, ...
         self._hidden: list = []  # per-entity actors hidden by a drag preview
         self._previewing: set[int] = set()  # entities left out of the layers during a drag
@@ -103,6 +109,12 @@ class Scene:
         self.default_view = "xy"
         self.hovered: int | None = None  # entity highlighted under the pointer
         self.grid = ReferenceGrid(plotter)  # the z = 0 plane's grid, when enabled
+        # Faces of blocks and volumes: the patch member of each face of their drawn surface
+        # (cell data "face" indexes it), the selected ones, the one the last pick hit.
+        self._face_members: dict[int, list[dict]] = {}
+        self.selected_faces: list[dict] = []
+        self.last_face: dict | None = None
+        self.patch_faces: list | None = None  # [(face member, colour)] while colouring by patch
 
     # ---------------------------------------------------------- actor plumbing
     def _add(self, mesh, name: str, pickable: bool = True, **kwargs):
@@ -118,11 +130,13 @@ class Scene:
 
     def _set_layer(self, name: str, mesh, **kwargs) -> None:
         actor = self._layers.pop(name, None)
+        self._layer_data.pop(name, None)
         if actor is not None:
             self._remove(actor)
         if mesh is None or mesh.n_points == 0:
             return
         self._layers[name] = self._add(mesh, name, **kwargs)
+        self._layer_data[name] = mesh
 
     def _set_overlay(self, name: str, mesh, **kwargs) -> None:
         actor = self._overlays.pop(name, None)
@@ -135,10 +149,24 @@ class Scene:
     def _remove_entity(self, entity_id: int) -> None:
         for actor in self._entity_actors.pop(entity_id, []):
             self._remove(actor)
+        self._face_members.pop(entity_id, None)
+
+    def _refresh_faces(self) -> None:
+        """Redraw the selected faces and the patch colours on the redrawn blocks (dropping the
+        faces that went)."""
+        if self.patch_faces is not None:
+            self.show_patch_faces(self.patch_faces)
+        if self.selected_faces:
+            kept = [m for m in self.selected_faces if self.face_surface(m) is not None]
+            self.set_face_selection(kept)
 
     def layer(self, name: str):
         """The actor of a merged layer ("connectors", "connector-nodes", ...), or None."""
         return self._layers.get(name)
+
+    def layer_data(self, name: str):
+        """The mesh a merged layer draws (with its cell data), or None."""
+        return self._layer_data.get(name)
 
     def has_geometry(self) -> bool:
         """Whether anything is drawn (a drag preview counts: its entities are taken out of
@@ -151,10 +179,12 @@ class Scene:
             self._remove_entity(entity_id)
         for name in list(self._layers):
             self._remove(self._layers.pop(name))
+            self._layer_data.pop(name, None)
         for entity in self.session.store:
             if entity.kind in ENTITY_KINDS:
                 self._draw_entity(entity.id)
         self._rebuild_layers(set(LAYER_GROUPS))
+        self._refresh_faces()
         self.plotter.render()
 
     def _closure(self, ids) -> set[int]:
@@ -191,6 +221,7 @@ class Scene:
             elif kind in ENTITY_KINDS:
                 self._draw_entity(entity_id)
         self._rebuild_layers(layers)
+        self._refresh_faces()
         self.plotter.render()
 
     def _rebuild_layers(self, groups) -> None:
@@ -225,7 +256,7 @@ class Scene:
             "curves-selected",
             _polylines(selected, selected_ids),
             color=SELECTED_COLOR,
-            line_width=4.0,
+            line_width=SELECTED_CURVE_WIDTH,
         )
         self._set_layer(
             "curve-endpoints",
@@ -309,12 +340,23 @@ class Scene:
             if mesh is not None:
                 mesh.cell_data["colors"] = np.asarray(colors, dtype=np.uint8)
             self._set_layer("connectors", mesh, scalars="colors", rgb=True, line_width=4.0)
-        self._set_layer(
-            "connectors-selected",
-            _polylines(selected, selected_ids),
-            color=SELECTED_COLOR,
-            line_width=4.0,
-        )
+        mesh = _polylines(selected, selected_ids)
+        if self.patch_colors is not None and mesh is not None:
+            selected_colors = [
+                pv.Color(self.patch_colors.get(i, CONNECTOR_COLOR)).int_rgb for i in selected_ids
+            ]
+            mesh.cell_data["colors"] = np.asarray(selected_colors, dtype=np.uint8)
+            self._set_layer(
+                "connectors-selected",
+                mesh,
+                scalars="colors",
+                rgb=True,
+                line_width=SELECTED_CURVE_WIDTH,
+            )
+        else:
+            self._set_layer(
+                "connectors-selected", mesh, color=SELECTED_COLOR, line_width=SELECTED_CURVE_WIDTH
+            )
         nodes_mesh = None
         if self.show_nodes:
             nodes_mesh = _points(nodes_all)
@@ -746,14 +788,120 @@ class Scene:
         elif cells:
             actor = self._add(mesh, name, color=color, show_edges=True, edge_color="#30363d")
         else:
-            actor = self._add(
-                mesh.extract_surface(algorithm="dataset_surface"),
-                name,
-                style="wireframe",
-                color=color,
-                line_width=width,
-            )
+            # Its boundary faces, each cell tagged with the face it is on: a click picks a
+            # face (a patch member: a block's imin ... kmax, a volume's ends and side walls).
+            surface, members = self._boundary_faces(entity)
+            actor = self._add(surface, name, style="wireframe", color=color, line_width=width)
+            self._face_members[entity.id] = members
         self._entity_actors[entity.id] = [actor]
+
+    def _boundary_faces(self, entity) -> tuple[pv.PolyData, list[dict]]:
+        """The drawn surface of a block or volume with cell data "face" (an index into the
+        returned patch members)."""
+        from opengrid.model.blocks import face_array
+        from opengrid.model.patches import BLOCK_FACES
+
+        if entity.kind == "block":
+            grid = np.asarray(self.session.block_grid(entity.name))
+            meshes = [quad_mesh(np.ascontiguousarray(face_array(grid, f))) for f in BLOCK_FACES]
+            members = [{"block": entity.id, "face": f} for f in BLOCK_FACES]
+        else:
+            mesh = self.session.volume_mesh(entity.name)
+            extruded = entity.params["faces"] is None
+            meshes = []
+            members = []
+            for key, cells in mesh["faces"].items():
+                triangles = [c for c in cells if len(c) == 3]
+                quads = [c for c in cells if len(c) == 4]
+                meshes.append(
+                    triangle_mesh(
+                        mesh["points"],
+                        np.asarray(triangles, dtype=np.int64).reshape(-1, 3),
+                        np.asarray(quads, dtype=np.int64).reshape(-1, 4),
+                    )
+                )
+                if isinstance(key, tuple) and key[0] == "side":
+                    members.append({"connector": int(key[1])})
+                elif isinstance(key, tuple):
+                    members.append({"volume": entity.id, "face": "top"})
+                elif extruded:
+                    members.append({"volume": entity.id, "face": "bottom"})
+                else:
+                    members.append({"domain": int(key)})
+        for index, part in enumerate(meshes):
+            part.cell_data["face"] = np.full(part.n_cells, index, dtype=np.int64)
+        surface = meshes[0]
+        if len(meshes) > 1:
+            surface = meshes[0].merge(meshes[1:], merge_points=False)
+        return surface, members
+
+    def face_surface(self, member: dict) -> pv.PolyData | None:
+        """The cells of one face of a block or volume (as drawn), or None (not drawn)."""
+        for owner, members in self._face_members.items():
+            actors = self._entity_actors.get(owner, [])
+            if member not in members or not actors:
+                continue
+            surface = actors[0].mapper.dataset
+            index = members.index(member)
+            cells = np.flatnonzero(np.asarray(surface.cell_data["face"]) == index)
+            return surface.extract_cells(cells).extract_surface(algorithm="dataset_surface")
+        return None
+
+    def show_patch_faces(self, coloured) -> None:
+        """Fill the faces of blocks and volumes with their patch colours ([(member, colour)],
+        or None: none)."""
+        parts = []
+        for member, color in coloured or []:
+            part = self.face_surface(member)
+            if part is None or not part.n_cells:
+                continue
+            part.cell_data["colors"] = np.tile(
+                np.asarray(pv.Color(color).int_rgb, dtype=np.uint8), (part.n_cells, 1)
+            )
+            parts.append(part)
+        surface = None
+        if parts:
+            surface = parts[0]
+            if len(parts) > 1:
+                surface = parts[0].merge(parts[1:])
+        self._set_overlay("patch-faces", surface, scalars="colors", rgb=True, opacity=0.6)
+        self.patch_faces = coloured
+
+    def set_face_selection(self, members) -> None:
+        """Highlight selected faces of blocks and volumes: filled and outlined in bold."""
+        self.selected_faces = [dict(m) for m in members]
+        parts = [self.face_surface(m) for m in self.selected_faces]
+        parts = [p for p in parts if p is not None and p.n_cells]
+        if not parts:
+            self._set_overlay("selected-faces", None)
+            self._set_overlay("selected-faces-outline", None)
+            self.plotter.render()
+            return
+        surface = parts[0]
+        if len(parts) > 1:
+            surface = parts[0].merge(parts[1:])
+        self._set_overlay("selected-faces", surface, color=FACE_COLOR, opacity=0.35)
+        outline = surface.extract_feature_edges(
+            boundary_edges=True, feature_edges=False, manifold_edges=False, non_manifold_edges=False
+        )
+        self._set_overlay(
+            "selected-faces-outline", outline, color=FACE_COLOR, line_width=SELECTED_CURVE_WIDTH
+        )
+        self.plotter.render()
+
+    def show_points_preview(self, arrays) -> None:
+        """Where curves without points would get them (arrays of points), or nothing."""
+        mesh = None
+        if arrays:
+            mesh = _points(arrays)
+        self._set_overlay(
+            "points-preview",
+            mesh,
+            color=POINTS_PREVIEW_COLOR,
+            point_size=8,
+            render_points_as_spheres=True,
+        )
+        self.plotter.render()
 
     def _add_sketch_actor(self, entity) -> None:
         """The sketch's wireframe as drawn (its edges between the vertices) and its vertices."""
@@ -827,9 +975,14 @@ class Scene:
                     picker.AddPickList(actor)
         hit = picker.Pick(x, y, 0.0, renderer)
         if not hit:
-            picker.PickFromListOff()
+            # Then the model's other entities (domains, surfaces, the faces of blocks and
+            # volumes) - not the reference grid or the overlays, which would catch the ray.
             picker.InitializePickList()
+            for actors in self._entity_actors.values():
+                for actor in actors:
+                    picker.AddPickList(actor)
             hit = picker.Pick(x, y, 0.0, renderer)
+        self.last_face = None
         if not hit:
             return None, None
         actor = picker.GetProp3D()
@@ -837,6 +990,10 @@ class Scene:
         point = tuple(float(v) for v in picker.GetPickPosition())
         for entity_id, actors in self._entity_actors.items():
             if any(a is actor for a in actors):
+                members = self._face_members.get(entity_id)
+                faces = actor.mapper.dataset.cell_data.get("face")
+                if members is not None and faces is not None and 0 <= cell < len(faces):
+                    self.last_face = dict(members[int(faces[cell])])
                 return entity_id, point
         for layer in self._layers.values():
             if layer is actor:

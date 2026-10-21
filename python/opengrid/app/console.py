@@ -131,6 +131,10 @@ class PythonConsole(QWidget):
             self.write(captured)
         return captured
 
+    def user_namespace(self) -> dict:
+        """The names code typed here sees (the Script tab runs in them too)."""
+        return self.namespace
+
     def input_text(self) -> str:
         return self.input.text()
 
@@ -258,6 +262,13 @@ class IPythonConsole(QWidget):
         finally:
             channel.message_received.disconnect(on_message)
         return "".join(captured)
+
+    def user_namespace(self) -> dict:
+        """IPython's namespace, bound to this console's window (the Script tab runs in it,
+        so names defined there are seen here and the other way round)."""
+        self.start()
+        self.bind()
+        return self._manager.kernel.shell.user_ns
 
     def input_text(self) -> str:
         if self.widget is None:

@@ -52,6 +52,7 @@ GROUPS = [
             "set_dimension",
             "set_distribution",
             "connector_nodes",
+            "preview_points",
             "connector_report",
         ],
     ),

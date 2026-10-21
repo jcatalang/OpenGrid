@@ -66,7 +66,20 @@ history). Phase tags show where each item came from.
     the points when it is not automatic).
   - Drawing a curve does not give it points: they come when a domain is made on it, from
     Points on curves or from its panel's "Give it points".
+- **3D faces** [2026-10-21]:
+  - A curve or point seen through a face is picked before the face (on purpose: a wing inside
+    its far-field box); click a face where no curve lies behind it, or rotate the view.
+  - With the blocks coloured by quality, cut or shrunk, the cells are drawn, not the faces: a
+    click then selects the whole block.
+  - Faces are patch members, not entities: they are not in the model tree (the Boundary panel
+    lists them) and Delete does not apply to them.
+  - Colour by patch in 3D finds the boundary faces by meshing the model once (when switched
+    on or refreshed); after that it follows the patches.
 - **Console and Script tab** [2026-10-21]:
+  - Code run from the Script tab runs on the GUI thread, like the console; lines that ran
+    cannot be edited there (edit the saved script and run it, or use undo).
+  - A statement that fails half way (a loop) leaves what it did in the model, recorded in the
+    trace as the calls it made.
   - One IPython kernel per process (IPython's shell is a singleton): with several windows,
     `og` and `window` follow the window whose console got the focus last; variables typed in
     one console are seen by the others.

@@ -302,13 +302,25 @@ def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
     assert window.navigation_mode == "3d"
     live.widget.render()
     # (2, 0.7, 0.3) on the block's x = 2 face: the view ray behind it meets no base line
-    # (lines seen through a face are picked first: a body inside its far-field box).
+    # (lines seen through a face are picked first: a body inside its far-field box). A click
+    # on a block selects the face under the pointer (a boundary); again, the whole block.
+    block_id = og.entity(block).id
     live.click((2.0, 0.7, 0.3))
-    assert window.selected_names() == [block]
-    live.click((1.0, 0.5, 1.0))  # the top face
-    assert window.selected_names() == [block]
-    live.click((6.0, -4.0, 0.0))  # empty space (off the block's projection)
     assert window.selected_names() == []
+    assert window.selected_faces == [{"block": block_id, "face": "imax"}]
+    assert "imax" in window.property_panel._title.text()
+    live.click((2.0, 0.7, 0.3))
+    assert window.selected_names() == [block] and window.selected_faces == []
+    live.click((1.0, 0.5, 1.0))  # the top face
+    assert window.selected_faces == [{"block": block_id, "face": "kmax"}]
+    live.click((2.0, 0.7, 0.3), shift=True)  # Shift adds a face
+    assert window.selected_faces == [
+        {"block": block_id, "face": "kmax"},
+        {"block": block_id, "face": "imax"},
+    ]
+    live.click((6.0, -4.0, 0.0))  # empty space (off the block's projection)
+    assert window.selected_names() == [] and window.selected_faces == []
+    live.click((2.0, 0.7, 0.3))
     live.click((2.0, 0.7, 0.3))
     live.click((6.0, -4.0, 0.0), shift=True)  # Shift + empty: the selection stays
     assert window.selected_names() == [block]

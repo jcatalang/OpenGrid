@@ -130,3 +130,68 @@ def test_plain_console_without_ipython(monkeypatch, qtbot):
     assert isinstance(console, PythonConsole) and console.kind == "python"
     assert console.run_line("print(x + 1)").strip() == "21"
     assert "hello" in console.output.toPlainText()
+
+
+# ------------------------------------------------------------------ the Script tab runs code
+def test_new_lines_in_the_script_run_in_the_window(window):
+    og = window.session
+    panel = window.script_panel
+    editor = panel.editor
+    committed = panel.text()
+    editor.replace_pending("x = 2.5  # a variable\nog.create_line((0, 0), (x, 0), name='typed')\n")
+    assert editor.pending().startswith("x = 2.5")
+    assert panel.run()
+    assert og.entity("typed").params["p1"] == (2.5, 0.0, 0.0)
+    assert window.model_tree.entity_names() == ["typed"]
+    assert editor.pending() == "" and "Ran 2 statement(s)" in panel.message.text()
+    # The trace has the code as written (not the call it made), and replays.
+    text = window.trace.text()
+    assert text.startswith(committed)
+    assert "x = 2.5  # a variable\nog.create_line((0, 0), (x, 0), name='typed')\n" in text
+    assert "p1=(2.5" not in text
+    assert opengrid.replay(text).entity("typed").params["p1"] == (2.5, 0.0, 0.0)
+    # The window's own actions join the trace before the code not run yet.
+    editor.replace_pending("og.create_line((0, 0), (0, 1), name='later')\n")
+    og.create_line((5, 5), (6, 5), name="drawn")
+    assert editor.pending() == "og.create_line((0, 0), (0, 1), name='later')\n"
+    assert "name='drawn')" in panel.text()[: editor.committed_end]
+    # A failing statement stops the run: it and what follows stay, the rest ran.
+    editor.replace_pending(
+        "og.create_line((0, 0), (0, 2), name='first')\n"
+        "og.create_line((0, 0), (0, 0), name='bad')\n"
+        "og.create_line((0, 0), (0, 3), name='never')\n"
+    )
+    assert not panel.run()
+    assert "first" in og.store and "bad" not in og.store and "never" not in og.store
+    assert editor.pending().startswith("og.create_line((0, 0), (0, 0), name='bad')")
+    assert "Stopped at line 2: ValidationError" in panel.message.text()
+    editor.replace_pending("og.undo()\n")  # undo from the script: an ordinary step
+    assert panel.run() and "first" not in og.store
+
+
+def test_what_ran_cannot_be_edited(window, qtbot):
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+
+    editor = window.script_panel.editor
+    before = editor.toPlainText()
+    cursor = editor.textCursor()
+    cursor.setPosition(3)
+    editor.setTextCursor(cursor)
+    QTest.keyClicks(editor, "y = 1")  # typed over the trace: written at the end instead
+    assert editor.toPlainText() == before + "y = 1"
+    cursor.setPosition(5)
+    editor.setTextCursor(cursor)
+    QTest.keyClick(editor, Qt.Key.Key_Backspace)
+    QTest.keyClick(editor, Qt.Key.Key_Delete)
+    assert editor.toPlainText() == before + "y = 1"
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+    for _ in range(6):
+        QTest.keyClick(editor, Qt.Key.Key_Backspace)  # stops at what ran
+    assert editor.toPlainText() == before
+    QTest.keyClicks(editor, "z = 3")
+    QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)  # runs
+    assert editor.pending() == "" and window.console.user_namespace()["z"] == 3
+    if window.console.kind == "ipython":  # the console sees what the script defined
+        assert window.console.run_line("print(z + 1)").strip() == "4"

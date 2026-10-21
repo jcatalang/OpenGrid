@@ -268,6 +268,36 @@ def build_chain(params: dict, store) -> "_core.CurveChain":
     return _core.CurveChain(pieces, CHAIN_TOLERANCE * scale)
 
 
+def node_specs(subs: list[dict]) -> list[tuple]:
+    """The C++ node distribution's input for the sub-connectors (sub_connectors)."""
+    specs = []
+    for sub in subs:
+        dist = sub["distribution"]
+        specs.append(
+            (
+                sub["start"],
+                sub["end"],
+                sub["n_points"],
+                dist["type"],
+                dist["begin_spacing"],
+                dist["end_spacing"],
+                dist["growth_ratio"],
+                dist.get("positions"),
+            )
+        )
+    return specs
+
+
+def preview_points(params: dict, store) -> np.ndarray:
+    """Where a connector with these canonical parameters puts its points (the C++ node
+    distribution, without spacing propagation): previews of parameters not applied yet."""
+    chain = build_chain(params, store)
+    points, _arc, _warnings, _ratio = _core.connector_nodes(
+        chain, params["mode"], node_specs(sub_connectors(params))
+    )
+    return np.asarray(points)
+
+
 def script_params(params: dict, store) -> dict:
     """Connector parameters with curve ids replaced by current names (for the journal)."""
     result = dict(params)
@@ -514,21 +544,7 @@ class ConnectorEvaluator:
                     if candidates:
                         dist[key] = candidates[0][0]
                         propagated[label] = f"{candidates[0][0]:.6g} from {candidates[0][1]}"
-        specs = []
-        for sub in subs:
-            dist = sub["distribution"]
-            specs.append(
-                (
-                    sub["start"],
-                    sub["end"],
-                    sub["n_points"],
-                    dist["type"],
-                    dist["begin_spacing"],
-                    dist["end_spacing"],
-                    dist["growth_ratio"],
-                    dist.get("positions"),
-                )
-            )
+        specs = node_specs(subs)
         points, arc_positions, warnings, ratio = _core.connector_nodes(chain, params["mode"], specs)
         points[0] = self.canonical_point(points[0])
         points[-1] = self.canonical_point(points[-1])

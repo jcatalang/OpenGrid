@@ -40,6 +40,7 @@ UNASSIGNED_COLOR = "#ff3b30"
 INTERFACE_COLOR = "#7f8c8d"
 OK_COLOR = "#2ee59d"
 ENTITY_ROLE = Qt.ItemDataRole.UserRole + 1
+FACE_ROLE = Qt.ItemDataRole.UserRole + 2  # a 3D row's face (a patch member with ids)
 COLUMNS = ("boundary", "patch", "type", "status")
 
 
@@ -71,6 +72,7 @@ class BoundaryDock(QWidget):
     zone_requested = Signal(str)
     refresh_requested = Signal()
     entity_chosen = Signal(int)  # a row clicked: the entity to select
+    face_chosen = Signal(dict)  # a 3D row clicked: its face (a patch member)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,6 +173,8 @@ class BoundaryDock(QWidget):
                     color = UNASSIGNED_COLOR
             item = QTreeWidgetItem(boundaries, [label, patch_text, kind, status])
             item.setData(0, ENTITY_ROLE, report.ids.get(label))
+            if label in report.members:
+                item.setData(0, FACE_ROLE, report.members[label])
             item.setForeground(3, QBrush(QColor(color)))
         boundaries.setExpanded(True)
         pairs = []
@@ -314,6 +318,10 @@ class BoundaryDock(QWidget):
 
     def _on_item_clicked(self, item, _column) -> None:
         self.detail.setText(item.text(3))
+        face = item.data(0, FACE_ROLE)
+        if face is not None:
+            self.face_chosen.emit(dict(face))
+            return
         entity_id = item.data(0, ENTITY_ROLE)
         if entity_id is not None:
             self.entity_chosen.emit(int(entity_id))

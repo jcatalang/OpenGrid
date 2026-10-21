@@ -558,6 +558,29 @@ class Session:
         }
         return self.modify(name, distribution=distribution)
 
+    def preview_points(self, name: str, dimension: int | None = None, **changes) -> np.ndarray:
+        """Where points would go, changing nothing: on a curve without points, ``dimension``
+        points (uniform unless ``distribution`` is given); on a connector, its points with
+        ``changes`` to its parameters (dimension, distribution, mode, breakpoints). Spacing
+        propagation is left out. The window's preview before meshing or applying."""
+        from opengrid.model.connectors import normalize_connector, preview_points, script_params
+
+        entity = self.store.get(name)
+        if entity.kind in CURVE_KINDS:
+            if dimension is None:
+                raise ValueError("give the number of points of a curve without points")
+            raw = {"segments": entity.name, "dimension": dimension, **changes}
+            raw.setdefault("distribution", "uniform")
+        elif entity.kind == "connector":
+            raw = dict(script_params(entity.params, self.store))
+            raw.update(changes)
+            if dimension is not None:
+                raw["dimension"] = dimension
+        else:
+            raise ValidationError([Issue(entity.name, f"is a {entity.kind}, not a curve")])
+        params = normalize_connector(raw, self.store, f"{entity.name} (preview)")
+        return preview_points(params, self.store)
+
     def connector_nodes(self, name: str) -> ConnectorNodes:
         """Nodes and diagnostics of a connector (cached until the model changes)."""
         entity = self.store.get(name)
@@ -1568,12 +1591,33 @@ class Session:
             "extrude_model", "Extrude the 2D model", thickness, layers=layers, ends=ends
         )
 
-    def convert_domain(self, name: str) -> str:
+    def convert_domain(self, name: str, leave_groups: bool = False) -> str:
         """Turn a structured domain into an unstructured one on the same connectors, or an
         unstructured domain (one loop that assembles into four edges) into a structured one;
-        the name stays and zones and 3D patches follow. Refused for a sketch's domains (set
-        the sketch's unstructured blocks), members of a smoothing group and faces of blocks or
-        volumes. One undo step."""
+        the name stays and zones and 3D patches follow. A sketch's domain changes through its
+        sketch (its block joins or leaves the sketch's ``unstructured`` blocks). A member of a
+        smoothing group is refused unless ``leave_groups`` (it leaves the groups; a group left
+        empty goes); faces of blocks or volumes are refused. One undo step."""
+        from opengrid.model.sketch import output_owner
+
+        entity = self.store.get(name)
+        owner = output_owner(self.store).get(entity.id)
+        kinds = ("domain", "unstructured_domain")
+        if owner is not None and entity.kind in kinds and owner[1][:1] == "d":
+            sketch, role = owner
+            block = int(role[1:])
+            listed = set(sketch.params["unstructured"])
+            if entity.kind == "domain":
+                listed.add(block)
+            else:
+                listed.discard(block)
+            self.edit_sketch(sketch.name, unstructured=tuple(sorted(listed)))
+            for output_role, output in self.store.get(sketch.name).params["outputs"]:
+                if output_role == role:
+                    return self.store.get(output).name
+        if leave_groups:
+            label = f"Convert {name}"
+            return self._topology("convert_domain", label, name, leave_groups=True)[0]
         return self._topology("convert_domain", f"Convert {name}", name)[0]
 
     def set_boundary_type(self, members, patch_type: str, name: str | None = None) -> str:
@@ -1719,8 +1763,10 @@ class Session:
             unassigned = [e["label"] for e in result["entries"] if e["patch"] is None]
             assignment = {e["label"]: e["patch"] for e in result["entries"]}
             ids = {}
+            members = {}
             for entry in result["entries"]:
                 ids[entry["label"]] = sorted(key[1] for key in entry["keys"])[0]
+                members[entry["label"]] = _face_member(entry)
             return BoundaryReport(
                 boundary,
                 result["interfaces"],
@@ -1730,6 +1776,7 @@ class Session:
                 result["periodic"],
                 assignment,
                 ids,
+                members,
             )
         from opengrid.model.topology import validate_patches
 
@@ -2307,6 +2354,21 @@ class Session:
         for listener in listeners:
             self.commands.add_listener(listener)
             listener(None)
+
+
+def _face_member(entry: dict) -> dict:
+    """The patch member (with ids) of a 3D boundary entry (opengrid.model.volumes)."""
+    if entry["block"] is not None:
+        block, face = entry["block"]
+        return {"block": block, "face": face}
+    volume, key = entry["volume"]
+    if isinstance(key, tuple) and key[0] == "side":
+        return {"connector": key[1]}
+    if isinstance(key, tuple):
+        return {"volume": volume, "face": "top"}
+    if ("volume", volume, "bottom") in entry["keys"]:
+        return {"volume": volume, "face": "bottom"}
+    return {"domain": key}
 
 
 def replay(source: str) -> Session:

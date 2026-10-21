@@ -7,6 +7,7 @@ changed in that case.
 
 import math
 
+import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -1063,6 +1064,8 @@ class PropertyPanel(QWidget):
     message = Signal(str, bool)
     smooth_requested = Signal(str)
     points_requested = Signal(str)  # a curve without points: give it the toolbar's points
+    entity_requested = Signal(int)  # a face's "Select the block": select that entity
+    points_preview = Signal(list)  # where the edited points would go (arrays; [] = none)
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -1073,6 +1076,7 @@ class PropertyPanel(QWidget):
         # curve, model/curves.py): the shape's editors are "shape:<field>".
         self.shape_id: int | None = None
         self.shape_changes: dict = {}
+        self.face_member: dict | None = None  # a face of a block or volume (a patch member)
 
         self._layout = QVBoxLayout(self)
         self._title = QLabel("No selection")
@@ -1097,6 +1101,16 @@ class PropertyPanel(QWidget):
 
     def show_entity(self, entity_id: int | None) -> None:
         self.entity_id = entity_id
+        self.face_member = None
+        self.refresh()
+
+    def show_face(self, member: dict) -> None:
+        """A face of a block or volume: its size, its patch and a boundary type for it."""
+        owner = member.get("block", member.get("volume"))
+        if owner is None:  # a face that is an entity: a side wall (curve) or a domain
+            owner = member.get("connector", member.get("domain"))
+        self.entity_id = owner
+        self.face_member = dict(member)
         self.refresh()
 
     def refresh(self) -> None:
@@ -1116,6 +1130,11 @@ class PropertyPanel(QWidget):
             self.revert_button.setEnabled(False)
             return
         entity = self.session.store.get(self.entity_id)
+        if self.face_member is not None:
+            self._face_rows(entity, self.face_member)
+            self.apply_button.setEnabled(True)
+            self.revert_button.setEnabled(True)
+            return
         index = CurveIndex(self.session.store)
         self.shape_id = index.geometry_of.get(entity.id)
         self._title.setText(f"<b>{entity.kind}</b>  (id {entity.id})")
@@ -1505,6 +1524,8 @@ class PropertyPanel(QWidget):
         dimension_editor.valueChanged.connect(
             lambda n: distribution_editor.set_context(nodes.length, n)
         )
+        for field, _kind in CONNECTOR_FIELDS:  # edits are previewed before Apply
+            _watch(self._editors[field][1], self._preview_edits)
         self._boundary_rows(entity, "connector")
         self._form.addRow("length", QLabel(f"{nodes.length:.10g}"))
         self._form.addRow(
@@ -1525,12 +1546,60 @@ class PropertyPanel(QWidget):
             warnings.setStyleSheet("color: #ff6b6b;")
             self._form.addRow("warnings", warnings)
 
+    def _face_rows(self, owner, member: dict) -> None:
+        """A face of a block or volume: what it is, its patch and boundary type, and a way to
+        the whole block or volume."""
+        from opengrid.model.patches import member_label
+
+        store = self.session.store
+        label = member_label(member, store)
+        self.shape_id = None
+        what = "face"
+        if "connector" in member:
+            what = "side wall"
+        self._title.setText(f"<b>{what}</b>  {label}")
+        if "block" in member:
+            from opengrid.model.blocks import face_array
+
+            grid = face_array(np.asarray(self.session.block_grid(owner.name)), member["face"])
+            self._form.addRow("points", QLabel(f"{grid.shape[1]} x {grid.shape[0]}"))
+        self._member_boundary_rows(member)
+        whole = member.get("block", member.get("volume"))
+        if whole is not None:
+            button = QPushButton(f"Select {store.get(whole).name}")
+            button.setToolTip("The whole block or volume (or click the face again)")
+            button.clicked.connect(lambda: self.entity_requested.emit(int(whole)))
+            self._form.addRow("", button)
+
+    def _preview_edits(self, *_args) -> None:
+        """Where the curve's points would go with the edits not applied yet."""
+        entity = self.session.store.get(self.entity_id)
+        try:
+            _name, changes = self.read_changes()
+        except ParseError:
+            self.points_preview.emit([])
+            return
+        changes = {k: v for k, v in changes.items() if k in PREVIEWED_FIELDS}
+        if not changes:
+            self.points_preview.emit([])
+            return
+        try:
+            points = self.session.preview_points(entity.name, **changes)
+        except (ValidationError, ValueError):
+            self.points_preview.emit([])
+            return
+        self.points_preview.emit([points])
+
     def _boundary_rows(self, entity, key: str) -> None:
         """The patch the entity is in, and a combo to give it a boundary type (it then joins
         a patch of that type: Session.set_boundary_type)."""
+        self._member_boundary_rows({key: entity.id})
+
+    def _member_boundary_rows(self, member: dict) -> None:
+        """The patch a boundary member is in, and a combo to give it a type."""
         current = None
         for patch in self.session.store.entities("patch"):
-            if {key: entity.id} in patch.params["members"]:
+            if member in patch.params["members"]:
                 current = patch
                 break
         combo = QComboBox()
@@ -1766,6 +1835,8 @@ class PropertyPanel(QWidget):
         """Apply edits as commands; returns True if the model changed."""
         if self.entity_id is None:
             return False
+        if self.face_member is not None:
+            return self._apply_face()
         try:
             new_name, changes = self.read_changes()
         except ParseError as error:
@@ -1833,6 +1904,27 @@ class PropertyPanel(QWidget):
         self.message.emit(f"Updated {self.session.store.get(self.entity_id).name}", False)
         return True
 
+    def _apply_face(self) -> bool:
+        """A face's boundary type: it joins a patch of that type, or leaves its patch."""
+        from opengrid.model.patches import member_label, member_script
+
+        chosen = self._editors["boundary"][1].currentText()
+        if chosen == self._boundary_before:
+            self.message.emit("No changes", False)
+            return False
+        store = self.session.store
+        member = member_script(self.face_member, store)
+        try:
+            if chosen == "(none)":
+                self.session.clear_boundary_type([member])
+            else:
+                self.session.set_boundary_type([member], chosen)
+        except ValidationError as error:
+            self._show_error(str(error))
+            return False
+        self.message.emit(f"{member_label(self.face_member, store)}: {chosen}", False)
+        return True
+
     def _apply_boundary(self, name: str, chosen: str) -> None:
         if chosen == "(none)":
             entity_id = self.session.store.get(name).id
@@ -1845,6 +1937,22 @@ class PropertyPanel(QWidget):
     def _show_error(self, text: str) -> None:
         self._error.setText(text)
         self.message.emit(text, True)
+
+
+PREVIEWED_FIELDS = ("dimension", "mode", "distribution", "breakpoints")
+
+
+def _watch(widget: QWidget, callback) -> None:
+    """Call ``callback`` whenever an editor (or a field inside it) changes."""
+    for item in [widget, *widget.findChildren(QWidget)]:
+        if isinstance(item, QSpinBox):
+            item.valueChanged.connect(callback)
+        elif isinstance(item, QComboBox):
+            item.currentTextChanged.connect(callback)
+        elif isinstance(item, (QLineEdit, QPlainTextEdit)):
+            item.textChanged.connect(callback)
+        elif isinstance(item, QCheckBox):
+            item.toggled.connect(callback)
 
 
 def _curve_title(entity, index: CurveIndex) -> str:

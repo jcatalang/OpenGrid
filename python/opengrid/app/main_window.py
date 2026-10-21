@@ -236,6 +236,9 @@ class MainWindow(QMainWindow):
         self._last_dir = ""
         self._recent: list[str] = []
         self.selected_ids: list[int] = []
+        # Selected faces of blocks and volumes (patch members with ids: {"block": id, "face":
+        # "imin"}, {"volume": id, "face": "top"}, a side wall {"connector": id}, ...).
+        self.selected_faces: list[dict] = []
         self.tool: Tool = TOOLS["select"](session)
         self._saved_journal_length = 0
         self._press_position: tuple[int, int] | None = None
@@ -273,6 +276,7 @@ class MainWindow(QMainWindow):
         self.trace = SessionTrace(session, trace_path)
         self.script_panel = ScriptPanel(self.trace)
         self.script_panel.save_requested.connect(self.save_trace)
+        self.script_panel.runner = self.run_script
         self.console = make_console(
             namespace={
                 "opengrid": opengrid,
@@ -349,6 +353,8 @@ class MainWindow(QMainWindow):
         self.property_panel.message.connect(self._on_panel_message)
         self.property_panel.smooth_requested.connect(self.run_smoother)
         self.property_panel.points_requested.connect(self.give_points)
+        self.property_panel.points_preview.connect(self._show_edit_preview)
+        self.dimension_box.valueChanged.connect(lambda _n: self._update_points_preview())
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
         self.quality_dock.metric_changed.connect(self._on_metric_changed)
         self.quality_dock.locate_requested.connect(self.show_worst_cell)
@@ -358,6 +364,8 @@ class MainWindow(QMainWindow):
         self.boundary_dock.zone_requested.connect(self.create_zone_from_selection)
         self.boundary_dock.refresh_requested.connect(self.validate_boundary)
         self.boundary_dock.entity_chosen.connect(lambda entity_id: self.set_selection([entity_id]))
+        self.boundary_dock.face_chosen.connect(lambda face: self.set_selection([], faces=[face]))
+        self.property_panel.entity_requested.connect(lambda i: self.set_selection([i]))
         session.commands.add_listener(self._on_model_changed)
 
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
@@ -1419,6 +1427,9 @@ class MainWindow(QMainWindow):
         2D tools and the 2D selection work in the z = 0 plane."""
         if self.tool.name == "select" and self._ray_picking():
             entity_id, _point = self.scene.pick_display(x, y)
+            if self.scene.last_face is not None:
+                self._select_face(self.scene.last_face, entity_id, additive)
+                return
             name = None
             if entity_id is not None and entity_id in self.session.store:
                 name = self.session.store.get(entity_id).name
@@ -1461,6 +1472,30 @@ class MainWindow(QMainWindow):
         else:
             self.scene.show_snap(snapped)
         self.scene.show_preview(self.tool.preview(snapped))
+
+    def _select_face(self, face: dict, owner: int, additive: bool) -> None:
+        """A click on a face of a block or volume: that face (a boundary to give a type);
+        Shift adds or removes it; a click on the face already selected selects its block."""
+        if additive:
+            faces = list(self.selected_faces)
+            if face in faces:
+                faces.remove(face)
+            else:
+                faces.append(face)
+            self.set_selection(self.selected_ids, faces=faces)
+            return
+        if self.selected_faces == [face] and not self.selected_ids:
+            self.set_selection([owner])
+            return
+        self.set_selection([], faces=[face])
+        from opengrid.model.patches import member_label
+
+        self.statusBar().showMessage(
+            f"Face {member_label(face, self.session.store)}: give it a boundary type (its "
+            "panel, the Boundary panel or the right-click menu); click it again for the "
+            f"whole {self.session.store.get(owner).kind}",
+            8000,
+        )
 
     def _select_picked(self, name: str | None, additive: bool) -> None:
         if name is None:
@@ -1535,7 +1570,9 @@ class MainWindow(QMainWindow):
             self.scene.show_preview([])
 
     # ------------------------------------------------------- model / selection
-    def set_selection(self, ids) -> None:
+    def set_selection(self, ids, faces=None) -> None:
+        """Select entities (ids) and faces of blocks and volumes (``faces``: patch members
+        with ids; none by default)."""
         # A curve's shape and its points are one curve, selected as its points (the panel
         # shows both; model/curves.py).
         index = CurveIndex(self.session.store)
@@ -1547,16 +1584,24 @@ class MainWindow(QMainWindow):
                     chosen.append(representative)
         ids = chosen
         self.selected_ids = list(ids)
+        store = self.session.store
+        self.selected_faces = [
+            dict(f) for f in faces or [] if all(v in store for k, v in f.items() if k != "face")
+        ]
         self.scene.set_selection(ids)
+        self.scene.set_face_selection(self.selected_faces)
         if self.scene.hovered in ids:
             self.scene.set_hover(None)
         self._show_handles()
         self.model_tree.select_ids(ids)
-        if len(ids) == 1:
+        if len(ids) == 1 and not self.selected_faces:
             self.property_panel.show_entity(ids[0])
+        elif not ids and len(self.selected_faces) == 1:
+            self.property_panel.show_face(self.selected_faces[0])
         else:
             self.property_panel.show_entity(None)
         self.delete_action.setEnabled(bool(ids))
+        self._update_points_preview()
         domains = self._selected_domains()
         groups = self._selected_of_kind("smoothing_group")
         blocks = self._selected_of_kind("block")
@@ -1600,6 +1645,12 @@ class MainWindow(QMainWindow):
             self._batched = (ids, whole)
             return
         had_geometry = self.scene.has_geometry()
+        if self.scene.patch_faces is not None:
+            if self.session.is_3d():
+                self.scene.patch_faces = self._patch_face_colors(previous=self.scene.patch_faces)
+            else:
+                self.scene.patch_faces = None
+                self.scene.show_patch_faces(None)
         if change is None:
             self.scene.rebuild()
         else:
@@ -1609,7 +1660,7 @@ class MainWindow(QMainWindow):
         if self.scene.patch_colors is not None:
             self.scene.patch_colors = self._patch_colors()
             self.scene.update_entities([])
-        self.set_selection(self.selected_ids)
+        self.set_selection(self.selected_ids, faces=self.selected_faces)
         self._update_edit_actions()
         self._auto_navigation()
         if not had_geometry and len(self.session.store) > 0:
@@ -1996,8 +2047,13 @@ class MainWindow(QMainWindow):
 
     def _patch_members_from_selection(self) -> list:
         """Connectors (2D boundaries, side walls of extruded volumes), structured domains
-        (faces of blocks and volumes) and extruded volumes (both their ends)."""
+        (faces of blocks and volumes), extruded volumes (both their ends) and the selected
+        faces of blocks and volumes."""
+        from opengrid.model.patches import member_script
+
         members = self._selected_of_kind("connector") + self._selected_of_kind("domain")
+        for face in self.selected_faces:
+            members.append(member_script(face, self.session.store))
         for name in self._selected_of_kind("volume"):
             if self.session.store.get(name).params["faces"] is None:
                 members.append({"volume": name, "face": "bottom"})
@@ -2358,13 +2414,33 @@ class MainWindow(QMainWindow):
         if len(domains) != 1:
             self.statusBar().showMessage(self._selection_hint("one domain to convert"), 5000)
             return None
-        name = self._run(lambda: self.session.convert_domain(domains[0]))
+        store = self.session.store
+        groups = [d.name for d in store.dependents(domains[0]) if d.kind == "smoothing_group"]
+        from opengrid.model.sketch import output_owner
+
+        sketched = store.get(domains[0]).id in output_owner(store)  # its sketch decides
+        if groups and not sketched and not self._confirm_leave_groups(domains[0], groups):
+            return None
+        leave = bool(groups)
+        name = self._run(lambda: self.session.convert_domain(domains[0], leave_groups=leave))
         if name:
             kind = self.session.store.get(name).kind.replace("_", " ")
             log.info("%s is now a %s", name, kind)
             self.set_selection([self.session.store.get(name).id])
             self.statusBar().showMessage(f"{name} is now a {kind}", 5000)
         return name
+
+    def _confirm_leave_groups(self, domain: str, groups: list[str]) -> bool:
+        """Ask before a converted domain leaves its smoothing groups; tests replace this."""
+        answer = QMessageBox.question(
+            self,
+            "Convert domain",
+            f"{domain} is smoothed in {', '.join(groups)}. Take it out of the group and "
+            "convert it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def pair_selection_as_periodic(self) -> list[str] | None:
         """Two selected sides (two connectors; 3D: two faces, or one extruded volume for its
@@ -2599,6 +2675,8 @@ class MainWindow(QMainWindow):
         self.boundary_dock.show_report(report, self.session.store)
         if self.scene.patch_colors is not None:
             self.scene.patch_colors = self._patch_colors(report)
+            if self.session.is_3d():
+                self.scene.patch_faces = self._patch_face_colors()
             self.scene.rebuild()
         return report
 
@@ -2628,11 +2706,38 @@ class MainWindow(QMainWindow):
         return colors
 
     def set_patch_colouring(self, enabled: bool) -> None:
+        self.scene.patch_faces = None
         if enabled:
             self.scene.patch_colors = self._patch_colors()
+            if self.session.is_3d():
+                self.scene.patch_faces = self._patch_face_colors()
         else:
             self.scene.patch_colors = None
+            self.scene.show_patch_faces(None)
         self.scene.rebuild()
+
+    def _patch_face_colors(self, previous=None) -> list:
+        """3D: [(face, colour)] of every boundary face: its patch's colour, or the unassigned
+        colour. The boundary faces are found by meshing the model (analyze_3d), or taken from
+        ``previous`` (after an edit of the patches: cheap)."""
+        from opengrid.api import _face_member
+        from opengrid.model.volumes import analyze_3d
+
+        coloured = []
+        for index, patch in enumerate(self.session.store.entities("patch")):
+            color = PATCH_PALETTE[index % len(PATCH_PALETTE)]
+            for member in patch.params["members"]:
+                coloured.append((dict(member), color))
+        assigned = [m for m, _c in coloured]
+        if previous is None:
+            faces = [_face_member(e) for e in analyze_3d(self.session)["entries"]]
+        else:
+            faces = [m for m, _c in previous]
+        for member in faces:
+            if member not in assigned:
+                assigned.append(member)
+                coloured.append((member, UNASSIGNED_COLOR))
+        return coloured
 
     def export_cgns(self, path: str | None = None) -> dict | None:
         if path is None:
@@ -2675,6 +2780,32 @@ class MainWindow(QMainWindow):
             log.info("created %s", ", ".join(names))
             self.set_selection([self.session.store.get(n).id for n in names])
         return names or []
+
+    def _update_points_preview(self) -> None:
+        """Where the selected curves without points would get them (the 'points' box),
+        before a domain is made on them: pink dots."""
+        import contextlib
+
+        arrays = []
+        for curve in self._selected_unmeshed_curves():
+            with contextlib.suppress(ValidationError, ValueError):
+                arrays.append(self.session.preview_points(curve, self.dimension_box.value()))
+        self.scene.show_points_preview(arrays)
+        if arrays:
+            self.statusBar().showMessage(
+                f"Preview: {self.dimension_box.value()} points on each selected curve (the "
+                "'points' box); they get them with Structured / Unstructured domain or Points "
+                "on curves",
+                6000,
+            )
+
+    def _show_edit_preview(self, arrays) -> None:
+        """The points a curve's panel edits would give, before Apply (or the plain preview
+        again when the edits are undone)."""
+        if arrays:
+            self.scene.show_points_preview(arrays)
+            return
+        self._update_points_preview()
 
     def give_points(self, curve: str) -> list[str]:
         """Points ('points' box) on one curve without points (its panel's button)."""
@@ -3321,6 +3452,58 @@ class MainWindow(QMainWindow):
                 return
         self.session.save_journal(path)
         log.info("journal saved to %s", path)
+
+    def run_script(self, code: str) -> tuple[str, str]:
+        """Run code written in the Script tab in this window's model, statement by statement,
+        with the console's names (``og``, ``window`` and what was defined there). Each
+        statement that runs joins the trace as written; the first that fails stops: it and
+        the rest are returned (the code not run) with a message."""
+        import ast
+        import contextlib
+        import io
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as error:
+            return code, f"Not run: syntax error at line {error.lineno}: {error.msg}"
+        lines = code.splitlines(keepends=True)
+        namespace = self.console.user_namespace()
+        start = 0  # where the next statement's text starts (the comments above go with it)
+        ran = 0
+        with self.batch_updates():
+            for statement in tree.body:
+                end = statement.end_lineno
+                source = "".join(lines[start:end])
+                printed = io.StringIO()
+                try:
+                    with (
+                        self.trace.typed(source),
+                        contextlib.redirect_stdout(printed),
+                        contextlib.redirect_stderr(printed),
+                    ):
+                        exec(compile(ast.Module([statement], []), "<script>", "exec"), namespace)
+                except Exception as error:
+                    self._log_printed(printed.getvalue())
+                    message = f"Stopped at line {statement.lineno}: {type(error).__name__}"
+                    if str(error):
+                        message += f": {str(error).splitlines()[0]}"
+                    log.error("script: %s", message)
+                    return "".join(lines[start:]), message
+                self._log_printed(printed.getvalue())
+                start = end
+                ran += 1
+        rest = "".join(lines[start:])
+        if rest.strip():  # comments after the last statement
+            self.trace.note(rest.strip("\n"))
+        message = f"Ran {ran} statement(s)"
+        if namespace.get("og") is not self.session:
+            message += " (og no longer names this window's model: og = window.session)"
+        log.info("script: %s", message)
+        return "", message
+
+    def _log_printed(self, text: str) -> None:
+        for line in text.splitlines():
+            log.info("script: %s", line)
 
     def save_trace(self, path: str | None = None) -> str | None:
         """Save the Python trace of this window (everything done in it, File > New and Open

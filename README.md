@@ -348,11 +348,23 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   points (`curve-1`, with its kind and point count: `line, 21 pts`), one selection, one
   property panel with the shape's parameters and the points' number and distribution, and
   one deletion. A curve gets points (the toolbar's "points" box) when a domain is made on
-  it, from Create > Points on curves, or from its panel's "Give it points".
+  it, from Create > Points on curves, or from its panel's "Give it points". Selected curves
+  are drawn bold (in their patch colour when colouring by patch).
+- **Points before meshing.** Selected curves without points show where the "points" box
+  would put them (pink dots, following the box), and a curve's panel shows where its edited
+  number and distribution of points would land before Apply.
 - **Script.** Everything done in the window, drawn, edited, undone, exported or typed in the
   console, is shown as the Python that redoes it, kept in a temporary file (`trace_path` in
   the console; File > New and Open continue it): copy it, save it, or replay it with
-  `python script.py`.
+  `python script.py`. New lines written at its end run in the window with Ctrl+Enter (or
+  Run), with the console's names, and join the trace as written; what already ran stays
+  read-only.
+- **Boundary conditions in 3D.** A click on a block or volume selects the face under the
+  pointer (a block's `imin` … `kmax`, an extruded volume's top, bottom or side walls; Shift
+  adds faces, a second click selects the whole block); the face's panel, the Boundary panel
+  and the right-click menu give it a type, the Boundary panel's rows select their faces, and
+  Colour by patch fills the faces with their patches' colours (unassigned: red). Extrude 2D
+  model carries the 2D curves' types over to the side faces.
 - Drawing tools for points, curves, freehand curves and sketch blocks (toolbar icons, keys
   `S P L A W B N D K`); snapping to points, curve ends and, with the reference grid shown, its
   lines; live drag previews of handles; double-click adds or removes curve points. A selected

@@ -1385,15 +1385,17 @@ def set_boundary_type(store, members, patch_type: str, name: str | None = None):
     return assign(store, members, patch_type, name), []
 
 
-def convert_domain(store, name: str):
+def convert_domain(store, name: str, leave_groups: bool = False):
     """A structured domain becomes an unstructured one on the same connectors; an
     unstructured domain with one loop becomes a structured one (the loop assembled into four
     edges). The name stays; zones and 3D patches follow it. Refused for a sketch's domains
-    (list the block in the sketch's unstructured blocks instead), members of a smoothing
-    group and faces of blocks or volumes. Returns ([name], [])."""
+    (Session.convert_domain goes through the sketch's unstructured blocks), faces of blocks or
+    volumes, and members of a smoothing group unless ``leave_groups`` (the domain leaves its
+    groups; a group left without domains goes). Returns ([name], [])."""
     from opengrid.model.connectors import ConnectorEvaluator
     from opengrid.model.domains import assemble_edges
     from opengrid.model.entities import normalize_params
+    from opengrid.model.membership import without_members
     from opengrid.model.sketch import owned_entities
     from opengrid.model.unstructured import assemble_loops
 
@@ -1412,15 +1414,27 @@ def convert_domain(store, name: str):
             ]
         )
     blockers = []
+    groups = []
     for dependent in store.dependents(entity.id):
         if dependent.kind == "smoothing_group":
-            blockers.append(f"smoothing group {dependent.name} (remove it from the group first)")
+            if leave_groups:
+                groups.append(dependent)
+            else:
+                blockers.append(
+                    f"smoothing group {dependent.name} (leave_groups=True takes it out)"
+                )
         elif dependent.kind in ("block", "volume"):
             blockers.append(f"{dependent.kind} {dependent.name}")
     if blockers:
         raise ValidationError(
             [Issue(entity.name, "cannot be converted while used by " + ", ".join(blockers))]
         )
+    for group in groups:
+        params = without_members(group, {entity.id})
+        if params is None:
+            store.remove(group.id)
+        else:
+            store.update(group.id, params=params)
     if entity.kind == "domain":
         ids = [item["connector"] for edge in entity.params["edges"] for item in edge]
     else:

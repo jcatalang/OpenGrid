@@ -180,6 +180,13 @@ Set a connector's distribution ("uniform", "geometric", "tanh", "sine").
 
 Nodes and diagnostics of a connector (cached until the model changes).
 
+### `preview_points(name: str, dimension: int | None = None, **changes) -> numpy.ndarray`
+
+Where points would go, changing nothing: on a curve without points, ``dimension``
+points (uniform unless ``distribution`` is given); on a connector, its points with
+``changes`` to its parameters (dimension, distribution, mode, breakpoints). Spacing
+propagation is left out. The window's preview before meshing or applying.
+
 ### `connector_report(name: str) -> str`
 
 One-paragraph summary: points, length, achieved spacings, stretching, warnings.
@@ -604,13 +611,14 @@ Split a structured domain along grid line i (or j). The cut becomes a connector 
 polyline through the grid line; edge connectors crossing it are split. Returns [name
 (part with the lower index), new domain, cut connector].
 
-### `convert_domain(name: str) -> str`
+### `convert_domain(name: str, leave_groups: bool = False) -> str`
 
 Turn a structured domain into an unstructured one on the same connectors, or an
 unstructured domain (one loop that assembles into four edges) into a structured one;
-the name stays and zones and 3D patches follow. Refused for a sketch's domains (set
-the sketch's unstructured blocks), members of a smoothing group and faces of blocks or
-volumes. One undo step.
+the name stays and zones and 3D patches follow. A sketch's domain changes through its
+sketch (its block joins or leaves the sketch's ``unstructured`` blocks). A member of a
+smoothing group is refused unless ``leave_groups`` (it leaves the groups; a group left
+empty goes); faces of blocks or volumes are refused. One undo step.
 
 ### `join_domains(first: str, second: str) -> str`
 

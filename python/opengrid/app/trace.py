@@ -4,7 +4,8 @@ The session journal (``commands/base.py``) records every command, undo and redo 
 the public API. The trace writes it to a file as it grows, so the operations done by hand
 can be read (and replayed) as a script. Unlike the journal, it lasts as long as the window:
 File > New and Open continue it (``og.new()``, ``og.load(...)``), and the window adds what
-changes no model (exports, saves: ``note``). The file is a temporary one
+changes no model (exports, saves: ``note``). Code run from the Script tab is recorded as
+written (``typed``), not as the commands it ran. The file is a temporary one
 (``<temp>/opengrid-traces/``, files older than a week removed at the next start).
 """
 
@@ -12,6 +13,7 @@ import os
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 TRACE_DIR = Path(tempfile.gettempdir()) / "opengrid-traces"
@@ -43,6 +45,7 @@ class SessionTrace:
         self.on_append: Callable[[str], None] | None = None
         self._journal = None
         self._written = 0
+        self._typing = False
         started = time.strftime("%Y-%m-%d %H:%M:%S")
         header = (
             f"# OpenGrid session trace, started {started}: every command run in the window or\n"
@@ -71,13 +74,32 @@ class SessionTrace:
             self._written = len(journal.lines)
             self._append(lines)
 
+    @contextmanager
+    def typed(self, source: str):
+        """Run code written in the Script tab inside: the trace records it as written (it
+        stands for the commands it runs). If it fails, the commands it ran before the error
+        are recorded instead, so the trace still redoes the session."""
+        self.sync()
+        self._typing = True
+        try:
+            yield
+        except BaseException:
+            self._typing = False
+            self.sync()
+            raise
+        self._typing = False
+        self._journal = self.session.commands.journal
+        self._written = len(self._journal.lines)
+        self._append([source.strip("\n")])
+
     def note(self, source: str) -> None:
         """Add an operation that changes no model (an export, a save)."""
         self.sync()
         self._append([source])
 
     def _on_change(self, _change) -> None:
-        self.sync()
+        if not self._typing:
+            self.sync()
 
     def _append(self, lines: list[str]) -> None:
         text = "\n".join(lines) + "\n"

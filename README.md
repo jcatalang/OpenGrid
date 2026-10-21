@@ -484,9 +484,11 @@ pip install --no-build-isolation -e .   # rerun after C++ changes
 ```
 
 ### Linux (x86_64; checked on openSUSE Leap 15.6)
-- **No compilation:** the self-contained bundle `OpenGrid-<version>-linux-x86_64.tar.gz`
-  (built by `packaging/linux/build_bundle.sh`) holds Python, Qt, VTK, Netgen, OpenCASCADE and
-  OpenGrid. Extract it and run `./opengrid`; no conda, compiler or root needed.
+- **No compilation:** download `OpenGrid-<version>-linux-x86_64.tar.gz` from the
+  repository's [Releases](https://github.com/jcatalang/OpenGrid/releases) (a self-contained
+  bundle: Python, Qt, VTK, Netgen, OpenCASCADE and OpenGrid), copy it to the Linux computer,
+  extract it and run `./opengrid` inside the folder it creates; no conda, compiler, internet
+  or root needed. (The repository itself holds only the scripts that build it.)
 - **From source in one command:** `packaging/linux/install_from_source.sh` installs Miniforge
   into a private folder, creates the environment with conda-forge's GCC, builds OpenGrid and
   adds `opengrid` to `~/.local/bin` and the application menu.

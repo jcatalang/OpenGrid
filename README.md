@@ -537,13 +537,11 @@ uv pip install --no-build-isolation -e ".[gui,test]"
 
 ```bash
 pytest -q                                   # Python and GUI tests (offscreen)
-ruff check . && ruff format --check .
-clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.hpp' '*.h')
-python tools/check_no_ternary.py
+tools/lint.sh                               # ruff, ruff format, clang-format, no ternaries
 python tools/gen_api_docs.py                # after changing public Session methods
 ```
 
-Conventions (details in `CLAUDE.md` and `docs/ARCHITECTURE.md`):
+Conventions (details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#9-coding-conventions)):
 - Algorithms in C++ (`og_core`, no Python / Qt / VTK dependency); the entity store, commands
   and exporters in Python.
 - Every model change is a command (undo / redo + journal); there is no other mutation path.
@@ -588,19 +586,27 @@ tools/                API docs generator, checks, GPU studies
 
 ## Dependencies and licences
 
-| Component | Use | Licence |
+**Nothing to install for the Linux bundle:** it carries everything below in one folder (no
+internet, compiler or conda needed on the machine; see
+[`docs/INSTALL_LINUX.md`](docs/INSTALL_LINUX.md)). To build from source, `environment.yml`
+installs everything from conda-forge in one command. Most of it is optional:
+
+| Needed for | Packages | Licence |
 |---|---|---|
-| Eigen | sparse linear algebra (curving) | MPL-2.0 |
-| nanobind | Python bindings | BSD-3 |
-| HDF5, CGNS | VTKHDF / CGNS writing | BSD-style, zlib |
-| Shewchuk's robust predicates | geometric predicates | public domain |
-| PySide6 / Qt 6 | GUI | LGPL-3.0 (dynamic) |
-| VTK, pyvista, pyvistaqt | rendering, picking | BSD-3, MIT |
-| Netgen | tetrahedral volume meshing | LGPL-2.1 (dynamic, optional) |
-| OpenCASCADE | STEP / IGES import | LGPL-2.1 with exception (dynamic, optional) |
-| OpenMP runtime | parallel loops | Apache-2.0 with LLVM exception |
-| NumPy, h5py, meshio | arrays, HDF5, test read-back | BSD-3, BSD-3, MIT |
-| IPython, qtconsole, ipykernel | the application's console (optional) | BSD-3 |
+| **building** (required) | a C++20 compiler, CMake, nanobind, Eigen (headers) | —, BSD-3, BSD-3, MPL-2.0 |
+| **the scripting API** (required) | Python 3.10+, NumPy | PSF, BSD-3 |
+| **the application** | PySide6 / Qt 6, VTK, pyvista, pyvistaqt, matplotlib | LGPL-3.0 (dynamic), BSD-3, MIT, MIT, PSF-based |
+| CGNS export (optional, build time) | HDF5, CGNS | BSD-style, zlib |
+| VTKHDF / HDF5 export (optional) | h5py | BSD-3 |
+| tetrahedral volumes (optional, run time) | Netgen | LGPL-2.1 (dynamic) |
+| STEP / IGES import (optional, build time) | OpenCASCADE | LGPL-2.1 with exception (dynamic) |
+| the IPython console (optional; else a plain one) | IPython, qtconsole, ipykernel | BSD-3 |
+| parallel loops (optional) | OpenMP (comes with GCC; `llvm-openmp` on macOS) | GPL with runtime exception / Apache-2.0 |
+| tests only | pytest, pytest-qt, meshio, GoogleTest | MIT, MIT, MIT, BSD-3 |
+| in the source tree (nothing to install) | Shewchuk's robust predicates | public domain |
+
+A build without an optional package skips that feature (CMake says so) and the rest works:
+the C++ core and the scripting API need only the first two rows.
 
 Deliberately not used: TetGen (AGPL), Triangle (non-free), GPL parts of CGAL and the Gmsh
 library (GPL); Gmsh's `.msh` format is written by OpenGrid's own code. Full table:

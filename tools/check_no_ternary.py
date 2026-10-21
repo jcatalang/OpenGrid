@@ -1,4 +1,4 @@
-"""Enforce the project rule: no inline ternary conditionals (see CLAUDE.md).
+"""Enforce the project rule: no inline ternary conditionals (docs/ARCHITECTURE.md, §9).
 
 * Python: any ``ast.IfExp`` node (``a if c else b``) is reported. Exact.
 * C++: after removing comments, string/char literals (including raw strings), any remaining

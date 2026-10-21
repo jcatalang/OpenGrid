@@ -848,6 +848,28 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## A tidier repository root, dependencies by need, Linux machines without internet (2026-10-21) — requested by the user
+The user asked why `.clang-format`, `.clang-tidy`, `.gitignore` and `CLAUDE.md` were in the
+repository, found the dependency list inconvenient for their SLES 15 machine, and could not
+run `install_from_source.sh` there (no curl / internet).
+- The clang configs moved to `tools/clang-format.yaml` and `tools/clang-tidy.yaml` (passed with
+  `--style=file:` / `--config-file=`; editors no longer find them by themselves);
+  `tools/lint.sh` runs every style check. `CLAUDE.md` (Claude Code's notes) is no longer
+  tracked; its conventions are in `docs/ARCHITECTURE.md` §9. `.gitignore` stays: git reads
+  it only at the root.
+- Dependencies: the README lists them by need (building, the API, the application, each
+  optional feature, tests, in-tree code). `h5py` is loaded on first use (`opengrid.io`
+  re-exports the VTKHDF writers lazily): OpenGrid imports and runs without it; meshio left
+  the conda package's run requirements (tests only); the pip extras are `gui`, `export`,
+  `console`, `test`.
+- `install_from_source.sh` downloads with curl, wget or Python, uses a Miniforge installer
+  copied by hand (`MINIFORGE_INSTALLER`), and when a download or conda fails says that the
+  machine needs internet (or `https_proxy`) and points to the bundle. `docs/INSTALL_LINUX.md`:
+  a machine without internet takes the bundle (copied with scp or a USB disk).
+- The bundle in `packaging/dist/linux` is still the one from 2026-10-19 (no Docker builds on
+  this Mac any more, at the user's request: emulated x86_64 is too slow). 554 passed, 1
+  expected failure; lint clean.
+
 ## Boundary types on 3D faces, the Script tab runs code, bold selection, points before meshing, conversion of sketch domains (2026-10-21) — requested by the user
 The user asked for the Script tab to be editable with new lines run in the window, selected
 curves in bold (colours already mean boundary types), a preview of where points land before

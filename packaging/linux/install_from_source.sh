@@ -9,14 +9,43 @@
 #
 #   packaging/linux/install_from_source.sh          # install or update
 #   packaging/linux/install_from_source.sh --test   # ... and run the C++ and Python tests
+#   MINIFORGE_INSTALLER=~/Miniforge3-Linux-x86_64.sh packaging/linux/install_from_source.sh
+#                                                   # a Miniforge installer copied by hand
 #
-# Needs internet for the downloads (about 1.5 GB; 3 GB on disk) and 10-20 minutes.
+# Needs internet (directly or through the https_proxy variable) for the conda-forge packages:
+# about 1.5 GB, 3 GB on disk, 10-20 minutes. Downloads with curl, wget or Python, whichever
+# the machine has. A machine without internet: use the self-contained bundle instead
+# (docs/INSTALL_LINUX.md, way 1: one file to copy, nothing to download or compile).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 PREFIX="${OPENGRID_HOME:-$HOME/.local/share/opengrid/miniforge}"
 ENV_NAME=opengrid
 JOBS="${OG_JOBS:-$(nproc)}"
 step() { echo "== $*"; }
+offline() {
+  cat >&2 <<OFFLINE
+
+OpenGrid needs internet here (conda-forge packages): $1.
+If this machine has no internet, use the self-contained bundle instead: copy
+OpenGrid-<version>-linux-x86_64.tar.gz to it, then  tar -xzf ...  and  ./opengrid
+(docs/INSTALL_LINUX.md, way 1). Behind a proxy: export https_proxy=http://host:port first.
+OFFLINE
+  exit 1
+}
+# fetch URL FILE: with curl, wget or Python (minimal systems may lack one or the other).
+fetch() {
+  if command -v curl >/dev/null; then
+    curl -fsSL -o "$2" "$1" && return 0
+  elif command -v wget >/dev/null; then
+    wget -q -O "$2" "$1" && return 0
+  elif command -v python3 >/dev/null; then
+    python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+      "$1" "$2" && return 0
+  else
+    offline "no curl, wget or python3 to download with"
+  fi
+  return 1
+}
 
 if [ "$(uname -s)" != "Linux" ]; then
   echo "install_from_source.sh: Linux only (macOS: see README.md)" >&2
@@ -25,23 +54,28 @@ fi
 if [ ! -x "$PREFIX/bin/conda" ]; then
   step "Miniforge into $PREFIX"
   mkdir -p "$(dirname "$PREFIX")"
-  installer="$(mktemp -d)/miniforge.sh"
-  curl -fsSL -o "$installer" \
-    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-$(uname -m).sh"
+  installer="${MINIFORGE_INSTALLER:-}"
+  if [ -z "$installer" ]; then
+    installer="$(mktemp -d)/miniforge.sh"
+    url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-$(uname -m).sh"
+    fetch "$url" "$installer" || offline "the Miniforge download failed ($url)"
+  fi
   bash "$installer" -b -p "$PREFIX" >/dev/null
-  rm -f "$installer"
 fi
 # Only this prefix's conda, whatever the user's shell has.
 unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL PYTHONHOME PYTHONPATH
 source "$PREFIX/etc/profile.d/conda.sh"
 if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
   step "updating the environment $ENV_NAME from environment.yml"
-  conda env update -q -n "$ENV_NAME" -f "$ROOT/environment.yml"
+  conda env update -q -n "$ENV_NAME" -f "$ROOT/environment.yml" \
+    || offline "conda could not fetch the packages"
 else
   step "creating the environment $ENV_NAME from environment.yml"
-  conda env create -q -n "$ENV_NAME" -f "$ROOT/environment.yml"
+  conda env create -q -n "$ENV_NAME" -f "$ROOT/environment.yml" \
+    || offline "conda could not fetch the packages"
 fi
-conda install -y -q -n "$ENV_NAME" -c conda-forge --override-channels cxx-compiler
+conda install -y -q -n "$ENV_NAME" -c conda-forge --override-channels cxx-compiler \
+  || offline "conda could not fetch the compiler"
 conda activate "$ENV_NAME"
 # The prefixed compiler finds its own archiver and linker (no binutils needed on the system).
 export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"

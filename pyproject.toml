@@ -8,18 +8,14 @@ version = "0.0.1"
 description = "Interactive structured / unstructured / hybrid mesh generator"
 readme = "README.md"
 requires-python = ">=3.10"
+# Required: NumPy. The rest is optional, by feature (none is needed for scripting 2D grids
+# with Plot3D export): the application, VTKHDF / HDF5 export, the IPython console, the tests.
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-gui = [
-    "PySide6>=6.6",
-    "vtk>=9.3",
-    "pyvista>=0.43",
-    "pyvistaqt>=0.11",
-    "qtpy",
-    "qtconsole",
-    "ipykernel",
-]
+gui = ["PySide6>=6.6", "vtk>=9.3", "pyvista>=0.43", "pyvistaqt>=0.11", "qtpy", "matplotlib"]
+export = ["h5py"]
+console = ["qtconsole", "ipykernel"]
 test = ["pytest", "pytest-qt", "meshio>=5.3", "h5py"]
 
 [project.scripts]

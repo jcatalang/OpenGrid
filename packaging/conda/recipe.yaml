@@ -60,7 +60,6 @@ requirements:
     - python
     - numpy >=1.26
     - h5py
-    - meshio >=5.3
     - pyside6 >=6.6
     - vtk-base >=9.3
     - pyvista >=0.43

@@ -1301,14 +1301,33 @@ faces), with boundary faces preserved bit-for-bit.
 - High-DPI: Qt6 is HiDPI-aware by default; VTK render window DPI is set from the screen's
   device pixel ratio.
 
-## 9. Coding conventions (summary — full list in CLAUDE.md)
+## 9. Coding conventions
 
-- clang-format / clang-tidy for C++, ruff for Python.
-- **No inline ternary conditionals** (`?:` in C++, `a if c else b` in Python) — explicit
-  if/else. Enforced by `tools/check_no_ternary.py` in CI (neither clang-tidy nor ruff has a
-  rule for this).
-- One generator per file with a header comment giving method and reference.
-- Validators never silently fix input.
+- Style: clang-format (Google based, 100 columns; `tools/clang-format.yaml`), clang-tidy
+  (`tools/clang-tidy.yaml`), ruff (100 columns; `pyproject.toml`). `tools/lint.sh` runs every
+  check.
+- **No inline ternary conditionals** (`?:` in C++, `a if c else b` in Python): explicit
+  if/else. Enforced by `tools/check_no_ternary.py` (neither clang-tidy nor ruff has a rule for
+  this).
+- C++: namespace `og`, headers in `core/include/opengrid/core/<module>/`, double precision,
+  `std::int64_t` indices, `-ffp-contract=off`, no `-ffast-math`. `og_core` does not depend on
+  Python, Qt or VTK. It must also build with GCC: include what you use (libc++ includes
+  `<algorithm>` transitively, libstdc++ does not) and stay clean under `-Werror` with GCC's
+  `-Wshadow`, `-Wsign-conversion`, `-Warray-bounds` and `-Wstringop-overflow`.
+- Each generator / algorithm in its own file, with a header comment giving the method and its
+  reference. Mesh and grid algorithms are in C++, never in Python.
+- Every model mutation is a command (undo / redo + journal) run through `Session` /
+  `CommandStack`; there is no other mutation path (`Store` refuses changes outside a
+  transaction). The entity store is in Python (`opengrid.model`), the algorithms in C++
+  (`opengrid._core`), see §4. Parameters are canonical (floats, 3-tuples); canonicalisation
+  is idempotent. Entity parameters never use the record keys `id`, `name`, `type`.
+- Exporters (VTKHDF, Plot3D, CGNS, Gmsh) live in Python (`opengrid.io`); VTKHDF changes are
+  checked against VTK's own reader.
+- Validators never silently fix input: they report the entity, the index and what is wrong.
+- Determinism: fixed seeds, stable ordering, no iteration over unordered containers in output
+  paths.
+- Tests: GoogleTest in `core/tests/`, pytest in `tests/python/`; GUI tests use pytest-qt with
+  `MainWindow(off_screen=True)`.
 
 ## 10. Deviations from SPEC and identified risks
 

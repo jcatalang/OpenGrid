@@ -60,15 +60,19 @@ step "conda package (rattler-build; its own build and test environments)"
   -m "$WORK/packaging/conda/variants.yaml" -c conda-forge --output-dir "$BUILD/channel" \
   > "$BUILD/rattler.log" 2>&1 || { tail -60 "$BUILD/rattler.log"; exit 1; }
 ls "$BUILD/channel/linux-64/"
+# The intermediate environments go as soon as they are done (a CI runner has ~14 GB free).
+rm -rf "$BUILD/channel/bld" "$BUILD/channel/src_cache"
 step "runtime environment"
 conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" -c conda-forge \
   "opengrid=$OG_VERSION" python=3.12
 step "conda-pack"
 "$CONDA/envs/pack/bin/conda-pack" -p "$BUILD/env" -o "$BUILD/env.tar.gz" --quiet
+rm -rf "$BUILD/env"
 NAME="OpenGrid-$OG_VERSION-linux-x86_64"
 B="$BUILD/$NAME"
 mkdir -p "$B/env"
 tar -xzf "$BUILD/env.tar.gz" -C "$B/env"
+rm -f "$BUILD/env.tar.gz"
 step "launchers, examples, README"
 cp -r "$WORK/packaging/linux/bundle/." "$B/"
 chmod +x "$B/opengrid" "$B/opengrid-python" "$B/install.sh"

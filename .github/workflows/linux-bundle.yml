@@ -8,8 +8,12 @@ name: Linux bundle
 on:
   workflow_dispatch:
     inputs:
+      bundle:
+        description: "Build and test the bundle"
+        type: boolean
+        default: true
       tests:
-        description: "Also build with warnings as errors and run the C++ and Python tests"
+        description: "Build with warnings as errors and run the C++ and Python tests"
         type: boolean
         default: true
 
@@ -18,6 +22,7 @@ permissions:
 
 jobs:
   bundle:
+    if: ${{ inputs.bundle }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -97,8 +102,11 @@ jobs:
           cmake --build --preset ci -j "$(nproc)"
           ctest --preset ci -j "$(nproc)" --output-on-failure
       - name: Python tests (GUI tests under a virtual display)
+        timeout-minutes: 40
         run: |
           source ~/miniforge/etc/profile.d/conda.sh && conda activate opengrid
           export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"
           pip install --no-build-isolation -q -C build-dir=build/ci .
-          xvfb-run -a -s "-screen 0 1600x1200x24" python -m pytest -q -p no:cacheprovider tests/python
+          # One line per test, and every thread's stack when a test runs over 3 minutes.
+          xvfb-run -a -s "-screen 0 1600x1200x24" python -m pytest -v -p no:cacheprovider \
+            -o faulthandler_timeout=180 --durations=15 tests/python

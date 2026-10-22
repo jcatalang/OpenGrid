@@ -7,12 +7,13 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QVBoxLayout,
 )
+
+from opengrid.app.forms import form_layout
 
 
 class ShapeParseError(ValueError):
@@ -177,7 +178,7 @@ class ShapeDialog(QDialog):
         hint = QLabel(spec.hint)
         hint.setWordWrap(True)
         layout.addWidget(hint)
-        form = QFormLayout()
+        form = form_layout()
         self.edits = {}
         for field in spec.fields:
             if field.kind == "bool":

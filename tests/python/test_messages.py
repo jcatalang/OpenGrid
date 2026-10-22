@@ -131,3 +131,38 @@ def test_sliding_layers_in_a_sketch_and_their_corner():
     assert np.min(quality["min_angle"]) > 20.0  # (3.4 degrees before: steps at the corner)
     replayed = opengrid.replay(og.journal_text())
     assert len(replayed.unstructured_mesh("sketch-1-d0")["quads"]) == len(mesh["quads"])
+
+
+def test_wrapped_panel_text_is_not_cut(window, qtbot):
+    """Every form of the panels lets its fields take the width available (macOS's default kept
+    them at their preferred width, and word-wrapped labels lost their second line)."""
+    from PySide6.QtWidgets import QFormLayout, QLabel
+
+    from opengrid.app.inflation_dialog import InflationDialog
+
+    og = window.session
+    sketch_box(og)
+    og.edit_sketch("sketch-1", unstructured=(0,))
+    og.set_inflation(["sketch-1-c1-2"], first_height=0.01, growth_rate=1.15, layers=20)
+    window.show()
+
+    def cut():
+        return [
+            label.text()
+            for label in window.property_panel.findChildren(QLabel)
+            if label.isVisible()
+            and label.wordWrap()
+            and label.text()
+            and label.height() + 1 < label.heightForWidth(label.width())
+        ]
+
+    for name in ("sketch-1-c1-2", "sketch-1-d0", "sketch-1"):
+        window.set_selection([og.entity(name).id])
+        forms = window.property_panel.findChildren(QFormLayout)
+        assert forms
+        for form in forms:
+            assert form.fieldGrowthPolicy() == QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        qtbot.waitUntil(lambda: not cut(), timeout=3000)  # (once the layout has settled)
+    dialog = InflationDialog(["c"])
+    (form,) = dialog.findChildren(QFormLayout)
+    assert form.fieldGrowthPolicy() == QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow

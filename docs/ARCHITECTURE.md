@@ -500,7 +500,9 @@ segment, so derivative jumps at knots never cost accuracy.
     1/min(n·n_seg). On a straight wall layer k is exactly h₀gᵏ (tested to 1e-6); on curved
     walls the first height is within 0.25% (demo; tested < 2%).
   - Sharp convex corners (normals turning > 60°) get fans in steps of ≤ 20°.
-  - Converging columns are merged.
+  - Converging columns are merged: a pair whose new front segment shrinks below half of the
+    old one or turns back; a run of such pairs (both neighbours of a concave corner's column)
+    becomes one node at the run's mean, so two walls' layers meet along the corner.
 - **Stopping rules:**
   - The layer limit is reached.
   - **Transition**: the layer height reaches the column's isotropic size. That size is its
@@ -510,12 +512,24 @@ segment, so derivative jumps at knots never cost accuracy.
     more than `max_slope` (0.5) times their distance along the front.
   - **Crossing**: exact intersection tests against the old fronts, the boundary and the other
     new segments.
-  - **Proximity**: a facing segment ahead closer than the isotropic size; this handles
-    multi-element gaps.
+  - **Proximity**: a facing segment ahead closer than the isotropic size, approaching within
+    60° of head-on; this handles multi-element gaps and sharp wedges. (Without the head-on
+    condition the other wall's layers beside a column in a concave corner stopped it, leaving
+    steps and 3° cells where two walls meet.)
   - **Cell validity**: inverted cells, or an angle above 165°.
 
   Checks repeat until no column has to stop, so every committed layer is valid. Open wall
-  chains keep their fixed end nodes, and the layers taper to them.
+  chains keep their fixed end nodes, and the layers taper to them (or slide into the
+  neighbouring boundary through its own vertices, `slide`, between 45° and 135°). The
+  result counts the wall columns each rule stopped (`InflationStops`; Python
+  `mesh["layer_stops"]`), so the window can say why layers did not all grow
+  (`model/unstructured.layer_shortfall`).
+- **Messages.** Every warning and error goes through the `opengrid` logger: the session logs
+  its commands' warnings (prefixed by the operation's label), the window its refusals at
+  ERROR. The window shows WARNING and above in a bar above the view (`app/message_bar.py`)
+  and INFO and above in the Log tab (`app/log_panel.py`: time and message, repeats counted);
+  details go to DEBUG (the launcher's log file only). A record logged with
+  `extra={"on_screen": False}` is left out of the bar (a dialog shows it).
 - **Lessons from the NACA demo** (each is fixed and covered by a test or the demo):
   - The slope rule must measure the gap along the front, not between the column tops; that
     distance already contains the height difference, so the rule never fired.

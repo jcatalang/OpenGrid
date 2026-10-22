@@ -373,6 +373,8 @@ class MainWindow(QMainWindow):
         self.dimension_box.valueChanged.connect(lambda _n: self._update_points_preview())
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
         self.quality_dock.metric_changed.connect(self._on_metric_changed)
+        self.quality_dock.colouring_toggled.connect(self.quality_action.setChecked)
+        self.quality_dock.threshold_changed.connect(self.set_quality_threshold)
         self.quality_dock.locate_requested.connect(self.show_worst_cell)
         self.boundary_dock.type_requested.connect(self._set_type_from_dock)
         self.boundary_dock.pair_requested.connect(self.pair_selection_as_periodic)
@@ -610,7 +612,11 @@ class MainWindow(QMainWindow):
         self.shrink_action = QAction("Shrink block cells", self)
         self.shrink_action.setCheckable(True)
         self.shrink_action.toggled.connect(self.set_shrink)
-        self.quality_action = QAction("Colour domains by quality", self)
+        self.quality_action = QAction("Colour the mesh by quality", self)
+        self.quality_action.setStatusTip(
+            "Colour the cells by the Quality panel's metric (there: only the cells worse than a "
+            "value, also inside 3D blocks and volumes)"
+        )
         self.quality_action.setCheckable(True)
         self.quality_action.toggled.connect(self.set_quality_colouring)
         self.patch_color_action = QAction("Colour curves by patch", self)
@@ -2292,14 +2298,30 @@ class MainWindow(QMainWindow):
 
     def set_quality_colouring(self, enabled: bool) -> None:
         if enabled:
+            self.quality_dock_widget.raise_()  # (its metric and threshold)
             self.scene.quality_metric = self.quality_dock.metric_key()
+            self.scene.quality_threshold = self.quality_dock.threshold_value()
         else:
             self.scene.quality_metric = None
+        self.quality_dock.colour.blockSignals(True)
+        self.quality_dock.colour.setChecked(enabled)
+        self.quality_dock.colour.blockSignals(False)
         self.scene.rebuild()
+
+    def set_quality_threshold(self, value) -> None:
+        """Only the cells worse than ``value`` filled (None: every cell coloured); turns the
+        colouring on."""
+        self.scene.quality_threshold = value
+        if value is not None and not self.quality_action.isChecked():
+            self.quality_action.setChecked(True)  # (rebuilds)
+        elif self.scene.quality_metric is not None:
+            self.scene.rebuild()
+        self.refresh_quality()  # (its statistics count the cells worse than the threshold)
 
     def _on_metric_changed(self, key: str) -> None:
         if self.scene.quality_metric is not None:
             self.scene.quality_metric = key
+            self.scene.quality_threshold = self.quality_dock.threshold_value()
             self.scene.rebuild()
         self.refresh_quality()
 

@@ -189,6 +189,11 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
 - Scaled Jacobian, equiangle skewness, aspect ratio, minimum / maximum included angle,
   non-orthogonality, neighbour area / volume ratio and cell volume, for every cell type; colour
   maps in the GUI, a worst-cell finder, and a quality floor for 3D cells.
+- **Quality on the mesh** (the Quality panel, or View > Colour the mesh by quality): every
+  cell coloured by the chosen metric, or only the cells worse than a threshold filled and the
+  rest drawn as lines: in 3D also the cells inside blocks and volumes, so distorted elements
+  are found wherever they are. The histogram marks the threshold and counts the cells past
+  it.
 
 ### High-order elements
 See [High-order meshes](#high-order-meshes).
@@ -393,7 +398,11 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   vertices): dragging one regenerates and remeshes.
 - Create > Shapes (a dialog per shape), Create > Mesh surfaces and Volume from faces for 3D
   bodies; Structured and Unstructured domain work on the selected curves directly.
-- Colour by quality, patches or entities; node display; block cuts and shrunk cells for 3D.
+- Colour by quality (all cells, or only those worse than a threshold, inside 3D meshes too),
+  patches or entities; node display; block cuts and shrunk cells for 3D.
+- **Messages where they are seen.** Warnings and refused operations appear in a bar above the
+  view (with what to change, e.g. why inflation layers stopped early); the Log tab keeps every
+  message, one line each with its time.
 - **Navigation.** 2D: left-drag (or a three-finger drag on a trackpad) zooms to a window
   drawn live, or pans (View menu); Shift + drag or middle-drag pans; wheel / two-finger scroll
   and right-drag zoom. 3D (switched on when the model gains blocks, volumes or surfaces, or

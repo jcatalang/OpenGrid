@@ -79,6 +79,15 @@ history). Phase tags show where each item came from.
     a second; on larger models it waits for Refresh (and shows no rows meanwhile).
   - A click on the bottom of a box extruded from a domain may select that domain rather than
     the block's `kmin` face (both are drawn there); either works as the patch member.
+- **Messages and quality view** [2026-10-22]:
+  - The bar shows every warning, including repeated ones while dragging (identical lines are
+    shown once); it closes by itself after a reading time.
+  - Layer shortfall messages come from the 2D mesher only; 3D volume layers report none yet.
+  - "Only cells worse than" fills the cells of 2D domains (in 2D models) and of blocks and
+    volumes; a 3D model's surface domains are not coloured (their cells are faces of volumes).
+  - A sketch edge leaving an unstructured block's wall is still clustered at the wall when the
+    layers taper (as for structured blocks; it keeps periodic pairs matched); a tiny first
+    height then gives a strongly stretched edge (warned).
 - **Sliding layers** [2026-10-22]:
   - Only in 2D domains, between 45 and 135 degrees; sharper wedges and wider openings taper
     as before (layers converging into a wedge would be squeezed into slivers).

@@ -12,7 +12,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from opengrid.api import Session
+from opengrid.app.forms import form_layout
 from opengrid.model.blocks import EXTRUSION_MODES
 from opengrid.model.connectors import CURVE_KINDS, DISTRIBUTION_TYPES, EXPLICIT, SPACING_MODES
 from opengrid.model.curves import CurveIndex
@@ -94,7 +94,7 @@ class ExtrusionEditor(QWidget):
     def __init__(self, value: dict, parent=None):
         super().__init__(parent)
         self.domain = value["domain"]
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.mode = QComboBox()
         self.mode.addItems(list(EXTRUSION_MODES))
@@ -163,7 +163,7 @@ class PeriodicEditor(QWidget):
 
     def __init__(self, value: dict | None, partners, paired_from=(), parent=None):
         super().__init__(parent)
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.partner = QComboBox()
         self.partner.addItem("(none)", None)
@@ -271,7 +271,7 @@ class VolumeEditor(QWidget):
         super().__init__(parent)
         self._boundary_spacing = boundary_spacing  # mean boundary node spacing: suggestions
         self.store = store
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.backend = QComboBox()
         self.backend.addItems(list(BACKENDS))
@@ -386,7 +386,7 @@ class BlockSmoothingEditor(QWidget):
     def __init__(self, value: dict | None, parent=None):
         super().__init__(parent)
         self.original = value
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.control = QComboBox()
         self.control.addItems(["none", "laplace", "thomas_middlecoff"])
@@ -628,7 +628,7 @@ class GeneratorEditor(QWidget):
     def __init__(self, value: dict, parent=None):
         super().__init__(parent)
         self.original = value
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.method = QComboBox()
         self.method.addItems(list(METHODS))
@@ -783,7 +783,7 @@ class UnstructuredEditor(QWidget):
         super().__init__(parent)
         self._boundary_spacing = boundary_spacing  # mean boundary node spacing: suggestions
         self.store = store
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.algorithm = QComboBox()
         self.algorithm.addItems(list(ALGORITHMS))
@@ -939,7 +939,7 @@ class DistributionEditor(QWidget):
 
     def __init__(self, value: dict, parent=None, length=None, dimension=None, unit: str = ""):
         super().__init__(parent)
-        layout = QFormLayout(self)
+        layout = form_layout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.type = QComboBox()
         self.type.addItems(list(DISTRIBUTION_TYPES))
@@ -1092,7 +1092,7 @@ class PropertyPanel(QWidget):
         self._title = QLabel("No selection")
         self._layout.addWidget(self._title)
         self._form_host = QWidget()
-        self._form = QFormLayout(self._form_host)
+        self._form = form_layout(self._form_host)
         self._layout.addWidget(self._form_host)
         self._error = QLabel("")
         self._error.setWordWrap(True)

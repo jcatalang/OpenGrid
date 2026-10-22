@@ -100,6 +100,10 @@ class Scene:
         self.color_by_stretching = True
         self.show_nodes = True
         self.quality_metric: str | None = None  # colour domains by this metric when set
+        # With a metric: fill only the cells worse than this (in 3D also inside blocks and
+        # volumes), the rest drawn as lines.
+        self.quality_threshold: float | None = None
+        self._worse: dict[int, pv.DataSet] = {}  # entity id -> its cells drawn as worse
         self.patch_colors: dict[int, str] | None = None  # connector id -> colour (patch mode)
         # 3D views of blocks: keep the cells on one side of a plane (origin, normal), and/or
         # shrink every cell towards its centre.
@@ -150,6 +154,7 @@ class Scene:
         for actor in self._entity_actors.pop(entity_id, []):
             self._remove(actor)
         self._face_members.pop(entity_id, None)
+        self._worse.pop(entity_id, None)
 
     def _refresh_faces(self) -> None:
         """Redraw the selected faces and the patch colours on the redrawn blocks (dropping the
@@ -436,10 +441,15 @@ class Scene:
         """Selection colour of a per-entity actor, in place (actors coloured by a quality
         metric keep their scalars)."""
         entity = self.session.store.get(entity_id)
-        if entity.kind not in STYLES or self._coloured_by_quality(entity):
+        if entity.kind not in STYLES:
             return
+        actors = self._entity_actors.get(entity_id, [])
+        if self._coloured_by_quality(entity):
+            if self.quality_threshold is None:
+                return
+            actors = actors[:1]  # the lines; the worse cells keep their colours
         color, width = STYLES[entity.kind][int(entity_id in self.selected_ids)]
-        for actor in self._entity_actors.get(entity_id, []):
+        for actor in actors:
             actor.prop.color = color
             actor.prop.line_width = width
 
@@ -712,6 +722,14 @@ class Scene:
             mesh = quad_mesh(self.session.domain_grid(entity.name, compute=False))
         name = f"entity-{entity.id}"
         # In a 3D model the cells are the blocks: domains (their faces) stay wireframes.
+        if self._coloured_by_quality(entity) and self.quality_threshold is not None:
+            values = self._display_quality(entity)[self.quality_metric]
+            mesh.cell_data[self.quality_metric] = values.reshape(-1)
+            color, width = STYLES[entity.kind][int(entity.id in self.selected_ids)]
+            actors = [self._add(mesh, name, style="wireframe", color=color, line_width=width)]
+            actors += self._worse_cells(mesh, name, entity.id)
+            self._entity_actors[entity.id] = actors
+            return
         if self._coloured_by_quality(entity):
             values = self._display_quality(entity)[self.quality_metric]
             mesh.cell_data[self.quality_metric] = values.reshape(-1)
@@ -775,6 +793,16 @@ class Scene:
             return
         cells = self.cut_plane is not None or self.shrink
         color, width = STYLES[entity.kind][int(entity.id in self.selected_ids)]
+        if self.quality_metric is not None and self.quality_threshold is not None:
+            # The outline (its faces still pick) and the cells worse than the threshold,
+            # wherever they are inside.
+            surface, members = self._boundary_faces(entity)
+            outline = self._add(
+                surface, name, style="wireframe", color=color, line_width=width, opacity=0.35
+            )
+            self._face_members[entity.id] = members
+            self._entity_actors[entity.id] = [outline, *self._worse_cells(mesh, name, entity.id)]
+            return
         if self.quality_metric is not None:
             actor = self._add(
                 mesh,
@@ -794,6 +822,42 @@ class Scene:
             actor = self._add(surface, name, style="wireframe", color=color, line_width=width)
             self._face_members[entity.id] = members
         self._entity_actors[entity.id] = [actor]
+
+    def _worse_cells(self, mesh, name: str, entity_id: int) -> list:
+        """An actor of the mesh's cells worse than the quality threshold, coloured by the
+        metric on the mesh's whole range (none when every cell passes)."""
+        from opengrid.app.quality_dock import worse_than
+
+        values = np.asarray(mesh.cell_data[self.quality_metric])
+        bad = np.flatnonzero(worse_than(values, self.quality_metric, self.quality_threshold))
+        if len(bad) == 0:
+            return []
+        finite = values[np.isfinite(values)]
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+        if high <= low:
+            high = low + 1e-12
+        cells = mesh.extract_cells(bad)
+        actor = self._add(
+            cells,
+            f"{name}-worse",
+            scalars=self.quality_metric,
+            cmap=QUALITY_CMAP,
+            clim=(low, high),
+            show_edges=True,
+            edge_color="#30363d",
+            scalar_bar_args={"title": self.quality_metric.replace("_", " ")},
+        )
+        self._worse[entity_id] = cells  # (a mapper's input is only there once rendered)
+        return [actor]
+
+    def worse_cells(self, entity_id: int):
+        """The cells of an entity drawn as worse than the threshold (None: none drawn)."""
+        return self._worse.get(entity_id)
+
+    def worse_cell_count(self) -> int:
+        """Cells drawn as worse than the threshold, over every entity."""
+        return sum(cells.n_cells for cells in self._worse.values())
 
     def _boundary_faces(self, entity) -> tuple[pv.PolyData, list[dict]]:
         """The drawn surface of a block or volume with cell data "face" (an index into the

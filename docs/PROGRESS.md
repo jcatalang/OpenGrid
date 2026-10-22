@@ -848,6 +848,59 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Messages on screen, a plain log, quality on the mesh, panel text, wall corners (2026-10-22) — requested by the user
+The user, trying the new inflation layers on a sketch block: they did not generate (the
+refusal only reached the status bar and the log, whose lines were hard to read: "those error
+messages should appear in screen ... the log is confusing, it should be simpler"); then: panel
+texts cut, the cell quality plotted on the mesh in 2D and 3D to find distorted elements, a
+badly executed corner where two walls meet, and a curve's type that could not be removed.
+- **The refusal and the silent outcomes, from the session trace:** "Inflation layers" on a
+  structured domain's curve was refused with a misleading message ("bound no unstructured
+  domain"); after converting, 4 of 20 layers grew (the first height 0.01 against a 0.015
+  spacing: transition) with nothing said; "run into the neighbouring curves" was dropped for
+  a sketch's block.
+- **Messages on screen** (`app/message_bar.py`): every warning and error of the `opengrid`
+  logger (any thread) in a bar above the view, one operation's messages together, closing
+  after a reading time (not under the pointer), "Not done" for refusals, a Log button. A
+  dialog's error (`extra={"on_screen": False}`) is not repeated there.
+- **A plain log** (`app/log_panel.py`): time and message (no level or logger names; warnings
+  and errors coloured), a repeated message counted on its line, the compute summary, snapping,
+  group statistics at DEBUG (the launcher's log file), "No changes" and progress in the status
+  bar; the session's warnings are no longer logged a second time by the window and carry the
+  operation's label ("Inflation layers: ...").
+- **Messages that say what happened:** the 2D mesher counts the wall columns each rule stopped
+  (`InflationStops`, `mesh["layer_stops"]`), and the window says why layers did not all grow
+  and what to change (`model/unstructured.layer_shortfall`); a structured domain's curve gets
+  "a structured domain: convert it first (Topology > Convert domain, or the right-click
+  menu)".
+- **Sketch blocks**: walls take `transition` and `slide` (the block's inflation keeps them;
+  transition off is no longer refused), and with slide an edge leaving the wall that borders
+  only unstructured blocks gets points at the layer heights (periodic edges keep theirs, with
+  a warning). The user's case: the top-left and bottom-right fans of tiny triangles became
+  layers running into the sides.
+- **Two walls in a concave corner** (the user's bottom-left corner): the proximity rule
+  stopped a wall's column because the other wall's layers ran beside it, leaving steps and
+  3.4-degree cells; it now counts only fronts approaching within 60 degrees of head-on (two
+  walls of a gap, a sharp wedge), and runs of converging columns merge together. The user's
+  case: worst angle 3.4 -> 21.4 degrees, scaled Jacobian 0.07 -> 0.42, no column stopped;
+  tested on a square with two walls and layers 2.6 times the spacing (the test fails with the
+  old rule).
+- **Quality on the mesh** (Quality panel: "Colour the mesh", "Only cells worse than" a value
+  offered per metric; View > Colour the mesh by quality): only the cells past the threshold
+  filled, the rest as lines; in 3D the cells inside blocks and volumes too (the outline keeps
+  picking faces); the histogram marks the threshold and counts the cells past it.
+- **Panel text cut** on macOS: Qt's macOS form layouts keep fields at their preferred width, so
+  a word-wrapped label got the height of fewer, longer lines (reproduced offscreen with the
+  macOS policy: "line, from the sketch (move its vertices)" 15 px tall for 30). Every form now
+  lets its fields grow (`app/forms.form_layout`, as on Linux); every panel checked at 260 and
+  330 px wide.
+- **A curve's type could not be removed** after extruding ("wall: does not contain
+  sketch-1-c0-1"): patch members were compared by label, and a curve that became an extruded
+  side wall is labelled by its face identifier; members are now compared as members.
+- Tests: `test_messages.py`, `test_quality_view.py`, a face test, C++
+  `TwoWallsMeetInAConcaveCornerWithoutSteps`. C++ 158 / 158; Python 571 passed, 1 expected
+  failure; lint clean.
+
 ## 3D faces with identifiers, boundary types on curves and faces, reaching hidden faces, inflation layers from curves that run into their neighbours (2026-10-22) — requested by the user
 The user (the openSUSE bundle "opened smoothly") asked: 3D faces registered with identifiers,
 hidden faces selectable, inflation layers set from the curves rather than in the domain,

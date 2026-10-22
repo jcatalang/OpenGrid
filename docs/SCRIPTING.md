@@ -171,7 +171,17 @@ curve too short for the layers keeps its points too. `og.last_warnings` names th
 og.set_inflation(["wall"], first_height=1e-3, growth_rate=1.25, layers=10, slide=True)
 ```
 In 3D, `set_inflation` takes surfaces: the volumes they bound grow layers from them (volume
-layers slide on planar neighbouring faces). The generator's `inflation` dict
+layers slide on planar neighbouring faces). A sketch's unstructured block takes the same
+settings on its walls (`walls=[{"edge": (1, 2), "spacing": 1e-3, "layers": 10, "growth": 1.15,
+"transition": True, "slide": True}]`), and its edges leaving those walls get points at the
+layer heights when they slide.
+
+Whether every layer grew, and why not: `og.unstructured_mesh(name)["layers"]` is the largest
+column's count, `["layer_stops"]` counts the wall columns each rule stopped (`transition`: a
+layer as thick as the cells beside it; `slope`: stepping down next to a stopped column;
+`proximity`: too close to another front or the boundary, a crossing or a bad cell).
+`opengrid.model.unstructured.layer_shortfall(og, og.entity(name), mesh)` says it in a
+sentence (the window shows it). The generator's `inflation` dict
 (`create_unstructured_domain(generator={"inflation": {...}})`) is the same setting written
 out.
 

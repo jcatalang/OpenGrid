@@ -5,13 +5,14 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
+
+from opengrid.app.forms import form_layout
 
 
 class InflationDialog(QDialog):
@@ -55,7 +56,7 @@ class InflationDialog(QDialog):
             "The layers run along the boundary curves next to these up to them, instead of "
             "tapering into steps (those curves get points at the layer heights near the walls)"
         )
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("first height", self.first_height)
         form.addRow("growth rate", self.growth)
         form.addRow("layers", self.layers)

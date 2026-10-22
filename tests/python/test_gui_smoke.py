@@ -17,9 +17,8 @@ def window(qtbot):
 
 def test_model_tree_categories(window):
     assert window.model_tree.category_names() == list(CATEGORIES)
-    assert CATEGORIES == (
-        "Curves", "Surfaces", "Points", "Domains", "Blocks", "Patches", "Zones"
-    )  # fmt: skip
+    # No Patches category: boundary types are shown on the curves and faces.
+    assert CATEGORIES == ("Curves", "Surfaces", "Points", "Domains", "Blocks", "Zones")
     # Points and Surfaces show only when there are some.
     tree = window.model_tree
     assert tree.category_item("Points").isHidden() and tree.category_item("Surfaces").isHidden()

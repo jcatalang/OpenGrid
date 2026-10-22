@@ -176,8 +176,8 @@ def test_boundary_panel_follows_the_model(window, qtbot):
     qtbot.waitUntil(lambda: "1 of 4 boundaries have no type" in dock.status.text(), timeout=3000)
     assert dock.rows("Boundaries")[0][3].startswith("no type yet")
     og.create_patch("spare", "inlet", [])
-    qtbot.waitUntil(lambda: dock.rows("Empty patches") != [], timeout=3000)
-    assert dock.rows("Empty patches")[0][:3] == ["spare", "", "inlet"]
+    qtbot.waitUntil(lambda: dock.rows("Unused names") != [], timeout=3000)
+    assert dock.rows("Unused names")[0][:3] == ["spare", "", "inlet"]
     og.undo()
     og.undo()
     qtbot.waitUntil(lambda: "ready to export" in dock.status.text(), timeout=3000)

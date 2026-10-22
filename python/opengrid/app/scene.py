@@ -1003,6 +1003,47 @@ class Scene:
                 return int(ids[cell]), point
         return None, point
 
+    def pick_stack(self, x: float, y: float) -> list[tuple[int, dict | None]]:
+        """Everything under display pixel (x, y), front to back: what ``pick_display`` picks
+        first (a curve or point seen through a face comes first), then every face of a block or
+        volume and every domain or surface the view ray crosses, then the blocks and volumes
+        those faces belong to. Entries are (entity id, face member or None)."""
+        renderer = self.plotter.renderer
+        near = np.asarray(_display_point_to_world(renderer, x, y, 0.0))
+        far = np.asarray(_display_point_to_world(renderer, x, y, 1.0))
+        first, _point = self.pick_display(x, y)
+        first_face = self.last_face
+        hits = []
+        for entity_id, actors in self._entity_actors.items():
+            for actor in actors:
+                mesh = actor.mapper.dataset
+                if not isinstance(mesh, pv.PolyData) or mesh.GetNumberOfPolys() == 0:
+                    continue  # (lines: curves and sketches are picked by pick_display)
+                points, cells = mesh.ray_trace(near, far, first_point=False)
+                faces = mesh.cell_data.get("face")
+                members = self._face_members.get(entity_id)
+                for point, cell in zip(points, cells, strict=True):
+                    member = None
+                    if faces is not None and members is not None:
+                        member = dict(members[int(faces[cell])])
+                    hits.append((float(np.linalg.norm(point - near)), entity_id, member))
+        hits.sort(key=lambda hit: hit[0])
+        stack = []
+        if first is not None:
+            stack.append((first, first_face))
+        owners = []
+        for _distance, entity_id, member in hits:
+            entry = (entity_id, member)
+            if entry not in stack:
+                stack.append(entry)
+            if member is not None and entity_id not in owners:
+                owners.append(entity_id)
+        for owner in owners:
+            if (owner, None) not in stack:
+                stack.append((owner, None))
+        self.last_face = first_face
+        return stack
+
     def display_to_world(self, x: float, y: float) -> tuple[float, float, float]:
         """Intersect the view ray through display pixel (x, y) with the plane z = 0."""
         renderer = self.plotter.renderer

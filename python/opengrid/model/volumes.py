@@ -1070,6 +1070,8 @@ def analyze_3d(session) -> dict:
     interfaces = []
     side_pairs = []  # (connector, block face, volume) interfaces, for the CGNS writer
 
+    from opengrid.model.faces import face_identifier
+
     def name(entity_id):
         return store.get(entity_id).name
 
@@ -1110,7 +1112,7 @@ def analyze_3d(session) -> dict:
                 keys.add(("volume", vols[0], "bottom"))
             entries.append(
                 {
-                    "label": f"{name(vols[0])}.{name(d)}",
+                    "label": face_identifier(store, {"domain": d}),
                     "block": None,
                     "volume": (vols[0], d),
                     "keys": keys,
@@ -1135,7 +1137,7 @@ def analyze_3d(session) -> dict:
         if len(vols) == 1:
             entries.append(
                 {
-                    "label": f"{name(vols[0])}.{name(c)}",
+                    "label": face_identifier(store, {"connector": c}),
                     "block": None,
                     "volume": (vols[0], ("side", c)),
                     "keys": {("connector", c)},
@@ -1163,18 +1165,15 @@ def analyze_3d(session) -> dict:
                     )
                 )
                 continue
+            label = face_identifier(store, item)
             if "connector" in item:
                 key = ("connector", item["connector"])
-                label = name(item["connector"])
             elif "block" in item:
                 key = ("block", item["block"], item["face"])
-                label = f"{name(item['block'])}.{item['face']}"
             elif "volume" in item:
                 key = ("volume", item["volume"], item["face"])
-                label = f"{name(item['volume'])}.{item['face']}"
             else:
                 key = ("domain", item["domain"])
-                label = name(item["domain"])
             hits = by_key.get(key, [])
             if not hits:
                 issues.append(Issue(label, f"is in patch {patch.name} but is not a boundary face"))

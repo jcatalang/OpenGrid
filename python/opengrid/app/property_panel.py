@@ -1605,10 +1605,10 @@ class PropertyPanel(QWidget):
         combo = QComboBox()
         combo.addItem("(none)")
         combo.addItems(list(PATCH_TYPES))
-        label = QLabel("in no patch")
+        label = QLabel("no type yet")
         if current is not None:
             combo.setCurrentText(current.params["patch_type"])
-            label.setText(f"patch {current.name}")
+            label.setText(f"exported as {current.name}")
         box = QWidget()
         row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
@@ -1906,14 +1906,14 @@ class PropertyPanel(QWidget):
 
     def _apply_face(self) -> bool:
         """A face's boundary type: it joins a patch of that type, or leaves its patch."""
-        from opengrid.model.patches import member_label, member_script
+        from opengrid.model.patches import member_label
 
         chosen = self._editors["boundary"][1].currentText()
         if chosen == self._boundary_before:
             self.message.emit("No changes", False)
             return False
         store = self.session.store
-        member = member_script(self.face_member, store)
+        member = member_label(self.face_member, store)  # its identifier, in the journal
         try:
             if chosen == "(none)":
                 self.session.clear_boundary_type([member])

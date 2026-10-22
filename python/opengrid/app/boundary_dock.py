@@ -41,7 +41,7 @@ INTERFACE_COLOR = "#7f8c8d"
 OK_COLOR = "#2ee59d"
 ENTITY_ROLE = Qt.ItemDataRole.UserRole + 1
 FACE_ROLE = Qt.ItemDataRole.UserRole + 2  # a 3D row's face (a patch member with ids)
-COLUMNS = ("boundary", "patch", "type", "status")
+COLUMNS = ("boundary", "exported as", "type", "status")
 
 
 def transform_text(pairing: dict) -> str:
@@ -90,7 +90,7 @@ class BoundaryDock(QWidget):
             "are paired with Pair as periodic instead"
         )
         self.name = QLineEdit()
-        self.name.setPlaceholderText("patch name (optional)")
+        self.name.setPlaceholderText("name in the exported file (optional)")
         self.name.setToolTip(
             "Leave empty to use the patch named after the type; give a name to keep several "
             "patches of one type apart (wall-top, wall-bottom)"
@@ -238,7 +238,7 @@ class BoundaryDock(QWidget):
             group.setExpanded(True)
         empty = [p for p in store.entities("patch") if not p.params["members"]]
         if empty:
-            group = QTreeWidgetItem(self.tree, [f"Empty patches ({len(empty)})"])
+            group = QTreeWidgetItem(self.tree, [f"Unused names ({len(empty)})"])
             for patch in empty:
                 item = QTreeWidgetItem(
                     group,

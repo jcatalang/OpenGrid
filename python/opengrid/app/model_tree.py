@@ -1,6 +1,8 @@
-"""Model tree: entities grouped as curves, surfaces, points, domains, blocks, patches, zones.
+"""Model tree: entities grouped as curves, surfaces, points, domains, blocks and zones.
 
-A curve and the connector of its points are one row (``model/curves.py``)."""
+A curve and the connector of its points are one row (``model/curves.py``). Boundary types are
+shown where they are given: on the curves (2D) and on the faces of blocks and volumes, listed
+under them (3D, ``model/faces.py``); there is no category of patches."""
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
@@ -10,9 +12,10 @@ from opengrid.model.entities import SURFACE_KINDS
 from opengrid.validation import ValidationError
 
 # Top-level categories, in display order. Points and Surfaces show only when there are some.
-CATEGORIES = ("Curves", "Surfaces", "Points", "Domains", "Blocks", "Patches", "Zones")
+CATEGORIES = ("Curves", "Surfaces", "Points", "Domains", "Blocks", "Zones")
 HIDDEN_WHEN_EMPTY = ("Surfaces", "Points")
 ENTITY_ID_ROLE = Qt.ItemDataRole.UserRole
+FACE_ROLE = Qt.ItemDataRole.UserRole + 1  # a face of a block or volume (a patch member)
 
 
 def connector_info(session, entity, index: CurveIndex | None = None) -> str:
@@ -38,10 +41,40 @@ def domain_info(session, entity) -> str:
     return text
 
 
-class ModelTree(QTreeWidget):
-    """Tree of model entities grouped by category; emits the selected entity ids."""
+def boundary_types(session) -> dict:
+    """{member key: text} of every boundary given a type: 'wall', 'periodic ↔ c-right'."""
+    from opengrid.model.patches import partner_of
 
-    selection_changed = Signal(list)
+    texts = {}
+    store = session.store
+    for patch in store.entities("patch"):
+        kind = patch.params["patch_type"]
+        if kind == "periodic":
+            partner = partner_of(patch, store)
+            if partner is None:
+                kind = "periodic, NOT PAIRED"
+            else:
+                labels = [member_label(m, store) for m in store.get(partner).params["members"]]
+                kind = f"periodic \u2194 {', '.join(labels)}"
+        for member in patch.params["members"]:
+            texts[member_key(member)] = kind
+    return texts
+
+
+def member_key(member: dict) -> tuple:
+    return tuple(sorted(member.items()))
+
+
+def member_label(member: dict, store) -> str:
+    from opengrid.model.faces import face_identifier
+
+    return face_identifier(store, member)
+
+
+class ModelTree(QTreeWidget):
+    """Tree of model entities grouped by category; emits the selected entity ids and faces."""
+
+    selection_changed = Signal(list, list)  # entity ids, faces (patch members)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +85,7 @@ class ModelTree(QTreeWidget):
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self._category_items = {}
         self._entity_items: dict[int, QTreeWidgetItem] = {}
+        self._face_items: dict[tuple, QTreeWidgetItem] = {}
         for name in CATEGORIES:
             item = QTreeWidgetItem(self, [name, ""])
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
@@ -82,22 +116,33 @@ class ModelTree(QTreeWidget):
     def populate(self, session) -> None:
         """Rebuild the categories (entity ids kept as item data; a curve's row stands for
         its database curve and its connector)."""
+        from opengrid.model.faces import faces_of
+
         self.blockSignals(True)
+        expanded = {
+            self._entity_items[i].text(0)
+            for i in self._entity_items
+            if self._entity_items[i].isExpanded()
+        }
         self._entity_items.clear()
+        self._face_items.clear()
         curves = self._category_items["Curves"]
         surfaces = self._category_items["Surfaces"]
         points = self._category_items["Points"]
         domains = self._category_items["Domains"]
         blocks = self._category_items["Blocks"]
-        patches = self._category_items["Patches"]
         zones = self._category_items["Zones"]
-        categories = (curves, surfaces, points, domains, blocks, patches, zones)
+        categories = (curves, surfaces, points, domains, blocks, zones)
         for category in categories:
             category.takeChildren()
         index = CurveIndex(session.store)
+        types = boundary_types(session)
         for entity in session.store:
             if entity.kind == "connector":
                 info = connector_info(session, entity, index)
+                kind = types.get(member_key({"connector": entity.id}))
+                if kind is not None:
+                    info += f"  \u00b7 {kind}"
                 item = QTreeWidgetItem(curves, [entity.name, info])
             elif entity.kind in SURFACE_KINDS:
                 item = QTreeWidgetItem(surfaces, [entity.name, entity.kind.replace("_", " ")])
@@ -145,7 +190,7 @@ class ModelTree(QTreeWidget):
                 info = f"sketch, {len(entity.params['blocks'])} blocks"
                 item = QTreeWidgetItem(blocks, [entity.name, info])
             elif entity.kind == "patch":
-                item = QTreeWidgetItem(patches, [entity.name, patch_summary(entity, session.store)])
+                continue  # boundary types are shown on the curves and faces they are given to
             elif entity.kind == "zone":
                 count = len(entity.params["members"])
                 item = QTreeWidgetItem(zones, [entity.name, f"{count} domain(s)"])
@@ -155,6 +200,14 @@ class ModelTree(QTreeWidget):
                 item = QTreeWidgetItem(curves, [entity.name, index.describe(entity)])
             item.setData(0, ENTITY_ID_ROLE, entity.id)
             self._entity_items[entity.id] = item
+            for face in faces_of(session.store, entity):  # a block's or volume's faces
+                kind = types.get(member_key(face.member), "no type")
+                child = QTreeWidgetItem(item, [face.short, f"face \u00b7 {kind}"])
+                child.setData(0, FACE_ROLE, face.member)
+                child.setToolTip(0, face.identifier)
+                self._face_items[member_key(face.member)] = child
+            if entity.name in expanded:
+                item.setExpanded(True)
         for curve, connector in index.connector_of.items():
             self._entity_items[curve] = self._entity_items[connector]  # selecting either
         for category in categories:
@@ -168,7 +221,7 @@ class ModelTree(QTreeWidget):
         parent = self._category_items[category]
         return [parent.child(i).text(0) for i in range(parent.childCount())]
 
-    def select_ids(self, ids) -> None:
+    def select_ids(self, ids, faces=()) -> None:
         self.blockSignals(True)
         self.clearSelection()
         for entity_id in ids:
@@ -176,15 +229,30 @@ class ModelTree(QTreeWidget):
             if item is not None:
                 item.setSelected(True)
                 self.scrollToItem(item)
+        for face in faces:
+            item = self._face_items.get(member_key(face))
+            if item is not None:
+                item.parent().setExpanded(True)
+                item.setSelected(True)
+                self.scrollToItem(item)
         self.blockSignals(False)
+
+    def face_rows(self, entity_id: int) -> list[list[str]]:
+        """The face rows under a block or volume, for tests."""
+        item = self._entity_items[entity_id]
+        return [[item.child(k).text(0), item.child(k).text(1)] for k in range(item.childCount())]
 
     def _emit_selection(self) -> None:
         ids = []
+        faces = []
         for item in self.selectedItems():
             entity_id = item.data(0, ENTITY_ID_ROLE)
+            face = item.data(0, FACE_ROLE)
             if entity_id is not None:
                 ids.append(int(entity_id))
-        self.selection_changed.emit(sorted(ids))
+            elif face is not None:
+                faces.append(dict(face))
+        self.selection_changed.emit(sorted(ids), faces)
 
 
 def patch_summary(entity, store) -> str:

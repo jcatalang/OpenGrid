@@ -125,3 +125,52 @@ def test_faces_pair_as_periodic(live, tmp_path):
     og.set_boundary_type([{"block": block, "face": f} for f in others], "wall")
     summary = og.export_cgns(tmp_path / "box.cgns")
     assert summary["connections"] == 4  # two pairs, both ways
+
+
+def test_face_identifiers_in_the_api():
+    """Every face of a block or volume has an identifier the API takes wherever it takes
+    boundary members; side walls are named as faces, not by the curve they rise from."""
+    import opengrid
+    from opengrid.model.faces import all_faces, face_identifier, face_member
+
+    og = opengrid.Session()
+    base = og.unstructured_domain_from_curves(og.create_rectangle(width=2, height=1), 9, name="b")
+    og.create_extruded_volume(base, "translate", vector=(0, 0, 0.5), dimension=3, name="vol")
+    square = og.structured_domain_from_curves(og.create_rectangle(center=(5, 0)), 9, name="sq")
+    og.create_extruded_block(square, "translate", vector=(0, 0, 1), dimension=5, name="blk")
+    identifiers = [face.identifier for face in all_faces(og.store)]
+    assert identifiers == [
+        "vol.bottom", "vol.top", "vol.side-1", "vol.side-2", "vol.side-3", "vol.side-4",
+        "blk.imin", "blk.imax", "blk.jmin", "blk.jmax", "blk.kmin", "blk.kmax",
+    ]  # fmt: skip
+    for identifier in identifiers:
+        assert face_identifier(og.store, face_member(og.store, identifier)) == identifier
+    og.set_boundary_type(["vol.side-1", "blk.imin"], "inlet")
+    og.make_periodic_pair(["blk.jmin"], ["blk.jmax"])
+    assert [face_identifier(og.store, m) for m in og.entity("inlet").params["members"]] == [
+        "vol.side-1",
+        "blk.imin",
+    ]
+    assert "og.set_boundary_type(['vol.side-1', 'blk.imin'], 'inlet'" in og.journal_text()
+    replayed = opengrid.replay(og.journal_text())
+    assert replayed.entity("inlet").params == og.entity("inlet").params
+    report = og.boundary_report()
+    assert "vol.side-1" in report.boundary and "blk.jmax" in report.boundary
+
+
+def test_the_tree_lists_faces_with_their_types(live):
+    window, og = live.window, live.og
+    block = _box(og)
+    block_id = og.entity(block).id
+    og.set_boundary_type([f"{block}.{_face_at(og, block, 0, 0.0)}"], "inlet")
+    tree = window.model_tree
+    rows = dict(tree.face_rows(block_id))
+    assert set(rows) == {"imin", "imax", "jmin", "jmax", "kmin", "kmax"}
+    inlet = _face_at(og, block, 0, 0.0)
+    assert rows[inlet] == "face · inlet" and rows[_face_at(og, block, 0, 2.0)] == "face · no type"
+    assert "Patches" not in tree.category_names()
+    # A face picked in the tree: a hidden one too (here the bottom, under the block).
+    item = tree._face_items[(("block", block_id), ("face", "kmin"))]
+    item.setSelected(True)
+    assert window.selected_faces == [{"block": block_id, "face": "kmin"}]
+    assert "kmin" in window.property_panel._title.text()

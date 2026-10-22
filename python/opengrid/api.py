@@ -1549,9 +1549,12 @@ class Session:
         """Centroid of the nodes of boundary members (connectors, domains, block faces,
         extruded-volume ends)."""
         from opengrid.model.blocks import face_array
+        from opengrid.model.faces import face_member
 
         pieces = []
         for member in members:
+            if isinstance(member, str) and member not in self.store:
+                member = face_member(self.store, member) or member  # "block-1.imin"
             if isinstance(member, dict) and "block" in member:
                 grid = self.block_grid(self.store.get(member["block"]).name)
                 pieces.append(face_array(grid, member["face"]).reshape(-1, 3))

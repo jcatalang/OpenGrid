@@ -121,13 +121,21 @@ def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
     """Patch members: connectors (2D boundaries, and the side walls of extruded volumes),
     domains (faces of 3D blocks and volumes, the bottom of an extruded volume), block faces
     ({"block": name or id, "face": "imin" ...}, or a (block, face) pair) and the ends of
-    extruded volumes ({"volume": name or id, "face": "top" | "bottom"})."""
+    extruded volumes ({"volume": name or id, "face": "top" | "bottom"}); or a face's identifier
+    ("block-1.imin", "volume-1.side-2": opengrid.model.faces)."""
+    from opengrid.model.faces import face_member
+
     if isinstance(raw, (str, int, dict)):
         raw = [raw]
     result = []
     seen = set()
     for index, item in enumerate(raw):
         label = f"{where}: members[{index}]"
+        # A face identifier ("block-1.imin", "volume-1.side-2"): the member it stands for.
+        if isinstance(item, str) and item not in store:
+            found = face_member(store, item)
+            if found is not None:
+                item = found
         block_face = None
         ref = item
         if isinstance(item, dict) and "block" in item:
@@ -205,20 +213,20 @@ def _patch_members(raw, store, where: str, issues: list[Issue]) -> tuple:
 
 
 def member_label(item: dict, store) -> str:
-    if "block" in item:
-        return f"{store.get(item['block']).name}.{item['face']}"
-    if "volume" in item:
-        return f"{store.get(item['volume']).name}.{item['face']}"
-    ref = item.get("connector", item.get("domain"))
-    return store.get(ref).name
+    """A curve's name in 2D; a face's identifier in 3D (opengrid.model.faces)."""
+    from opengrid.model.faces import face_identifier
+
+    return face_identifier(store, item)
 
 
 def member_script(item: dict, store):
+    """The member as the journal writes it: in the same form (an entity's name, not its face
+    identifier), so a replay makes the same member."""
     if "block" in item:
         return {"block": store.get(item["block"]).name, "face": item["face"]}
     if "volume" in item:
         return {"volume": store.get(item["volume"]).name, "face": item["face"]}
-    return member_label(item, store)
+    return store.get(item.get("connector", item.get("domain"))).name
 
 
 def normalize_patch(raw: dict, store, where: str) -> dict:

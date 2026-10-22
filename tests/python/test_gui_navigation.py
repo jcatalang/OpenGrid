@@ -309,8 +309,15 @@ def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
     assert window.selected_names() == []
     assert window.selected_faces == [{"block": block_id, "face": "imax"}]
     assert "imax" in window.property_panel._title.text()
-    live.click((2.0, 0.7, 0.3))
-    assert window.selected_names() == [block] and window.selected_faces == []
+    # Clicking again at the same place: what lies behind (the bottom face, the base domain),
+    # then the whole block, then round again.
+    seen = []
+    for _ in range(5):
+        live.click((2.0, 0.7, 0.3))
+        faces = [f.get("face") for f in window.selected_faces]
+        seen.append((tuple(window.selected_names()), faces))
+    assert ((), ["kmin"]) in seen and ((domain,), []) in seen and ((block,), []) in seen
+    assert seen[seen.index(((block,), [])) + 1] == ((), ["imax"])  # round again
     live.click((1.0, 0.5, 1.0))  # the top face
     assert window.selected_faces == [{"block": block_id, "face": "kmax"}]
     live.click((2.0, 0.7, 0.3), shift=True)  # Shift adds a face
@@ -320,8 +327,7 @@ def test_clicks_pick_along_the_view_ray_in_3d(qtbot):
     ]
     live.click((6.0, -4.0, 0.0))  # empty space (off the block's projection)
     assert window.selected_names() == [] and window.selected_faces == []
-    live.click((2.0, 0.7, 0.3))
-    live.click((2.0, 0.7, 0.3))
+    window.set_selection([block_id])
     live.click((6.0, -4.0, 0.0), shift=True)  # Shift + empty: the selection stays
     assert window.selected_names() == [block]
     live.click((2.0, 0.5, 0.5))  # the ray through this point runs on through line-1 (y = z = 0)

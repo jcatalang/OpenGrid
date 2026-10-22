@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
         self.tool: Tool = TOOLS["select"](session)
         self._saved_journal_length = 0
         self._press_position: tuple[int, int] | None = None
+        self._pick_cycle: dict | None = None  # what is under the last click (front to back)
         self._drag = None  # handle drag in progress (app.handles.Drag)
         self._stroke: list | None = None  # freehand stroke in progress
         # Mouse bindings: "2d" or "3d" (NAVIGATION); the mode follows the model until the user
@@ -1430,14 +1431,42 @@ class MainWindow(QMainWindow):
         not looking along z) picks what is drawn under the pointer (Scene.pick_display); the
         2D tools and the 2D selection work in the z = 0 plane."""
         if self.tool.name == "select" and self._ray_picking():
-            entity_id, _point = self.scene.pick_display(x, y)
-            if self.scene.last_face is not None:
-                self._select_face(self.scene.last_face, entity_id, additive)
+            # Clicking again at the same place (same view) takes the next thing behind: the
+            # faces hidden by others, then the blocks and volumes (pick_stack).
+            camera = self.viewport.renderer.GetActiveCamera()
+            view = (tuple(camera.GetPosition()), tuple(camera.GetFocalPoint()))
+            cycle = self._pick_cycle
+            same = (
+                cycle is not None
+                and not additive
+                and cycle["view"] == view
+                and abs(cycle["x"] - x) <= CLICK_MOVE_PIXELS
+                and abs(cycle["y"] - y) <= CLICK_MOVE_PIXELS
+            )
+            if same:
+                stack = cycle["stack"]
+                index = (cycle["index"] + 1) % max(len(stack), 1)
+            else:
+                stack = self.scene.pick_stack(x, y)
+                index = 0
+            self._pick_cycle = {"x": x, "y": y, "view": view, "stack": stack, "index": index}
+            if stack:
+                entity_id, face = stack[index]
+                if entity_id not in self.session.store:
+                    self._pick_cycle = None
+                    return
+                if face is not None:
+                    self._select_face(face, entity_id, additive, (index, len(stack)))
+                    return
+                self._select_picked(self.session.store.get(entity_id).name, additive)
+                if len(stack) > 1:
+                    self.statusBar().showMessage(
+                        f"{index + 1} of {len(stack)} under the pointer: click again for the "
+                        "next one behind",
+                        6000,
+                    )
                 return
-            name = None
-            if entity_id is not None and entity_id in self.session.store:
-                name = self.session.store.get(entity_id).name
-            self._select_picked(name, additive)
+            self._select_picked(None, additive)
             return
         self.handle_click(self.scene.display_to_world(x, y), additive)
 
@@ -1477,9 +1506,9 @@ class MainWindow(QMainWindow):
             self.scene.show_snap(snapped)
         self.scene.show_preview(self.tool.preview(snapped))
 
-    def _select_face(self, face: dict, owner: int, additive: bool) -> None:
+    def _select_face(self, face: dict, owner: int, additive: bool, place=(0, 1)) -> None:
         """A click on a face of a block or volume: that face (a boundary to give a type);
-        Shift adds or removes it; a click on the face already selected selects its block."""
+        Shift adds or removes it. ``place``: (index, count) among what is under the pointer."""
         if additive:
             faces = list(self.selected_faces)
             if face in faces:
@@ -1488,16 +1517,14 @@ class MainWindow(QMainWindow):
                 faces.append(face)
             self.set_selection(self.selected_ids, faces=faces)
             return
-        if self.selected_faces == [face] and not self.selected_ids:
-            self.set_selection([owner])
-            return
         self.set_selection([], faces=[face])
         from opengrid.model.patches import member_label
 
+        index, count = place
         self.statusBar().showMessage(
-            f"Face {member_label(face, self.session.store)}: give it a boundary type (its "
-            "panel, the Boundary panel or the right-click menu); click it again for the "
-            f"whole {self.session.store.get(owner).kind}",
+            f"Face {member_label(face, self.session.store)} ({index + 1} of {count} under the "
+            "pointer: click again for the next one behind): give it a boundary type in its "
+            "panel, the Boundary panel or the right-click menu",
             8000,
         )
 
@@ -1597,7 +1624,7 @@ class MainWindow(QMainWindow):
         if self.scene.hovered in ids:
             self.scene.set_hover(None)
         self._show_handles()
-        self.model_tree.select_ids(ids)
+        self.model_tree.select_ids(ids, self.selected_faces)
         if len(ids) == 1 and not self.selected_faces:
             self.property_panel.show_entity(ids[0])
         elif not ids and len(self.selected_faces) == 1:
@@ -1649,6 +1676,7 @@ class MainWindow(QMainWindow):
             self._batched = (ids, whole)
             return
         had_geometry = self.scene.has_geometry()
+        self._pick_cycle = None  # what lies under the last click may have changed
         if self.scene.patch_faces is not None:
             if self.session.is_3d():
                 self.scene.patch_faces = self._patch_face_colors(previous=self.scene.patch_faces)
@@ -2053,11 +2081,11 @@ class MainWindow(QMainWindow):
         """Connectors (2D boundaries, side walls of extruded volumes), structured domains
         (faces of blocks and volumes), extruded volumes (both their ends) and the selected
         faces of blocks and volumes."""
-        from opengrid.model.patches import member_script
+        from opengrid.model.faces import face_identifier
 
         members = self._selected_of_kind("connector") + self._selected_of_kind("domain")
-        for face in self.selected_faces:
-            members.append(member_script(face, self.session.store))
+        for face in self.selected_faces:  # by identifier: "block-1.imin" in the journal
+            members.append(face_identifier(self.session.store, face))
         for name in self._selected_of_kind("volume"):
             if self.session.store.get(name).params["faces"] is None:
                 members.append({"volume": name, "face": "bottom"})

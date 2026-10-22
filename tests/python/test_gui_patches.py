@@ -46,7 +46,11 @@ def test_patch_workflow_and_validation(window, tmp_path):
     report = window.validate_boundary()
     assert report.ok
     assert "ready to export" in window.boundary_dock.status.text()
-    assert window.model_tree.entity_names("Patches") == ["walls", "inflow", "outflow"]
+    # No Patches category: each curve shows its boundary type.
+    curves = window.model_tree.category_item("Curves")
+    rows = {curves.child(i).text(0): curves.child(i).text(1) for i in range(curves.childCount())}
+    assert rows["c-inlet"].endswith("\u00b7 inlet") and rows["c-step"].endswith("\u00b7 wall")
+    assert "\u00b7" not in rows["c-mid"]  # an interface: no type
     window.set_selection(_ids(window, "lower-block", "upper-block"))
     assert window.create_zone_from_selection("expansion") == "expansion"
     assert window.model_tree.entity_names("Zones") == ["expansion"]

@@ -19,6 +19,10 @@ build:
     # Clang on macOS ships no OpenMP runtime: the host prefix's libomp is found through
     # OpenMP_ROOT (GCC on Linux brings its own). scikit-build-core reads CMAKE_ARGS.
     - export CMAKE_ARGS="${CMAKE_ARGS:-} -DOpenMP_ROOT=$PREFIX -DOG_WITH_OPENMP=ON"
+    # Linux: no OpenCL (the experimental GPU sweeps). An OpenCL loader found on the build
+    # machine (GitHub's Ubuntu images have one) would be linked but not shipped, and the
+    # package would not import elsewhere ("libOpenCL.so.1: cannot open shared object file").
+    - 'if [ "$(uname)" = "Linux" ]; then export CMAKE_ARGS="$CMAKE_ARGS -DOG_WITH_OPENCL=OFF"; fi'
     - export CMAKE_GENERATOR=Ninja
     - ${{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
   python:

@@ -543,7 +543,9 @@ history). Phase tags show where each item came from.
   fixed at the first start (conda-unpack): a moved folder mostly works but is not supported;
   extract it again. It needs glibc 2.28 or newer (the conda-forge sysroot pinned in
   `packaging/conda/variants.yaml`; its binaries ask for no symbol newer than 2.17). It brings
-  its own Mesa (software OpenGL) besides using the system's driver.
+  its own Mesa (software OpenGL) besides using the system's driver. It has no GPU (OpenCL)
+  sweeps (the recipe builds Linux without OpenCL: a loader on the build machine would be
+  linked but not shipped).
 - **conda-forge's `cxx-compiler` 2.0** [2026-10-19]: installs the compiler under plain names
   (`c++`, `g++`) without an activation script, so CMake looks for the system's `ar`; without
   binutils it stops with a message (`CMakeLists.txt`). The installer and the documentation use

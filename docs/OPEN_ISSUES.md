@@ -88,6 +88,10 @@ history). Phase tags show where each item came from.
   - A sketch edge leaving an unstructured block's wall is still clustered at the wall when the
     layers taper (as for structured blocks; it keeps periodic pairs matched); a tiny first
     height then gives a strongly stretched edge (warned).
+- **Closed wall loops** [2026-10-22]: columns are not merged across a closed chain's seam;
+  the seam is put as far as possible from the corners, so only a smooth loop whose layers
+  converge everywhere (the inside of a pipe, layers about as thick as its radius) could still
+  stop columns there.
 - **Sliding layers** [2026-10-22]:
   - Only in 2D domains, between 45 and 135 degrees; sharper wedges and wider openings taper
     as before (layers converging into a wedge would be squeezed into slivers).

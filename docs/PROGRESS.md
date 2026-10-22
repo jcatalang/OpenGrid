@@ -886,7 +886,12 @@ badly executed corner where two walls meet, and a curve's type that could not be
   walls of a gap, a sharp wedge), and runs of converging columns merge together. The user's
   case: worst angle 3.4 -> 21.4 degrees, scaled Jacobian 0.07 -> 0.42, no column stopped;
   tested on a square with two walls and layers 2.6 times the spacing (the test fails with the
-  old rule).
+  old rule). Then the user's four-wall block had distorted cells at one corner only: a closed
+  wall chain merges columns along the chain, not across its seam, and the seam was at the
+  loop's first vertex, a corner; closed chains now start as far as possible from their
+  corners (turns above 5 degrees). The user's case: worst angle 10.6 -> 21.2 degrees, scaled
+  Jacobian 0.21 -> 0.42, no column stopped (a C++ test fails with the seam at a corner:
+  1.2 degrees).
 - **Quality on the mesh** (Quality panel: "Colour the mesh", "Only cells worse than" a value
   offered per metric; View > Colour the mesh by quality): only the cells past the threshold
   filled, the rest as lines; in 3D the cells inside blocks and volumes too (the outline keeps
@@ -900,8 +905,8 @@ badly executed corner where two walls meet, and a curve's type that could not be
   sketch-1-c0-1"): patch members were compared by label, and a curve that became an extruded
   side wall is labelled by its face identifier; members are now compared as members.
 - Tests: `test_messages.py`, `test_quality_view.py`, a face test, C++
-  `TwoWallsMeetInAConcaveCornerWithoutSteps`. C++ 158 / 158; Python 572 passed, 1 expected
-  failure; lint clean.
+  `TwoWallsMeetInAConcaveCornerWithoutSteps`, `AClosedWallLoopStartingAtACornerMergesThere`.
+  C++ 159 / 159; Python 572 passed, 1 expected failure; lint clean.
 
 ## 3D faces with identifiers, boundary types on curves and faces, reaching hidden faces, inflation layers from curves that run into their neighbours (2026-10-22) — requested by the user
 The user (the openSUSE bundle "opened smoothly") asked: 3D faces registered with identifiers,

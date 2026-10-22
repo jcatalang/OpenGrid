@@ -409,10 +409,55 @@ class Inflator {
       }
       std::vector<Piece> pieces;
       if (all) {
+        // A closed chain starts as far as possible from its corners (turns above 5 degrees):
+        // columns are merged along the chain, not across its seam, so a seam at a corner (a
+        // loop starting at one) left the two columns there unmerged, to stop as their cell
+        // folded. Without corners (a smooth loop), at its first node.
+        std::vector<bool> corner(m);
+        bool any_corner = false;
+        for (std::size_t k = 0; k < m; ++k) {
+          const P2& a = points_[u(verts[(k + m - 1) % m])];
+          const P2& b = points_[u(verts[k])];
+          const P2& c = points_[u(verts[(k + 1) % m])];
+          const P2 d1 = normalize({b[0] - a[0], b[1] - a[1]});
+          const P2 d2 = normalize({c[0] - b[0], c[1] - b[1]});
+          corner[k] = dot(d1, d2) < std::cos(5.0 * std::numbers::pi / 180.0);
+          any_corner = any_corner || corner[k];
+        }
+        std::size_t seam = 0;
+        if (any_corner) {
+          // Nodes to the nearest corner, along the loop either way (two sweeps each way).
+          std::vector<std::size_t> gap(m, m);
+          std::size_t run = m;
+          for (std::size_t pass = 0; pass < 2 * m; ++pass) {
+            const std::size_t k = pass % m;
+            if (corner[k]) {
+              run = 0;
+            } else if (run < m) {
+              ++run;
+            }
+            gap[k] = std::min(gap[k], run);
+          }
+          run = m;
+          for (std::size_t pass = 0; pass < 2 * m; ++pass) {
+            const std::size_t k = (2 * m - 1 - pass) % m;
+            if (corner[k]) {
+              run = 0;
+            } else if (run < m) {
+              ++run;
+            }
+            gap[k] = std::min(gap[k], run);
+          }
+          for (std::size_t k = 1; k < m; ++k) {
+            if (gap[k] > gap[seam]) {
+              seam = k;
+            }
+          }
+        }
         Chain chain;
         chain.closed = true;
-        for (const Index vert : verts) {
-          chain.nodes.push_back(Node{vert});
+        for (std::size_t k = 0; k < m; ++k) {
+          chain.nodes.push_back(Node{verts[(seam + k) % m]});
         }
         pieces.push_back({true, static_cast<Index>(chains_.size())});
         chains_.push_back(std::move(chain));

@@ -360,6 +360,41 @@ TEST(Inflation, TwoWallsMeetInAConcaveCornerWithoutSteps) {
   EXPECT_GT(worst, 20.0);
 }
 
+TEST(Inflation, AClosedWallLoopStartingAtACornerMergesThere) {
+  // Walls all round a square whose loop starts at a corner, layers taller than the spacing:
+  // every corner merges its columns the same way (the chain's seam is put away from them),
+  // none stops.
+  Case c;
+  const int n = 20;
+  std::vector<Point> pts;
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0 * i / n, 0.0});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0, 1.0 * i / n});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0 - 1.0 * i / n, 1.0});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({0.0, 1.0 - 1.0 * i / n});
+  }
+  c.add(pts, true);
+  og::DomainMeshOptions options;
+  options.wall = c.wall;
+  options.inflation.first_height = 5e-3;
+  options.inflation.growth_rate = 1.2;
+  options.inflation.max_layers = 10;
+  options.inflation.transition = false;
+  const auto mesh = og::mesh_domain(c.in, options);
+  expect_valid(c, mesh);
+  EXPECT_EQ(mesh.layers, 10);
+  EXPECT_EQ(mesh.layer_stops.proximity, 0);
+  EXPECT_EQ(mesh.layer_stops.slope, 0);
+  const auto q = og::quality_cells(mesh.points, mesh.triangles, mesh.quads);
+  EXPECT_GT(*std::min_element(q.min_angle.begin(), q.min_angle.end()), 20.0);
+}
+
 TEST(Inflation, SlidingNeedsAWallAngleBetween45And135Degrees) {
   // At 60 degrees the end column slides along the leaning inlet (a full layer stack); at 30
   // degrees layers converging into the wedge would be squeezed, so that end tapers.

@@ -502,7 +502,9 @@ segment, so derivative jumps at knots never cost accuracy.
   - Sharp convex corners (normals turning > 60°) get fans in steps of ≤ 20°.
   - Converging columns are merged: a pair whose new front segment shrinks below half of the
     old one or turns back; a run of such pairs (both neighbours of a concave corner's column)
-    becomes one node at the run's mean, so two walls' layers meet along the corner.
+    becomes one node at the run's mean, so two walls' layers meet along the corner. Merging
+    works along a chain, not across a closed chain's seam, so a closed chain starts as far as
+    possible from its corners.
 - **Stopping rules:**
   - The layer limit is reached.
   - **Transition**: the layer height reaches the column's isotropic size. That size is its

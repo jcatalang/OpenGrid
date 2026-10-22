@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QToolBar,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -34,6 +35,7 @@ from opengrid.app.boundary_dock import (
 from opengrid.app.console import make_console
 from opengrid.app.icons import icon
 from opengrid.app.log_panel import LogPanel
+from opengrid.app.message_bar import MessageBar
 from opengrid.app.model_tree import ModelTree
 from opengrid.app.property_panel import PropertyPanel
 from opengrid.app.quality_dock import METRICS, QualityDock, worst_cell
@@ -260,7 +262,15 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self.viewport = self._create_viewport(off_screen)
-        self.setCentralWidget(self.viewport)
+        # Warnings and errors are shown above the view (app/message_bar.py), not only logged.
+        self.message_bar = MessageBar()
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.message_bar)
+        central_layout.addWidget(self.viewport, 1)
+        self.setCentralWidget(central)
         self.zoom_box = ZoomBox(self.viewport.renderer, min_pixels=int(CLICK_MOVE_PIXELS) + 1)
         self.scene = Scene(self.viewport, session)
 
@@ -374,15 +384,26 @@ class MainWindow(QMainWindow):
         self.property_panel.entity_requested.connect(lambda i: self.set_selection([i]))
         session.commands.add_listener(self._on_model_changed)
 
+        # The Log tab shows INFO and above, the bar WARNING and above; details (DEBUG) go to the
+        # launcher's log file only.
         logging.getLogger("opengrid").addHandler(self.log_panel.handler)
-        logging.getLogger("opengrid").setLevel(logging.INFO)
+        logging.getLogger("opengrid").addHandler(self.message_bar.handler)
+        logging.getLogger("opengrid").setLevel(logging.DEBUG)
+        self.message_bar.log_requested.connect(self.show_log)
         self._refresh_all()
-        log.info("OpenGrid %s (core %s) started", version_label(), opengrid.core_version())
+        log.info("OpenGrid %s", version_label())
+        log.debug("core %s", opengrid.core_version())
         self._code_stamp = code_stamp()
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self._check_for_update)
         self._update_timer.start(UPDATE_CHECK_MS)
-        log.info("%s", compute_summary())
+        log.debug("%s", compute_summary())
+
+    def show_log(self) -> None:
+        """The Log tab, in front."""
+        self.console_dock_widget.show()
+        self.console_dock_widget.raise_()
+        self.console_tabs.setCurrentWidget(self.log_panel)
 
     # ------------------------------------------------------------------ setup
     def _create_viewport(self, off_screen: bool):
@@ -1170,9 +1191,7 @@ class MainWindow(QMainWindow):
         spacing = total / len(curves) / max(self.dimension_box.value() - 1, 1)
         created = self._run(lambda: self.session.domains_from_curves(curves, spacing=spacing))
         if created:
-            log.info("created %s", ", ".join(created))
-            for warning in self.session.last_warnings:
-                log.warning(warning)
+            log.info("created %s", ", ".join(created))  # (the session logs its warnings)
             self.set_selection([self.session.store.get(n).id for n in created])
         return created or []
 
@@ -1428,9 +1447,7 @@ class MainWindow(QMainWindow):
     def _after_curve_edit(self, name: str, message: str) -> None:
         from opengrid.app.handles import dependents_closure
 
-        log.info("%s", message)
-        for warning in self.session.last_warnings:
-            log.warning(warning)
+        log.info("%s", message)  # (the session logs its warnings)
         self.scene.update_entities(dependents_closure(self.session.store, name))
         self._show_handles()
         self.statusBar().showMessage(f"{message}; undo restores the curve", 5000)
@@ -1497,7 +1514,7 @@ class MainWindow(QMainWindow):
             return
         snapped, target = self.snap_point(xyz)
         if target is not None:
-            log.info("snapped to %s", target.label)
+            log.debug("snapped to %s", target.label)
         created = self._run(lambda: self.tool.click(snapped))
         if created:
             log.info("created %s", created)
@@ -1697,6 +1714,7 @@ class MainWindow(QMainWindow):
         else:
             self.scene.update_entities(change.ids())
             self._report_connector_warnings(change.ids())
+            self._report_domain_warnings(change.ids())
         self.model_tree.populate(self.session)
         if self.scene.patch_colors is not None:
             self.scene.patch_colors = self._patch_colors()
@@ -1738,6 +1756,27 @@ class MainWindow(QMainWindow):
                     nodes.max_stretching_ratio,
                     self.session.stretching_threshold,
                 )
+
+    def _report_domain_warnings(self, ids) -> None:
+        """What the mesher of a changed unstructured domain reported, and inflation layers that
+        did not all grow (and why)."""
+        from opengrid.model.unstructured import layer_shortfall
+
+        for entity_id in ids:
+            if entity_id not in self.session.store:
+                continue
+            entity = self.session.store.get(entity_id)
+            if entity.kind != "unstructured_domain":
+                continue
+            try:
+                mesh = self.session.unstructured_mesh(entity.name)
+            except (ValidationError, ValueError, RuntimeError):
+                continue  # (its error is shown where it is drawn)
+            for warning in mesh["warnings"]:
+                log.warning("%s: %s", entity.name, warning)
+            text = layer_shortfall(self.session, entity, mesh)
+            if text is not None:
+                log.warning("%s", text)
 
     def _refresh_all(self) -> None:
         self.scene.rebuild()
@@ -1942,10 +1981,14 @@ class MainWindow(QMainWindow):
     def is_modified(self) -> bool:
         return len(self.session.commands.journal.lines) != self._saved_journal_length
 
-    def _on_panel_message(self, text: str, is_error: bool) -> None:
-        if is_error:
+    def _on_panel_message(self, text: str, level: str) -> None:
+        """A message of the property panel: "status" (the status bar only), "info", "warning"
+        or "error" (also logged; warnings and errors are shown above the view)."""
+        if level == "error":
+            log.error("%s", text)
+        elif level == "warning":
             log.warning("%s", text)
-        else:
+        elif level == "info":
             log.info("%s", text)
         self.statusBar().showMessage(text.splitlines()[0], 5000)
 
@@ -2203,7 +2246,7 @@ class MainWindow(QMainWindow):
         self.smoother_dock_widget.raise_()
         started = self.smoother_dock.start(name)
         if started:
-            log.info("smoothing %s…", name)
+            self.statusBar().showMessage(f"smoothing {name}…", 5000)
         return started
 
     def _on_smoothing_finished(self, name: str, result) -> None:
@@ -2215,7 +2258,17 @@ class MainWindow(QMainWindow):
         if result.cancelled:
             log.info("%s: smoothing cancelled after %d iterations", name, result.iterations)
         elif self.session.store.get(name).kind == "smoothing_group":
-            log.info("%s: %s", name, self.session.group_status(name))
+            status = self.session.group_status(name)
+            log.debug("%s: %s", name, status)
+            if "NOT converged" in status:
+                log.warning(
+                    "%s: the smoothing did not converge in %d iterations (the grid shown is its "
+                    "last iterate; see the Smoother panel)",
+                    name,
+                    result.iterations,
+                )
+            else:
+                log.info("%s smoothed (%d iterations)", name, result.iterations)
         else:
             log.info("%s: %s", name, self.session.domain_status(name))
         if name in self.session.store:
@@ -2903,9 +2956,7 @@ class MainWindow(QMainWindow):
             if not dialog.removed:
                 values = dialog.values()
         names = self._run(lambda: self.session.set_inflation(curves, **values))
-        if names:
-            for warning in self.session.last_warnings:
-                log.warning("%s", warning)
+        if names:  # (the session logs its warnings)
             text = f"layers from {', '.join(curves)} in {', '.join(names)}"
             if values.get("remove"):
                 text = f"no layers from {', '.join(curves)} in {', '.join(names)}"
@@ -3141,7 +3192,7 @@ class MainWindow(QMainWindow):
                 return function()
         except (ValidationError, KeyError, ValueError) as error:
             text = str(error)
-            log.warning("%s", text)
+            log.error("%s", text)  # (shown above the view)
             self.statusBar().showMessage(text.splitlines()[0], 8000)
             return None
 
@@ -3625,8 +3676,9 @@ class MainWindow(QMainWindow):
         return str(path)
 
     def _report_error(self, title: str, error: Exception) -> None:
-        log.error("%s: %s", title, error)
-        if self.isVisible() and not self._off_screen:
+        dialog = self.isVisible() and not self._off_screen
+        log.error("%s: %s", title, error, extra={"on_screen": not dialog})
+        if dialog:
             QMessageBox.critical(self, title, str(error))
 
     # ----------------------------------------------------------------- settings
@@ -3709,6 +3761,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         self._save_settings()
         logging.getLogger("opengrid").removeHandler(self.log_panel.handler)
+        logging.getLogger("opengrid").removeHandler(self.message_bar.handler)
         if self._on_model_changed in self.session.commands._listeners:
             self.session.commands.remove_listener(self._on_model_changed)
         if self.trace._on_change in self.session.commands._listeners:

@@ -543,7 +543,7 @@ class UnstructuredEvaluator:
         if np.sum(a[:, 0] * b[:, 1] - b[:, 0] * a[:, 1]) < 0:
             segments = segments[:, ::-1]
         try:
-            xy, triangles, _quads, _rejected, _warnings, _layers = _core.mesh_domain(
+            xy, triangles, _quads, _rejected, _warnings, _layers, _stops = _core.mesh_domain(
                 uv,
                 np.ascontiguousarray(segments),
                 algorithm=generator["algorithm"],
@@ -606,7 +606,7 @@ class UnstructuredEvaluator:
             uv, points_in, segments, wall, origin = _open_poles(
                 frame, loops3, points, uv, segments, wall
             )
-            xy, triangles, quads, rejected, warnings, layers = _core.mesh_domain(
+            xy, triangles, quads, rejected, warnings, layers, stops = _core.mesh_domain(
                 uv,
                 segments,
                 algorithm=generator["algorithm"],
@@ -637,6 +637,7 @@ class UnstructuredEvaluator:
             "triangles": triangles,
             "quads": quads,
             "layers": int(layers),
+            "layer_stops": dict(stops),
             "rejected": int(rejected),
             "warnings": list(warnings),
         }
@@ -757,3 +758,48 @@ def _close_poles(xyz, triangles, quads, origin, n_original: int):
     out_tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
     out_quads = np.asarray(quad_cells, dtype=np.int64).reshape(-1, 4)
     return points, out_tris, out_quads
+
+
+def layer_shortfall(session, entity, mesh: dict) -> str | None:
+    """Why the inflation layers of an unstructured domain did not all grow, in a sentence for
+    the user (None when they did, or nearly: fewer than a quarter of the wall points stopped
+    early and the full count grew somewhere). From the mesher's count of the columns each rule
+    stopped (``mesh["layer_stops"]``)."""
+    from opengrid.model.layer_spacing import layer_heights
+
+    inflation = entity.params["generator"]["inflation"]
+    stops = mesh.get("layer_stops") or {}
+    columns = stops.get("columns", 0)
+    if inflation is None or not columns:
+        return None
+    wanted = len(layer_heights(
+        inflation["first_height"], inflation["growth_rate"], inflation["layers"],
+        inflation["total_thickness"],
+    )) - 1  # fmt: skip
+    grown = mesh["layers"]
+    early = stops["transition"] + stops["slope"] + stops["proximity"]
+    if grown >= wanted and early < 0.25 * columns:
+        return None
+    if grown < wanted:
+        head = f"{entity.name}: {grown} of the {wanted} inflation layers grow"
+    else:
+        head = (
+            f"{entity.name}: {early} of the {columns} wall points grow fewer than {wanted} layers"
+        )
+    if stops["transition"] >= stops["proximity"] and stops["transition"] > 0:
+        spacing = []
+        for ref in inflation["connectors"]:
+            n = session.store.get(ref).params["dimension"] - 1
+            spacing.append(session.connectors.nodes(ref).length / max(n, 1))
+        size = sum(spacing) / len(spacing)
+        return (
+            f"{head}: they stop where a layer is as thick as the cells beside it are wide "
+            f"(about {size:.2g}, the wall's point spacing). For more layers: a smaller first "
+            f"height or growth rate, or switch off 'stop at the core cell size'."
+        )
+    if stops["proximity"] > 0:
+        return (
+            f"{head}: they stop where they would come too close to other layers or the boundary "
+            "(a narrow gap, a corner), or make an inverted cell."
+        )
+    return f"{head}: they step down beside wall points whose layers stopped."

@@ -25,9 +25,14 @@ in VTK). Its edges and faces are those of the blocks, shared where blocks share 
 * **Unstructured blocks** (``unstructured``: block indices, 2D): those blocks become
   unstructured domains on the same connectors (``generator``: their triangulation settings,
   shared by all of them; a wall on one of their edges becomes inflation layers from that
-  connector with the wall's first-cell height, layers and growth). They are not members of
-  the smoothing group; a connector between a structured and an unstructured block is pinned
-  so both sides keep the same nodes. The vertex passes treat every block as structured.
+  connector with the wall's first-cell height, layers and growth, ``transition`` (stop at the
+  core cell size) and ``slide`` (run into the neighbouring edges)). An edge leaving such a
+  wall is clustered at the wall as for structured blocks, except with ``slide`` when it
+  borders only unstructured blocks: then it gets points at the layer heights
+  (model/layer_spacing.py; between 45 and 135 degrees to the wall; not a periodic one). They
+  are not members of the smoothing group; a connector between a structured and an
+  unstructured block is pinned so both sides keep the same nodes. The vertex passes treat
+  every block as structured.
 * **Generation:** an edge assigned to a curve becomes a connector on the part of the curve
   between its vertices; any other edge a straight line (in 3D, between two faces on the same
   surface: a spline through the line's points projected onto it) and a connector on it. Each
@@ -103,6 +108,8 @@ DEFAULT_SKETCH_WALL = {
     "max_source": 100.0,
     "layers": 0,
     "growth": 1.2,
+    "transition": True,  # unstructured blocks: layers stop at the core cell size
+    "slide": False,  # unstructured blocks: layers run into the neighbouring edges
 }
 WALL_KEYS = ("spacing", "decay", "relaxation", "max_source", "layers", "growth")
 # Hexahedron (VTK order): edges and faces by local vertex indices.
@@ -404,7 +411,14 @@ def normalize_sketch(raw: dict, store, where: str) -> dict:
             "max_source": _number(wall["max_source"], f"{label}.max_source", issues, True),
             "layers": _count(wall["layers"], f"{label}.layers", issues),
             "growth": _growth(wall["growth"], f"{label}.growth", issues),
+            "transition": wall["transition"],
+            "slide": wall["slide"],
         }
+        for flag in ("transition", "slide"):
+            if not isinstance(wall[flag], bool):
+                issues.append(
+                    Issue(f"{label}.{flag}", f"must be true or false, got {wall[flag]!r}")
+                )
     unstructured = set()
     for index, item in enumerate(merged["unstructured"]):
         label = f"{where}: unstructured[{index}]"
@@ -1144,6 +1158,14 @@ def _along_extrusions(store, surfaces, direction) -> bool:
     return True
 
 
+def _edge_length(store, segments, pa, pb, curve_ref) -> float:
+    """Length of a sketch edge: along its curve's pieces, else the straight line."""
+    if curve_ref is None:
+        return float(np.linalg.norm(np.asarray(pb) - np.asarray(pa)))
+    curve = store.geometry(curve_ref)
+    return float(sum(abs(curve.length_between(s["t0"], s["t1"])) for s in segments))
+
+
 def _reverse_distribution(d: dict) -> dict:
     out = dict(d)
     out["begin_spacing"] = d["end_spacing"]
@@ -1277,30 +1299,41 @@ def plan(
                 )
             segments = ({"curve": f"@{line_key}", "t0": 0.0, "t1": 1.0},)
         distribution = {"type": "uniform"}
+        spaced = None
         if key in distributions:
             edge, given = distributions[key]
             distribution = given
             if edge != key:
                 distribution = _reverse_distribution(given)
         elif key not in wall_edges and (a in wall_at) != (b in wall_at):
-            # An edge leaving a wall: clustered at the wall (a better initial guess).
-            distribution = {"type": "tanh", "begin_spacing": None, "end_spacing": None}
-            if a in wall_at:
-                distribution["begin_spacing"] = wall_at[a]
-            else:
-                distribution["end_spacing"] = wall_at[b]
-        items.append(
-            (
-                f"c{a}-{b}",
-                "connector",
-                {
-                    "segments": segments,
-                    "dimension": dimensions[key],
-                    "distribution": distribution,
-                    "propagate_spacing": False,
-                },
+            spaced, edge_warnings = _leaving_unstructured_wall(
+                store,
+                base,
+                lattice,
+                params,
+                key,
+                unstructured,
+                pos,
+                _edge_length(store, segments, pa, pb, curves.get(key)),
+                dimensions[key],
             )
-        )
+            warnings.extend(edge_warnings)
+            if spaced is None:
+                # An edge leaving a wall: clustered at the wall (a better initial guess).
+                distribution = {"type": "tanh", "begin_spacing": None, "end_spacing": None}
+                if a in wall_at:
+                    distribution["begin_spacing"] = wall_at[a]
+                else:
+                    distribution["end_spacing"] = wall_at[b]
+        connector = {
+            "segments": segments,
+            "dimension": dimensions[key],
+            "distribution": distribution,
+            "propagate_spacing": False,
+        }
+        if spaced is not None:
+            connector.update(spaced)
+        items.append((f"c{a}-{b}", "connector", connector))
 
     def loop(ordered):
         edges = []
@@ -1453,9 +1486,13 @@ def _block_generator(params: dict, block, connector_ref) -> dict:
     heights = []
     layers = []
     growth = None
+    transition = True
+    slide = False
     for wall in params["walls"]:
         if "edge" not in wall or wall["edge"] not in edges:
             continue
+        transition = transition and wall.get("transition", True)
+        slide = slide or wall.get("slide", False)
         if wall["spacing"] is None:
             raise ValidationError(
                 [
@@ -1482,8 +1519,88 @@ def _block_generator(params: dict, block, connector_ref) -> dict:
             "first_height": min(heights),
             "layers": count,
             "growth_rate": growth,
+            "transition": transition,
+            "slide": slide,
         }
     return generator
+
+
+def _leaving_unstructured_wall(
+    store, base, lattice, params, key, unstructured, pos, length, dimension
+):
+    """The spacing of an edge with one end at a wall whose layers slide into it (``slide`` on
+    the walls of the unstructured blocks it borders, and no structured block uses it): points
+    at the layer heights of the block's inflation, 1 / sin(angle) farther apart along it
+    (layer_spacing.layered_params). None otherwise (clustered at the wall as before), and for
+    a periodic edge (its partner keeps its nodes). Returns (connector parameters to update,
+    warnings)."""
+    from opengrid.model.layer_spacing import (
+        SLIDE_MAX_ANGLE,
+        SLIDE_MIN_ANGLE,
+        layer_heights,
+        layered_params,
+    )
+    from opengrid.model.patches import partner_of
+
+    blocks_at = {use[0] for use in lattice.edges[key]}
+    if not blocks_at or not blocks_at <= unstructured:
+        return None, []
+    warnings = []
+    stacks = {}
+    growth = None
+    a, b = key
+    for k in sorted(blocks_at):
+        block = lattice.blocks[k]
+        inflation = _block_generator(params, block, lambda edge: edge)["inflation"]
+        if inflation is None or not inflation["slide"]:
+            continue
+        for v, other in ((a, b), (b, a)):
+            walls = [e for e in inflation["connectors"] if v in e and e != key]
+            if not walls or v in stacks:
+                continue
+            wall = walls[0]
+            far = wall[0]
+            if far == v:
+                far = wall[1]
+            u1 = pos[far] - pos[v]
+            u2 = pos[other] - pos[v]
+            cosine = float(np.dot(u1, u2) / (np.linalg.norm(u1) * np.linalg.norm(u2)))
+            angle = math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+            if not SLIDE_MIN_ANGLE <= angle <= SLIDE_MAX_ANGLE:
+                warnings.append(
+                    f"sketch edge {key} meets the wall {wall} at {angle:.0f} degrees (layers "
+                    f"slide between {SLIDE_MIN_ANGLE:.0f} and {SLIDE_MAX_ANGLE:.0f}): the "
+                    "layers taper there"
+                )
+                continue
+            scale = 1.0 / math.sin(math.radians(angle))
+            heights = layer_heights(
+                inflation["first_height"], inflation["growth_rate"], inflation["layers"]
+            )
+            stacks[v] = [h * scale for h in heights]
+            growth = inflation["growth_rate"]
+    if not stacks:
+        return None, warnings
+    name = f"{base}-c{a}-{b}"
+    if name in store:
+        connector_id = store.get(name).id
+        for patch in store.entities("patch"):
+            members = {m.get("connector") for m in patch.params["members"]}
+            if connector_id in members and (
+                patch.params["patch_type"] == "periodic" or partner_of(patch, store) is not None
+            ):
+                warnings.append(
+                    f"{name} is periodic: it keeps its points (the layers taper towards it)"
+                )
+                return None, warnings
+    try:
+        spaced = layered_params(
+            {"dimension": dimension}, length, growth, begin=stacks.get(a), end=stacks.get(b)
+        )
+    except ValueError as error:
+        warnings.append(f"sketch edge {key}: {error}; it keeps its spacing (the layers taper)")
+        return None, warnings
+    return spaced, warnings
 
 
 def _resolve(value, ids: dict):

@@ -1053,7 +1053,11 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
                                                               own_tri),
             nb::ndarray<nb::numpy, std::int64_t, nb::ndim<2>>(quad, {mesh.quads.size(), 4},
                                                               own_quad),
-            mesh.rejected, mesh.warnings, mesh.layers);
+            mesh.rejected, mesh.warnings, mesh.layers,
+            std::map<std::string, std::int64_t>{{"columns", mesh.layer_stops.columns},
+                                                {"transition", mesh.layer_stops.transition},
+                                                {"slope", mesh.layer_stops.slope},
+                                                {"proximity", mesh.layer_stops.proximity}});
       },
       nb::arg("points"), nb::arg("segments"), nb::arg("algorithm") = "delaunay",
       nb::arg("element_type") = "triangles", nb::arg("refine") = true, nb::arg("min_angle") = 25.0,
@@ -1070,7 +1074,8 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       "wall: one flag per segment; flagged segments get inflation layers (first_height, "
       "inflation_growth, layers, total_thickness, transition; slide: layers run into the "
       "neighbouring boundaries along their vertices). Returns (points (n, 2), triangles "
-      "(m, 3), quads (k, 4), rejected, warnings, layers).");
+      "(m, 3), quads (k, 4), rejected, warnings, layers, layer_stops: wall columns that ended "
+      "early by rule, {columns, transition, slope, proximity}).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")
       .def(

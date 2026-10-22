@@ -1247,7 +1247,7 @@ class Session:
         names = self.commands.run(command)
         self.last_warnings = command.warnings
         for warning in command.warnings:
-            log.warning("%s: %s", method, warning)
+            log.warning("%s: %s", label, warning)
         return names[0]
 
     def domain_status(self, name: str) -> str:
@@ -1733,6 +1733,8 @@ class Session:
                 if isinstance(ref, (str, int)) and self.store.get(ref).kind == "connector":
                     members.append({"connector": self.store.get(ref).id})
             refuse_shared_connectors(self.store, members)
+        if entity.kind == "patch":
+            return self._change_patch_members(entity, refs, add)
         current = [member_script(item, self.store) for item in entity.params["members"]]
         labels = [member_label(item, self.store) for item in entity.params["members"]]
         given = []
@@ -1762,6 +1764,27 @@ class Session:
             drop = {label for _m, label in given}
             members = [m for m, label in zip(current, labels, strict=True) if label not in drop]
         return self.modify(name, members=members)
+
+    def _change_patch_members(self, entity, refs, add: bool) -> str:
+        """Members compared as members (a curve given by name is the same member as the
+        extruded side wall it makes, which is labelled by its face identifier in 3D)."""
+        from opengrid.model.patches import _patch_members, member_label, member_script
+
+        issues: list[Issue] = []
+        given = _patch_members(list(refs), self.store, entity.name, issues)
+        if issues:
+            raise ValidationError(issues)
+        current = list(entity.params["members"])
+        if add:
+            members = current + [m for m in given if m not in current]
+        else:
+            missing = [member_label(m, self.store) for m in given if m not in current]
+            if missing:
+                raise ValidationError(
+                    [Issue(entity.name, f"does not contain {', '.join(missing)}")]
+                )
+            members = [m for m in current if m not in given]
+        return self.modify(entity.name, members=[member_script(m, self.store) for m in members])
 
     def is_3d(self) -> bool:
         """True when the model has blocks (exports and boundary checks are then 3D)."""
@@ -2077,7 +2100,7 @@ class Session:
         names = self.commands.run(command)
         self.last_warnings = command.warnings
         for warning in command.warnings:
-            log.warning("%s: %s", method, warning)
+            log.warning("%s: %s", label, warning)
         return names
 
     def move_handle(self, name: str, field: str, index: int, xyz) -> str:

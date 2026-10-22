@@ -297,6 +297,69 @@ TEST(Inflation, SlidingEndsRunTheLayersIntoTheNeighbouringBoundary) {
   EXPECT_LT(stopped.quads.size(), std::size_t{80 * layers});
 }
 
+TEST(Inflation, TwoWallsMeetInAConcaveCornerWithoutSteps) {
+  // The unit square with walls on the bottom and the left: layers growing taller than the wall
+  // spacing (0.13 against 0.05) meet along the corner's diagonal. Neither wall's layers are
+  // stopped by the other's running beside them (only fronts approaching head-on count); the
+  // only stops are the tapers towards the chain's open ends at (1, 0) and (0, 1).
+  Case c;
+  const int n = 20;
+  std::vector<Point> pts;
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0 * i / n, 0.0});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0, 1.0 * i / n});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({1.0 - 1.0 * i / n, 1.0});
+  }
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({0.0, 1.0 - 1.0 * i / n});
+  }
+  c.add(pts, false);
+  for (int s = 0; s < 4 * n; ++s) {
+    c.wall[static_cast<std::size_t>(s)] = s < n || s >= 3 * n;
+  }
+  og::DomainMeshOptions options;
+  options.wall = c.wall;
+  options.inflation.first_height = 5e-3;
+  options.inflation.growth_rate = 1.2;
+  options.inflation.max_layers = 10;
+  options.inflation.transition = false;
+  const auto mesh = og::mesh_domain(c.in, options);
+  expect_valid(c, mesh);
+  EXPECT_EQ(mesh.layers, 10);
+  EXPECT_EQ(mesh.layer_stops.proximity, 0);
+  EXPECT_EQ(mesh.layer_stops.transition, 0);
+  const auto q = og::quality_cells(mesh.points, mesh.triangles, mesh.quads);
+  // The cells around the corner (triangles first, then quads, as quality_cells numbers them).
+  double worst = 180.0;
+  auto centre_near = [&](const auto& cell) {
+    double x = 0.0;
+    double y = 0.0;
+    for (const MeshIndex v : cell) {
+      x += mesh.points[u(v)][0] / static_cast<double>(cell.size());
+      y += mesh.points[u(v)][1] / static_cast<double>(cell.size());
+    }
+    return x < 0.3 && y < 0.3;
+  };
+  std::size_t k = 0;
+  for (const auto& tri : mesh.triangles) {
+    if (centre_near(tri)) {
+      worst = std::min(worst, q.min_angle[k]);
+    }
+    ++k;
+  }
+  for (const auto& quad : mesh.quads) {
+    if (centre_near(quad)) {
+      worst = std::min(worst, q.min_angle[k]);
+    }
+    ++k;
+  }
+  EXPECT_GT(worst, 20.0);
+}
+
 TEST(Inflation, SlidingNeedsAWallAngleBetween45And135Degrees) {
   // At 60 degrees the end column slides along the leaning inlet (a full layer stack); at 30
   // degrees layers converging into the wedge would be squeezed, so that end tapers.

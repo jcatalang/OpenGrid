@@ -48,10 +48,15 @@ def test_layers_set_from_the_curves():
     assert og.entity("flow").params["generator"]["inflation"]["first_height"] == 1e-3
     og.set_inflation(["wall"], remove=True)
     assert og.entity("flow").params["generator"]["inflation"] is None
-    with pytest.raises(opengrid.ValidationError, match="bound no unstructured domain"):
+    with pytest.raises(opengrid.ValidationError, match="bound no domain yet"):
         og.create_line((9, 9), (9, 10), name="far")
         og.create_connector("far", 3, name="cf")
         og.set_inflation(["cf"])
+    # A structured domain's curve: the message says so, and how to convert it.
+    square = og.structured_domain_from_curves(og.create_rectangle(center=(5, 5)), 9, name="sq")
+    side = og.entity(square).params["edges"][0][0]["connector"]
+    with pytest.raises(opengrid.ValidationError, match=r"bounds sq, a structured domain.*Convert"):
+        og.set_inflation([og.store.get(side).name])
 
 
 def test_sliding_layers_run_into_the_inlet_and_outlet():

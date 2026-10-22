@@ -58,7 +58,7 @@ def test_settings_go_to_the_sketch():
     assert og.entity("s-d1").params["generator"]["inflation"] is None
     og.undo()
     assert og.entity("s-d1").params["generator"]["inflation"] is not None
-    # Refusals: a connector of another block, a total thickness, layers past the core.
+    # Refusals: a connector of another block, a total thickness.
     with pytest.raises(ValidationError, match=r"not an edge of block 1 of sketch 's'"):
         og.set_unstructured_generator(
             "s-d1", inflation={"connectors": ["s-c0-3"], "first_height": 0.005}
@@ -68,11 +68,20 @@ def test_settings_go_to_the_sketch():
             "s-d1",
             inflation={"connectors": ["s-c1-4"], "first_height": 0.005, "total_thickness": 0.1},
         )
-    with pytest.raises(ValidationError, match="stop at core size"):
-        og.set_unstructured_generator(
-            "s-d1",
-            inflation={"connectors": ["s-c1-4"], "first_height": 0.005, "transition": False},
-        )
+    # Layers past the core size and sliding layers go to the sketch's wall too.
+    og.set_unstructured_generator(
+        "s-d1",
+        inflation={
+            "connectors": ["s-c1-4"],
+            "first_height": 0.005,
+            "transition": False,
+            "slide": True,
+        },
+    )
+    wall = next(w for w in og.entity("s").params["walls"] if w["edge"] == (1, 4))
+    assert not wall["transition"] and wall["slide"]
+    inflation = og.entity("s-d1").params["generator"]["inflation"]
+    assert not inflation["transition"] and inflation["slide"]
     assert to_json(opengrid.replay(og.journal_text()).store) == to_json(og.store)
 
 

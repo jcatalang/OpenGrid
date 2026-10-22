@@ -13,8 +13,11 @@
 //  * Sharp convex corners (turning angle of the normals above fan_threshold_deg, e.g. sharp or
 //    blunt trailing edges) get a fan: several columns from the same wall node with normals
 //    interpolated in steps of at most fan_step_deg; the first layer there is made of triangles.
-//  * Concave corners: two adjacent columns whose new front segment shrinks below half of the old
-//    one are merged into one node (the layer cell becomes a triangle).
+//  * Concave corners: adjacent columns whose new front segment shrinks below half of the old one,
+//    or turns back (one would pass the other), are merged into one node (the layer cell becomes
+//    a triangle); a run of such pairs (both neighbours of a corner column, once the layers are
+//    taller than the wall spacing) becomes one node at the run's mean, so the layers of both
+//    walls meet there instead of one side stopping.
 //  * A column's isotropic size is its width along the front (at least the wall spacing it
 //    started from, so fan columns are not stopped at once), capped by the core size field
 //    (size_field.hpp: input boundary spacing, growth rate, max size, sources). A column stops
@@ -26,7 +29,9 @@
 //    or by single-layer steps instead of forming cliffs); when its new column edge or
 //    front segment would cross or touch the old fronts, the boundary or another new segment
 //    (exact predicates); when another front or boundary segment that faces it lies ahead closer
-//    than proximity times the core size; or when one of its cells would be inverted or have an
+//    than proximity times the core size and approaches it within 60 degrees of head-on (two
+//    walls of a narrow gap or a sharp wedge; not the other wall's layers beside it in a concave
+//    corner, which meet it there); or when one of its cells would be inverted or have an
 //    angle above max_angle_deg. Checks are repeated until no column has to stop, so every
 //    committed layer is valid.
 //  * Open wall chains (wall meeting a non-wall boundary) keep their end nodes fixed (the
@@ -79,12 +84,22 @@ struct InflationOptions {
   double slide_max_angle_deg = 135.0;  // wider openings taper
 };
 
+// Wall columns that ended before the last layer, by the rule that stopped them (open chains'
+// end columns, which taper or slide, are not counted).
+struct InflationStops {
+  std::int64_t columns = 0;     // wall columns
+  std::int64_t transition = 0;  // a layer as thick as the core cells beside it
+  std::int64_t slope = 0;       // too steep next to a stopped column
+  std::int64_t proximity = 0;   // near another front or boundary, crossing it, or a bad cell
+};
+
 struct InflationResult {
   std::vector<std::array<double, 2>> points;  // input points first, then layer nodes
   std::vector<std::array<std::int64_t, 3>> triangles;
   std::vector<std::array<std::int64_t, 4>> quads;
   std::vector<std::vector<std::int64_t>> core_loops;  // closed, domain on the left
   int layers = 0;                                     // largest number of layers of any column
+  InflationStops stops;
   std::vector<std::string> warnings;
 };
 

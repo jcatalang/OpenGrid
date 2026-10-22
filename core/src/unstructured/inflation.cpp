@@ -176,9 +176,15 @@ class SegmentGrid {
   std::uint64_t stamp_ = 0;
 };
 
+enum class Stop { none, transition, slope, proximity };
+
+// Proximity counts a front segment ahead only when it approaches within 60 degrees of head-on.
+constexpr double kHeadOnCos = 0.5;
+
 struct Node {
   Index point = 0;
   bool active = true;
+  Stop stop = Stop::none;  // why the column ended before the last layer
   int layers = 0;
   bool preset = false;
   P2 preset_normal{};
@@ -338,6 +344,22 @@ class Inflator {
     }
     InflationResult result;
     result.layers = layers_done;
+    for (const Chain& chain : chains_) {
+      for (std::size_t j = 0; j < chain.nodes.size(); ++j) {
+        if (!chain.closed && (j == 0 || j + 1 == chain.nodes.size())) {
+          continue;  // an open chain's ends taper (or slide)
+        }
+        const Node& node = chain.nodes[j];
+        ++result.stops.columns;
+        if (node.stop == Stop::transition) {
+          ++result.stops.transition;
+        } else if (node.stop == Stop::slope) {
+          ++result.stops.slope;
+        } else if (node.stop == Stop::proximity) {
+          ++result.stops.proximity;
+        }
+      }
+    }
     assemble_core(result);
     if (even_loops) {
       make_even(result);
@@ -520,6 +542,7 @@ class Inflator {
         std::min((*size_)(there[0], there[1]), std::max(node.spacing, node.origin_spacing));
     if (options_.transition && h >= options_.transition_ratio * node.target) {
       node.active = false;
+      node.stop = Stop::transition;
       return;
     }
     node.next = there;
@@ -706,6 +729,7 @@ class Inflator {
         // Transition: the layer would be as thick as its cells are wide.
         if (options_.transition && h >= options_.transition_ratio * node.target) {
           node.active = false;
+          node.stop = Stop::transition;
           continue;
         }
         node.next = next;
@@ -741,6 +765,7 @@ class Inflator {
             if (node.height + h - other.height >
                 std::max(options_.max_slope * gap, h) * (1.0 + 1e-9)) {
               node.active = false;
+              node.stop = Stop::slope;
               node.next = here;
               stopped = true;
               break;
@@ -755,22 +780,48 @@ class Inflator {
     return any;
   }
 
+  // Concave corners: adjacent columns whose new front segment shrinks below half of the old
+  // one, or turns back (one would pass the other), are merged; a run of such pairs (both
+  // neighbours of a corner column, whose layers have grown taller than the wall spacing) is
+  // merged into one node at the run's mean, so both walls' layers meet there.
   void merge_converging() {
     for (Chain& chain : chains_) {
       const std::size_t n = chain.nodes.size();
+      std::vector<bool> join(n, false);  // join[j]: node j + 1 merges with node j
       for (std::size_t j = 0; j + 1 < n; ++j) {
-        Node& a = chain.nodes[j];
-        Node& b = chain.nodes[j + 1];
-        if (!a.active || !b.active || a.merged || a.point == b.point || a.slider || b.slider) {
+        const Node& a = chain.nodes[j];
+        const Node& b = chain.nodes[j + 1];
+        if (!a.active || !b.active || a.point == b.point || a.slider || b.slider) {
           continue;
         }
-        const double old_length = distance(points_[u(a.point)], points_[u(b.point)]);
-        if (distance(a.next, b.next) < 0.5 * old_length) {
-          const P2 mid = {0.5 * (a.next[0] + b.next[0]), 0.5 * (a.next[1] + b.next[1])};
-          a.next = mid;
-          b.next = mid;
-          b.merged = true;
+        const P2& pa = points_[u(a.point)];
+        const P2& pb = points_[u(b.point)];
+        const P2 old_segment = {pb[0] - pa[0], pb[1] - pa[1]};
+        const P2 new_segment = {b.next[0] - a.next[0], b.next[1] - a.next[1]};
+        const double old_length = std::hypot(old_segment[0], old_segment[1]);
+        join[j] = std::hypot(new_segment[0], new_segment[1]) < 0.5 * old_length ||
+                  dot(old_segment, new_segment) <= 0.0;
+      }
+      std::size_t first = 0;
+      while (first < n) {
+        std::size_t last = first;
+        while (last + 1 < n && join[last]) {
+          ++last;
         }
+        if (last > first) {
+          P2 mean = {0.0, 0.0};
+          for (std::size_t k = first; k <= last; ++k) {
+            mean[0] += chain.nodes[k].next[0];
+            mean[1] += chain.nodes[k].next[1];
+          }
+          const auto count = static_cast<double>(last - first + 1);
+          mean = {mean[0] / count, mean[1] / count};
+          for (std::size_t k = first; k <= last; ++k) {
+            chain.nodes[k].next = mean;
+            chain.nodes[k].merged = k > first;
+          }
+        }
+        first = last + 1;
       }
     }
   }
@@ -782,6 +833,7 @@ class Inflator {
       return;
     }
     node.active = false;
+    node.stop = Stop::proximity;
     node.next = points_[u(node.point)];
     // A merged pair stops together.
     if (node.merged && j > 0) {
@@ -1012,7 +1064,10 @@ class Inflator {
               return;
             }
             const P2 facing = left_normal(o.a, o.b);
-            if (dot(facing, {-ahead[0], -ahead[1]}) > 0.0) {
+            // Facing it and approaching head-on (within 60 degrees): the other wall's layers
+            // beside it in a concave corner run across its path and meet it there instead.
+            if (dot(facing, {-ahead[0], -ahead[1]}) > 0.0 &&
+                dot(facing, node.normal) < -kHeadOnCos) {
               close = true;
             }
           };

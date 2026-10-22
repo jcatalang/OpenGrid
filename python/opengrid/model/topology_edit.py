@@ -1798,8 +1798,24 @@ def set_inflation(
             domains.append(entity.name)
     if not domains:
         names = ", ".join(store.get(c).name for c in ids)
+        structured = [
+            d.name
+            for d in store.entities("domain")
+            if set(ids) & {item["connector"] for edge in d.params["edges"] for item in edge}
+        ]
+        if structured:
+            raise ValidationError(
+                [
+                    Issue(
+                        names,
+                        f"bounds {', '.join(structured)}, a structured domain: inflation layers "
+                        "grow into unstructured domains (convert it first: Topology > Convert "
+                        "domain, or the right-click menu)",
+                    )
+                ]
+            )
         raise ValidationError(
-            [Issue(names, "bound no unstructured domain (make the domain first)")]
+            [Issue(names, "bound no domain yet: make the domain first, then its layers")]
         )
     connectors = ConnectorEvaluator(store)
     warnings = []
@@ -2020,9 +2036,9 @@ def set_unstructured_generator(store, name, generator):
     """An unstructured domain's generator settings (with sliding layers, the boundary curves
     next to its walls spaced like the layers: _space_like_layers). For a sketch's block they go
     to the sketch: the triangulation settings to its ``generator`` (shared by its unstructured
-    blocks) and the inflation to walls on the block's edges (first height, layers, growth;
-    the block's walls not listed any more are dropped, those on edges shared with another
-    block kept). A total thickness or layers past the core size are not available there.
+    blocks) and the inflation to walls on the block's edges (first height, layers, growth,
+    transition, slide; the block's walls not listed any more are dropped, those on edges shared
+    with another block kept). A total thickness is not available there.
     Returns ([domain name], warnings)."""
     from opengrid.model.entities import normalize_params
     from opengrid.model.sketch import edge_key, edit_sketch, output_owner
@@ -2065,14 +2081,6 @@ def set_unstructured_generator(store, name, generator):
                     "size, a total thickness is not available (leave it empty)",
                 )
             )
-        if not inflation["transition"]:
-            issues.append(
-                Issue(
-                    name,
-                    f"is a block of sketch {sketch.name!r}: its layers always stop at the core "
-                    "cell size (keep 'stop at core size' on)",
-                )
-            )
         for connector_id in inflation["connectors"]:
             edge = None
             owner_c = owners.get(connector_id)
@@ -2112,6 +2120,8 @@ def set_unstructured_generator(store, name, generator):
                 "spacing": inflation["first_height"],
                 "layers": inflation["layers"],
                 "growth": inflation["growth_rate"],
+                "transition": inflation["transition"],
+                "slide": inflation["slide"],
             }
         )
         walls.append(wall)

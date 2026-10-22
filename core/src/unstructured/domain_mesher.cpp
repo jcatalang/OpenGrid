@@ -248,6 +248,7 @@ MixedMesh inflated(const TriangulationInput& input, const DomainMeshOptions& opt
   out.triangles = std::move(layers.triangles);
   out.quads = std::move(layers.quads);
   out.layers = layers.layers;
+  out.layer_stops = layers.stops;
   out.warnings = std::move(layers.warnings);
   out.warnings.insert(out.warnings.end(), inner.warnings.begin(), inner.warnings.end());
   out.rejected = inner.rejected;

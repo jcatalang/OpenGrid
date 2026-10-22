@@ -174,3 +174,27 @@ def test_the_tree_lists_faces_with_their_types(live):
     item.setSelected(True)
     assert window.selected_faces == [{"block": block_id, "face": "kmin"}]
     assert "kmin" in window.property_panel._title.text()
+
+
+def test_a_curve_type_is_removed_after_extruding(live):
+    """A curve typed in 2D and then extruded is the volume's side wall: its type is removed by
+    the curve's name (as the panel's "(none)" does) or by the face identifier, never added
+    twice."""
+    window, og = live.window, live.og
+    lines = og.create_rectangle(width=2, height=1)
+    base = og.unstructured_domain_from_curves(lines, 9, name="b")
+    curve = og.entity(base).params["loops"][0][0]["connector"]
+    name = og.store.get(curve).name
+    og.set_boundary_type([name], "wall")
+    og.create_extruded_volume(base, "translate", vector=(0, 0, 0.5), dimension=3, name="vol")
+    og.add_to_patch("wall", [name])  # already there (as vol.side-1)
+    assert len(og.entity("wall").params["members"]) == 1
+    window.set_selection([curve])
+    panel = window.property_panel
+    panel._editors["boundary"][1].setCurrentText("(none)")
+    panel.apply()
+    assert panel._error.text() == ""
+    assert og.entity("wall").params["members"] == ()
+    og.undo()
+    og.remove_from_patch("wall", ["vol.side-1"])
+    assert og.entity("wall").params["members"] == ()

@@ -1070,7 +1070,7 @@ def parse_points(text: str, field: str) -> list[tuple]:
 class PropertyPanel(QWidget):
     """Editor for one entity. Emits ``message(text, is_error)`` after apply attempts."""
 
-    message = Signal(str, bool)
+    message = Signal(str, str)  # text, level: "status", "info", "warning" or "error"
     smooth_requested = Signal(str)
     points_requested = Signal(str)  # a curve without points: give it the toolbar's points
     entity_requested = Signal(int)  # a face's "Select the block": select that entity
@@ -1904,21 +1904,17 @@ class PropertyPanel(QWidget):
         try:
             if shape_changes:  # the curve's shape first: its points follow it
                 self.session.modify(self.session.store.get(self.shape_id).name, **shape_changes)
-            if generator is not None:
+            if generator is not None:  # (the session logs its warnings)
                 self.session.set_unstructured_generator(name, generator)
-                for warning in self.session.last_warnings:
-                    self.message.emit(warning, False)
             if dimension is not None:
                 # The connector's other edits go in the same step.
                 followed = self.session.set_dimension(name, dimension, **changes)
                 changes = {}
-                for warning in self.session.last_warnings:
-                    self.message.emit(warning, False)
                 if len(followed) > 1:
                     self.message.emit(
                         f"{len(followed) - 1} opposite curve(s) followed: "
                         + ", ".join(n for n in followed if n != name),
-                        False,
+                        "info",
                     )
             if changes or new_name is not None:
                 self.session.modify(name, new_name=new_name, **changes)  # one undo step
@@ -1937,9 +1933,9 @@ class PropertyPanel(QWidget):
             and generator is None
             and not shape_changes
         ):
-            self.message.emit("No changes", False)
+            self.message.emit("No changes", "status")
             return False
-        self.message.emit(f"Updated {self.session.store.get(self.entity_id).name}", False)
+        self.message.emit(f"changed {self.session.store.get(self.entity_id).name}", "info")
         return True
 
     def _apply_face(self) -> bool:
@@ -1948,7 +1944,7 @@ class PropertyPanel(QWidget):
 
         chosen = self._editors["boundary"][1].currentText()
         if chosen == self._boundary_before:
-            self.message.emit("No changes", False)
+            self.message.emit("No changes", "status")
             return False
         store = self.session.store
         member = member_label(self.face_member, store)  # its identifier, in the journal
@@ -1960,7 +1956,7 @@ class PropertyPanel(QWidget):
         except ValidationError as error:
             self._show_error(str(error))
             return False
-        self.message.emit(f"{member_label(self.face_member, store)}: {chosen}", False)
+        self.message.emit(f"{member_label(self.face_member, store)}: {chosen}", "info")
         return True
 
     def _apply_boundary(self, name: str, chosen: str) -> None:
@@ -1974,7 +1970,7 @@ class PropertyPanel(QWidget):
 
     def _show_error(self, text: str) -> None:
         self._error.setText(text)
-        self.message.emit(text, True)
+        self.message.emit(text, "error")
 
 
 PREVIEWED_FIELDS = ("dimension", "mode", "distribution", "breakpoints")

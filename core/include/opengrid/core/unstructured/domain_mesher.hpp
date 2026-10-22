@@ -53,6 +53,7 @@ struct MixedMesh {
   std::vector<std::array<std::int64_t, 4>> quads;      // counter-clockwise
   std::int64_t rejected = 0;
   int layers = 0;  // inflation layers (largest column)
+  InflationStops layer_stops;
   std::vector<std::string> warnings;
 };
 

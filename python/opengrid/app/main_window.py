@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
         self.property_panel.message.connect(self._on_panel_message)
         self.property_panel.smooth_requested.connect(self.run_smoother)
         self.property_panel.points_requested.connect(self.give_points)
+        self.property_panel.inflation_requested.connect(lambda name: self.inflation_on_selection())
         self.property_panel.points_preview.connect(self._show_edit_preview)
         self.dimension_box.valueChanged.connect(lambda _n: self._update_points_preview())
         self.smoother_dock.finished.connect(self._on_smoothing_finished)
@@ -524,6 +525,12 @@ class MainWindow(QMainWindow):
             self.create_unstructured_on_selection,
             tip="Triangulated domain bounded by the selected curves (closed loops; curves without "
             "points get the 'points' box's)",
+        )
+        self.inflation_action = self._action(
+            "Inflation layers…",
+            self.inflation_on_selection,
+            tip="Boundary layers grown from the selected curves into the unstructured domains "
+            "they bound (first height, growth, layers; running into the neighbouring curves)",
         )
         self.domain_action = self._action(
             "Structured domain",
@@ -776,6 +783,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.chain_action)
         create_menu.addAction(self.domain_action)
         create_menu.addAction(self.unstructured_action)
+        create_menu.addAction(self.inflation_action)
         create_menu.addAction(self.network_action)
         create_menu.addAction(self.group_action)
         create_menu.addAction(self.block_action)
@@ -1280,6 +1288,7 @@ class MainWindow(QMainWindow):
             (self.network_action, curves),
             (self.unstructured_action, curves or connectors),
             (self.domain_action, connectors or curves),
+            (self.inflation_action, connectors or (domains and self.session.is_3d())),
             (self.extrude_action, structured or "unstructured_domain" in kinds),
             (self.group_action, structured),
             (self.block_action, structured),
@@ -2843,6 +2852,66 @@ class MainWindow(QMainWindow):
             self.scene.show_points_preview(arrays)
             return
         self._update_points_preview()
+
+    def inflation_on_selection(self, values: dict | None = None) -> list[str] | None:
+        """Inflation layers from the selected curves (with points) into the unstructured domains
+        they bound: the dialog's settings, or ``values`` (for Session.set_inflation; with
+        "remove": True they stop growing layers). One undo step."""
+        from opengrid.app.inflation_dialog import InflationDialog
+        from opengrid.model.layer_spacing import suggested_first_height
+
+        curves = self._selected_of_kind("connector")
+        if self.session.is_3d():  # 3D: surfaces (the domains bounding volumes)
+            curves += self._selected_of_kind("unstructured_domain") + self._selected_of_kind(
+                "domain"
+            )
+        if not curves:
+            self.statusBar().showMessage(
+                self._selection_hint(
+                    "the curves the layers grow from (curves with points; 3D: surfaces)"
+                ),
+                6000,
+            )
+            return None
+        if values is None:
+            store = self.session.store
+            current = None
+            ids = {store.get(c).id for c in curves}
+            for domain in store.entities("unstructured_domain"):
+                inflation = domain.params["generator"]["inflation"]
+                if inflation is not None and ids & set(inflation["connectors"]):
+                    current = inflation
+                    break
+            from opengrid.model.topology_edit import _domain_connectors
+
+            refs = []
+            for name in curves:
+                entity = store.get(name)
+                if entity.kind == "connector":
+                    refs.append(entity.id)
+                else:
+                    refs += _domain_connectors(entity)
+            spacing = min(
+                self.session.connectors.nodes(r).length
+                / max(store.get(r).params["dimension"] - 1, 1)
+                for r in refs
+            )
+            dialog = InflationDialog(curves, current, suggested_first_height(spacing), self)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                return None
+            values = {"remove": True}
+            if not dialog.removed:
+                values = dialog.values()
+        names = self._run(lambda: self.session.set_inflation(curves, **values))
+        if names:
+            for warning in self.session.last_warnings:
+                log.warning("%s", warning)
+            text = f"layers from {', '.join(curves)} in {', '.join(names)}"
+            if values.get("remove"):
+                text = f"no layers from {', '.join(curves)} in {', '.join(names)}"
+            log.info("%s", text)
+            self.statusBar().showMessage(text, 6000)
+        return names
 
     def give_points(self, curve: str) -> list[str]:
         """Points ('points' box) on one curve without points (its panel's button)."""

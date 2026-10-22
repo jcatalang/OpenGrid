@@ -40,6 +40,8 @@ Blocks used by smoothing walls lose them (face names change with the new orienta
 warning says so.
 """
 
+import math
+
 import numpy as np
 
 from opengrid.model.connectors import CHAIN_TOLERANCE, EXPLICIT, ConnectorEvaluator
@@ -1731,9 +1733,293 @@ def set_dimension(store, name, dimension: int, **changes):
     return [store.get(c).name for c in assigned], warnings
 
 
+def set_inflation(
+    store,
+    curves,
+    first_height=None,
+    growth_rate=None,
+    layers=None,
+    total_thickness=None,
+    transition=None,
+    slide=None,
+    remove=False,
+):
+    """Inflation layers from curves (2D) or surfaces (3D: domains bounding volumes; the
+    volumes they bound grow layers from them, sliding on planar neighbouring faces as volume
+    layers do): every unstructured domain the curves bound grows layers from them (they join
+    its walls; ``remove``: they leave them, and a domain left without walls has no layers),
+    with the settings given (the others kept, or the defaults; the first height suggested from
+    the walls' spacing when a domain had no layers). With ``slide`` the
+    layers run into the boundary curves next to the walls instead of tapering: those curves are
+    spaced like the layers near the walls (model/layer_spacing.py), except a sketch's, a
+    periodic one, one a structured domain uses or one too short (a warning names them: the
+    layers taper there). Sketch domains route through their sketch (set_unstructured_generator).
+    Returns (the domains changed, warnings)."""
+    from opengrid.model.curves import CurveIndex
+    from opengrid.model.layer_spacing import suggested_first_height
+    from opengrid.model.unstructured import DEFAULT_INFLATION
+
+    if isinstance(curves, (str, int)):
+        curves = [curves]
+    index = CurveIndex(store)
+    ids = []
+    surfaces = []
+    for ref in curves:
+        if ref not in store:
+            raise ValidationError([Issue(str(ref), "no such curve or surface")])
+        entity = store.get(ref)
+        if entity.kind in ("domain", "unstructured_domain"):
+            surfaces.append(entity.id)
+            continue
+        connector = index.connector_of.get(entity.id, entity.id)
+        if store.get(connector).kind != "connector":
+            raise ValidationError(
+                [Issue(entity.name, "has no points yet: give it points first (or make the domain)")]
+            )
+        if connector not in ids:
+            ids.append(connector)
+    settings = {
+        "first_height": first_height,
+        "growth_rate": growth_rate,
+        "layers": layers,
+        "total_thickness": total_thickness,
+        "transition": transition,
+        "slide": slide,
+    }
+    changed = []
+    if surfaces:
+        changed += _volume_layers(store, surfaces, settings, remove)
+    if not ids:
+        return changed, []
+    domains = []
+    for entity in store.entities("unstructured_domain"):
+        on = {item["connector"] for loop in entity.params["loops"] for item in loop}
+        if on & set(ids):
+            domains.append(entity.name)
+    if not domains:
+        names = ", ".join(store.get(c).name for c in ids)
+        raise ValidationError(
+            [Issue(names, "bound no unstructured domain (make the domain first)")]
+        )
+    connectors = ConnectorEvaluator(store)
+    warnings = []
+    for name in domains:
+        entity = store.get(name)
+        on = {item["connector"] for loop in entity.params["loops"] for item in loop}
+        mine = [c for c in ids if c in on]
+        current = entity.params["generator"]["inflation"]
+        walls = []
+        if current is not None:
+            walls = list(current["connectors"])
+        if remove:
+            walls = [w for w in walls if w not in mine]
+        else:
+            walls += [c for c in mine if c not in walls]
+        generator = dict(entity.params["generator"])
+        inflation = None
+        if walls:
+            inflation = dict(DEFAULT_INFLATION)
+            if current is not None:
+                inflation.update(current)
+            else:
+                spacing = min(
+                    connectors.nodes(w).length / max(store.get(w).params["dimension"] - 1, 1)
+                    for w in walls
+                )
+                inflation["first_height"] = suggested_first_height(spacing)
+            for key, value in (
+                ("first_height", first_height),
+                ("growth_rate", growth_rate),
+                ("layers", layers),
+                ("total_thickness", total_thickness),
+                ("transition", transition),
+                ("slide", slide),
+            ):
+                if value is not None:
+                    inflation[key] = value
+            inflation["connectors"] = tuple(walls)
+        generator["inflation"] = inflation
+        names, more = set_unstructured_generator(store, name, generator)
+        connectors = ConnectorEvaluator(store)  # (curves may have been spaced anew)
+        changed += names
+        warnings += more
+    return changed, warnings
+
+
+def _volume_layers(store, surfaces: list[int], settings: dict, remove: bool) -> list[str]:
+    """Layers of the volumes the surfaces bound, from those surfaces (set_inflation in 3D)."""
+    from opengrid.model.layer_spacing import suggested_first_height
+    from opengrid.model.volumes import DEFAULT_VOLUME_INFLATION
+
+    volumes = [
+        v
+        for v in store.entities("volume")
+        if v.params["faces"] is not None and set(v.params["faces"]) & set(surfaces)
+    ]
+    if not volumes:
+        names = ", ".join(store.get(s).name for s in surfaces)
+        raise ValidationError(
+            [Issue(names, "bound no volume made of domains (extruded volumes take no layers)")]
+        )
+    connectors = ConnectorEvaluator(store)
+    changed = []
+    for volume in volumes:
+        generator = dict(volume.params["generator"])
+        current = generator["inflation"]
+        walls = []
+        if current is not None:
+            walls = list(current["faces"])
+        mine = [s for s in surfaces if s in volume.params["faces"]]
+        if remove:
+            walls = [w for w in walls if w not in mine]
+        else:
+            walls += [s for s in mine if s not in walls]
+        inflation = None
+        if walls:
+            inflation = dict(DEFAULT_VOLUME_INFLATION)
+            if current is not None:
+                inflation.update(current)
+            else:
+                spacings = []
+                for wall in walls:
+                    for ref in _domain_connectors(store.get(wall)):
+                        n = store.get(ref).params["dimension"] - 1
+                        spacings.append(connectors.nodes(ref).length / max(n, 1))
+                inflation["first_height"] = suggested_first_height(min(spacings, default=0.0))
+            for key, value in settings.items():
+                if value is not None:
+                    inflation[key] = value
+            inflation["faces"] = tuple(walls)
+        generator["inflation"] = inflation
+        params = dict(volume.params)
+        params["generator"] = generator
+        store.update(volume.id, params=normalize_params("volume", params, volume.name, store))
+        changed.append(volume.name)
+    return changed
+
+
+def _domain_connectors(domain) -> list[int]:
+    if domain.kind == "unstructured_domain":
+        return [item["connector"] for loop in domain.params["loops"] for item in loop]
+    return [item["connector"] for edge in domain.params["edges"] for item in edge]
+
+
+def _space_like_layers(store, connectors, domain, inflation) -> list[str]:
+    """The boundary curves of a domain next to its walls, spaced like the layers near each
+    wall they meet (model/layer_spacing.py): the height across the layers is the layer height,
+    so along a curve meeting the wall at an angle the steps are longer by 1 / sin(angle). Only
+    where the angle inside the domain is between the slide limits (the C++ inflation's): a
+    sharper wedge or a wider opening keeps its points and the layers taper there. Returns
+    warnings for the curves left as they are."""
+    from opengrid.model.layer_spacing import (
+        SLIDE_MAX_ANGLE,
+        SLIDE_MIN_ANGLE,
+        layer_heights,
+        layered_params,
+    )
+    from opengrid.model.patches import partner_of
+    from opengrid.model.sketch import output_owner
+
+    walls = set(inflation["connectors"])
+    heights = layer_heights(
+        inflation["first_height"],
+        inflation["growth_rate"],
+        inflation["layers"],
+        inflation["total_thickness"],
+    )
+    periodic = set()
+    for patch in store.entities("patch"):
+        if patch.params["patch_type"] == "periodic" or partner_of(patch, store) is not None:
+            periodic.update(m.get("connector") for m in patch.params["members"])
+    owners = output_owner(store)
+
+    def oriented(item):
+        points = np.asarray(connectors.nodes(item["connector"]).points)
+        if item["reversed"]:
+            return points[::-1]
+        return points
+
+    # A domain in the z = 0 plane tells re-entrant corners by the turn's sign; on a surface the
+    # angle between the two curves is taken as it is.
+    planar_xy = domain.params.get("surface") is None and all(
+        abs(float(np.asarray(connectors.nodes(item["connector"]).points)[:, 2].max())) < 1e-12
+        and abs(float(np.asarray(connectors.nodes(item["connector"]).points)[:, 2].min())) < 1e-12
+        for loop in domain.params["loops"]
+        for item in loop
+    )
+    # neighbour connector -> {"begin" | "end": the angle at the wall junction, degrees}
+    ends: dict[int, dict[str, float]] = {}
+    for loop in domain.params["loops"]:
+        n = len(loop)
+        for k in range(n):
+            before, after = loop[k], loop[(k + 1) % n]
+            if (before["connector"] in walls) == (after["connector"] in walls):
+                continue  # no wall / non-wall junction between them
+            a = oriented(before)
+            c = oriented(after)
+            b = c[0]
+            to_next = c[1] - b
+            to_previous = a[-2] - b
+            cross = np.cross(to_next, to_previous)
+            angle = math.degrees(
+                math.atan2(float(np.linalg.norm(cross)), float(np.dot(to_next, to_previous)))
+            )
+            if planar_xy and cross[2] < 0.0:
+                angle = 360.0 - angle  # a re-entrant corner (the domain lies on the left)
+            if before["connector"] in walls:
+                other, item, at_start = after["connector"], after, True
+            else:
+                other, item, at_start = before["connector"], before, False
+            # The neighbour's end at the junction, in its own direction.
+            side = "end"
+            if at_start != item["reversed"]:
+                side = "begin"
+            ends.setdefault(other, {})[side] = angle
+    warnings = []
+    for other, sides in sorted(ends.items()):
+        entity = store.get(other)
+        reason = None
+        if other in owners:
+            reason = "is a sketch's curve (the sketch sets its points)"
+        elif other in periodic:
+            reason = "is periodic (its partner would not match)"
+        elif any(d.kind == "domain" for d in store.dependents(other)):
+            reason = "is a side of a structured domain"
+        stacks = {}
+        for side, angle in sides.items():
+            if not SLIDE_MIN_ANGLE <= angle <= SLIDE_MAX_ANGLE:
+                warnings.append(
+                    f"{entity.name} meets a wall at {angle:.0f} degrees (layers slide between "
+                    f"{SLIDE_MIN_ANGLE:.0f} and {SLIDE_MAX_ANGLE:.0f}): the layers taper there"
+                )
+                continue
+            scale = 1.0 / math.sin(math.radians(angle))
+            stacks[side] = [scale * h for h in heights]
+        if reason is None and not stacks:
+            continue
+        params = None
+        if reason is None:
+            try:
+                params = layered_params(
+                    entity.params,
+                    connectors.nodes(other).length,
+                    inflation["growth_rate"],
+                    begin=stacks.get("begin"),
+                    end=stacks.get("end"),
+                )
+            except ValueError as error:
+                reason = str(error)
+        if reason is not None:
+            warnings.append(f"{entity.name} {reason}: the layers taper there")
+            continue
+        store.update(other, params=normalize_params("connector", params, entity.name, store))
+    return warnings
+
+
 def set_unstructured_generator(store, name, generator):
-    """An unstructured domain's generator settings. For a sketch's block they go to the
-    sketch: the triangulation settings to its ``generator`` (shared by its unstructured
+    """An unstructured domain's generator settings (with sliding layers, the boundary curves
+    next to its walls spaced like the layers: _space_like_layers). For a sketch's block they go
+    to the sketch: the triangulation settings to its ``generator`` (shared by its unstructured
     blocks) and the inflation to walls on the block's edges (first height, layers, growth;
     the block's walls not listed any more are dropped, those on edges shared with another
     block kept). A total thickness or layers past the core size are not available there.
@@ -1748,10 +2034,16 @@ def set_unstructured_generator(store, name, generator):
     generator = normalize_generator(generator, name, store)
     owner = output_owner(store).get(entity.id)
     if owner is None:
+        warnings = []
+        if generator["inflation"] is not None and generator["inflation"]["slide"]:
+            # Sliding layers: the curves next to the walls spaced like the layers.
+            warnings = _space_like_layers(
+                store, ConnectorEvaluator(store), entity, generator["inflation"]
+            )
         params = dict(entity.params)
         params["generator"] = generator
         store.update(entity.id, params=normalize_params("unstructured_domain", params, name, store))
-        return [name], []
+        return [name], warnings
     sketch, role = owner
     index = int(role[1:])
     blocks = sketch.params["blocks"]

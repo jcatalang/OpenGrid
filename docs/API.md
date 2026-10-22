@@ -260,6 +260,19 @@ the sketch: the triangulation settings to its ``generator`` (shared by its
 unstructured blocks) and ``inflation`` to walls on the block's edges (first height,
 layers, growth), which is what the property panel does there. One undo step.
 
+### `set_inflation(curves, first_height: float | None = None, growth_rate: float | None = None, layers: int | None = None, total_thickness: float | None = None, transition: bool | None = None, slide: bool | None = None, remove: bool = False) -> list[str]`
+
+Inflation layers from curves, e.g. ``og.set_inflation(["c-upper", "c-lower"],
+first_height=2e-5, layers=40)``: every unstructured domain the curves bound grows
+layers from them (3D: surfaces, the domains bounding volumes, and the volumes they bound
+grow layers from them), with the settings given (the others kept or the defaults; a first
+height suggested from the walls' spacing). ``remove=True`` takes the curves out of the
+walls. ``slide=True``: the layers run into the boundary curves next to the walls
+instead of tapering into steps, and those curves are spaced like the layers near the
+walls (a sketch's, periodic or structured-domain curves keep their points: a warning
+says so, ``last_warnings``). The window's "Inflation layers" on curves. One undo step;
+returns the domains changed.
+
 ### `rotate_domain(name: str, steps: int = 1) -> str`
 
 Cycle the edges (edge ``steps`` becomes edge 0); orientation is preserved.

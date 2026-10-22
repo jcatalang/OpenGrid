@@ -780,6 +780,45 @@ class Session:
             items.append(("connector", params, connector_name))
         return items
 
+    def set_inflation(
+        self,
+        curves,
+        first_height: float | None = None,
+        growth_rate: float | None = None,
+        layers: int | None = None,
+        total_thickness: float | None = None,
+        transition: bool | None = None,
+        slide: bool | None = None,
+        remove: bool = False,
+    ) -> list[str]:
+        """Inflation layers from curves, e.g. ``og.set_inflation(["c-upper", "c-lower"],
+        first_height=2e-5, layers=40)``: every unstructured domain the curves bound grows
+        layers from them (3D: surfaces, the domains bounding volumes, and the volumes they bound
+        grow layers from them), with the settings given (the others kept or the defaults; a first
+        height suggested from the walls' spacing). ``remove=True`` takes the curves out of the
+        walls. ``slide=True``: the layers run into the boundary curves next to the walls
+        instead of tapering into steps, and those curves are spaced like the layers near the
+        walls (a sketch's, periodic or structured-domain curves keep their points: a warning
+        says so, ``last_warnings``). The window's "Inflation layers" on curves. One undo step;
+        returns the domains changed."""
+        if isinstance(curves, (str, int)):
+            curves = [curves]
+        options = {}
+        for key, value in (
+            ("first_height", first_height),
+            ("growth_rate", growth_rate),
+            ("layers", layers),
+            ("total_thickness", total_thickness),
+            ("transition", transition),
+            ("slide", slide),
+        ):
+            if value is not None:
+                options[key] = value
+        if remove:
+            options["remove"] = True
+        names = [self.store.get(c).name for c in curves]
+        return self._topology("set_inflation", "Inflation layers", names, **options)
+
     def set_unstructured_generator(self, name: str, generator=None, **changes) -> str:
         """Change generator settings of an unstructured domain (``generator``, a dict, and
         ``changes`` merged into the current ones). For a sketch's block the settings go to

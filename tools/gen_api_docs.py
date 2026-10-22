@@ -66,6 +66,7 @@ GROUPS = [
             "structured_domain_from_curves",
             "set_domain_generator",
             "set_unstructured_generator",
+            "set_inflation",
             "rotate_domain",
             "smooth_domain",
             "domain_dimensions",

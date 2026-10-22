@@ -7,7 +7,10 @@ optionally recombined into quad-dominant or all-quad meshes, smoothed, edge-swap
 Boundary layers: ``generator["inflation"]`` (None or a dict) inflates quad layers from the given
 wall connectors (part of the domain's loops) before the core is meshed: first height, growth
 rate, at most ``layers`` layers or ``total_thickness``, and with ``transition`` columns stop when
-cells become isotropic (core size).
+cells become isotropic (core size). Where a wall meets a boundary that is not a wall, the layers
+taper to nothing, or with ``slide`` run into that boundary along its own nodes (which then
+need to be spaced like the layers near the wall: ``Session.set_inflation(..., slide=True)``
+spaces them so).
 
 Loops are closed chains of connectors (each possibly reversed). The outer loop runs
 counter-clockwise and inner loops clockwise, i.e. the domain lies on the left of every loop.
@@ -52,6 +55,7 @@ DEFAULT_INFLATION = {
     "layers": 30,
     "total_thickness": None,
     "transition": True,
+    "slide": False,  # run the layers into the neighbouring boundaries instead of tapering
 }
 
 
@@ -97,6 +101,9 @@ def normalize_inflation(raw, label: str, store, issues: list) -> dict | None:
     transition = merged["transition"]
     if not isinstance(transition, bool):
         issues.append(Issue(f"{label}.transition", f"must be true or false, got {transition!r}"))
+    slide = merged["slide"]
+    if not isinstance(slide, bool):
+        issues.append(Issue(f"{label}.slide", f"must be true or false, got {slide!r}"))
     return {
         "connectors": tuple(connectors),
         "first_height": first,
@@ -104,6 +111,7 @@ def normalize_inflation(raw, label: str, store, issues: list) -> dict | None:
         "layers": layers,
         "total_thickness": thickness,
         "transition": transition,
+        "slide": slide,
     }
 
 
@@ -588,6 +596,7 @@ class UnstructuredEvaluator:
                     "layers": inflation["layers"],
                     "total_thickness": inflation["total_thickness"],
                     "transition": inflation["transition"],
+                    "slide": inflation["slide"],
                 }
             loops3 = loop_points(entity.params, self.store, self.connectors, entity.name)
             frame = domain_frame(entity.params, self.store, loops3, entity.name)

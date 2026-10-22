@@ -36,8 +36,12 @@
 //    or lost), and the layers run into that boundary: it needs vertices at the layer heights near
 //    the wall (the caller distributes them so). A step whose height across the front is not
 //    within a factor slide_ratio of the layer's stops that column (the layers then taper from it);
-//    it never passes a corner of the boundary (a turn above 30 degrees) or another wall. The
-//    vertices passed are corners of the layer cells, no longer of the core loops.
+//    it never passes a corner of the boundary (a turn above 30 degrees) or another wall. Only
+//    where the wall and the boundary meet at an angle (inside the domain) between
+//    slide_min_angle_deg and slide_max_angle_deg: in a sharper wedge the layers would converge
+//    into thin distorted cells, and on a wider opening (a wall continuing into a symmetry line)
+//    there is nothing to run into, so those ends taper. The vertices passed are corners of the
+//    layer cells, no longer of the core loops.
 //  * Layer cells are quads; triangles appear at fans, merges and where a column stops next to an
 //    advancing one.
 // The final fronts and the non-wall boundary form the loops of the core region, which the caller
@@ -71,6 +75,8 @@ struct InflationOptions {
   int normal_smoothing = 5;
   bool slide = false;        // end columns of open wall chains slide along the boundary
   double slide_ratio = 2.0;  // a slide step's height may differ from the layer's by this factor
+  double slide_min_angle_deg = 45.0;   // sharper wall / boundary wedges taper
+  double slide_max_angle_deg = 135.0;  // wider openings taper
 };
 
 struct InflationResult {

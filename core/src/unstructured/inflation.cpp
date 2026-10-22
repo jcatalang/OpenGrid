@@ -417,8 +417,16 @@ class Inflator {
           chain.nodes.front().active = false;
           chain.nodes.back().active = false;
           if (options_.slide) {
-            add_slider(chain.nodes.front(), verts, is_wall, k, -1);
-            add_slider(chain.nodes.back(), verts, is_wall, (k + run) % m, 1);
+            // The wall leaves the front junction towards verts[k + 1], arrives at the back one
+            // from verts[k + run - 1]; their neighbours on the boundary are verts[k - 1] and
+            // verts[k + run + 1].
+            if (junction_slides(verts[(k + 1) % m], verts[k], verts[(k + m - 1) % m])) {
+              add_slider(chain.nodes.front(), verts, is_wall, k, -1);
+            }
+            const std::size_t back = (k + run) % m;
+            if (junction_slides(verts[(back + 1) % m], verts[back], verts[(back + m - 1) % m])) {
+              add_slider(chain.nodes.back(), verts, is_wall, back, 1);
+            }
           }
           pieces.push_back({true, static_cast<Index>(chains_.size())});
           chains_.push_back(std::move(chain));
@@ -428,6 +436,22 @@ class Inflator {
       (void)none;
       loops_.push_back(std::move(pieces));
     }
+  }
+
+  // Whether the layers may slide at a junction: the angle inside the domain at `here`, from the
+  // direction to the next loop vertex counter-clockwise to the direction to the previous one
+  // (the domain lies on the left of the loop), between the slide angle limits.
+  [[nodiscard]] bool junction_slides(Index next, Index here, Index previous) const {
+    const P2& b = points_[u(here)];
+    const P2 to_next = {points_[u(next)][0] - b[0], points_[u(next)][1] - b[1]};
+    const P2 to_previous = {points_[u(previous)][0] - b[0], points_[u(previous)][1] - b[1]};
+    double angle = std::atan2(to_next[0] * to_previous[1] - to_next[1] * to_previous[0],
+                              dot(to_next, to_previous));
+    if (angle < 0.0) {
+      angle += 2.0 * std::numbers::pi;
+    }
+    const double degrees = angle * 180.0 / std::numbers::pi;
+    return degrees >= options_.slide_min_angle_deg && degrees <= options_.slide_max_angle_deg;
   }
 
   // The boundary vertices an open chain's end column can slide through: from its junction

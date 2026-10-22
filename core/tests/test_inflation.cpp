@@ -206,7 +206,7 @@ TEST(Inflation, StraightWallHeightsAndGrowthAreExact) {
 
 // Channel [0, 4] x [0, 1] with a wall at the bottom and, on the inlet (x = 0) and outlet
 // (x = 4), vertices at the layer heights up to the layers' thickness, then coarser.
-Case layered_channel(int layers, double first, double growth) {
+Case layered_channel(int layers, double first, double growth, double inlet_deg = 90.0) {
   Case c;
   const int n = 80;
   std::vector<double> ys;  // heights on the side walls, from the bottom
@@ -234,9 +234,20 @@ Case layered_channel(int layers, double first, double growth) {
   for (int i = n - 1; i > 0; --i) {
     pts.push_back({4.0 * i / n, 1.0});
   }
-  pts.push_back({0.0, 1.0});
+  if (inlet_deg < 90.0) {  // (the top must stay to the right of the leaning inlet's end)
+    while (pts.back()[0] <= 1.0 / std::tan(inlet_deg * std::numbers::pi / 180.0) + 0.05) {
+      pts.pop_back();
+    }
+  }
+  // The inlet leans at inlet_deg to the wall; its vertices keep their heights across the
+  // layers (so along it they are 1 / sin farther apart).
+  double lean = 0.0;  // (exactly: 1 / tan(90 degrees) is 6e-17)
+  if (inlet_deg != 90.0) {
+    lean = 1.0 / std::tan(inlet_deg * std::numbers::pi / 180.0);
+  }
+  pts.push_back({lean, 1.0});
   for (auto it = ys.rbegin(); it != ys.rend(); ++it) {
-    pts.push_back({0.0, *it});
+    pts.push_back({lean * *it, *it});
   }
   c.in.points = pts;
   for (std::size_t k = 0; k < pts.size(); ++k) {
@@ -284,6 +295,28 @@ TEST(Inflation, SlidingEndsRunTheLayersIntoTheNeighbouringBoundary) {
   const auto stopped = og::mesh_domain(coarse.in, options);
   expect_valid(coarse, stopped);
   EXPECT_LT(stopped.quads.size(), std::size_t{80 * layers});
+}
+
+TEST(Inflation, SlidingNeedsAWallAngleBetween45And135Degrees) {
+  // At 60 degrees the end column slides along the leaning inlet (a full layer stack); at 30
+  // degrees layers converging into the wedge would be squeezed, so that end tapers.
+  for (const auto& [angle, slides] : {std::pair{60.0, true}, std::pair{30.0, false}}) {
+    Case c = layered_channel(8, 1e-3, 1.25, angle);
+    og::DomainMeshOptions options;
+    options.wall = c.wall;
+    options.inflation.first_height = 1e-3;
+    options.inflation.growth_rate = 1.25;
+    options.inflation.max_layers = 8;
+    options.inflation.transition = false;
+    options.inflation.slide = true;
+    const auto mesh = og::mesh_domain(c.in, options);
+    expect_valid(c, mesh);
+    if (slides) {
+      EXPECT_EQ(mesh.quads.size(), std::size_t{80 * 8}) << angle;
+    } else {
+      EXPECT_LT(mesh.quads.size(), std::size_t{80 * 8}) << angle;
+    }
+  }
 }
 
 TEST(Inflation, ClusteredInletNextToACoarseWallRefinesToAnEnd) {

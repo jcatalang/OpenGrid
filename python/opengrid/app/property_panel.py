@@ -833,6 +833,7 @@ class UnstructuredEditor(QWidget):
                 "layers": 30,
                 "total_thickness": None,
                 "transition": True,
+                "slide": False,
             }
         names = []
         for ref in inflation["connectors"]:
@@ -849,6 +850,12 @@ class UnstructuredEditor(QWidget):
         self.thickness.setPlaceholderText("none")
         self.transition = QCheckBox("stop at core size")
         self.transition.setChecked(inflation["transition"])
+        self.slide = QCheckBox("run into the neighbouring curves (no steps)")
+        self.slide.setChecked(inflation.get("slide", False))
+        self.slide.setToolTip(
+            "The layers run along the boundary curves next to the walls up to them, instead of "
+            "tapering into steps; those curves get points at the layer heights near the walls"
+        )
         layout.addRow("inflation walls", self.walls)
         self.first_height.setPlaceholderText(_first_height_placeholder(boundary_spacing))
         layout.addRow("first height", self.first_height)
@@ -857,6 +864,7 @@ class UnstructuredEditor(QWidget):
         layout.addRow("max layers", self.layers)
         layout.addRow("total thickness", self.thickness)
         layout.addRow(self.transition)
+        layout.addRow(self.slide)
         # refine and min angle apply to the Delaunay mesher only.
         self.algorithm.currentTextChanged.connect(self._update_enabled)
         self._update_enabled(self.algorithm.currentText())
@@ -915,6 +923,7 @@ class UnstructuredEditor(QWidget):
             "layers": self.layers.value(),
             "total_thickness": parse_optional(self.thickness.text(), "total thickness"),
             "transition": self.transition.isChecked(),
+            "slide": self.slide.isChecked(),
         }
 
 
@@ -1066,6 +1075,7 @@ class PropertyPanel(QWidget):
     points_requested = Signal(str)  # a curve without points: give it the toolbar's points
     entity_requested = Signal(int)  # a face's "Select the block": select that entity
     points_preview = Signal(list)  # where the edited points would go (arrays; [] = none)
+    inflation_requested = Signal(str)  # a curve's "Inflation layers…": the window's dialog
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -1527,6 +1537,7 @@ class PropertyPanel(QWidget):
         for field, _kind in CONNECTOR_FIELDS:  # edits are previewed before Apply
             _watch(self._editors[field][1], self._preview_edits)
         self._boundary_rows(entity, "connector")
+        self._layer_rows(entity)
         self._form.addRow("length", QLabel(f"{nodes.length:.10g}"))
         self._form.addRow(
             "begin / end spacing", QLabel(f"{nodes.begin_spacing:.6g} / {nodes.end_spacing:.6g}")
@@ -1570,6 +1581,33 @@ class PropertyPanel(QWidget):
             button.setToolTip("The whole block or volume (or click the face again)")
             button.clicked.connect(lambda: self.entity_requested.emit(int(whole)))
             self._form.addRow("", button)
+
+    def _layer_rows(self, entity) -> None:
+        """The inflation layers growing from this curve (which domains, how), and a button to
+        set them (the window's Inflation layers dialog)."""
+        lines = []
+        for domain in self.session.store.entities("unstructured_domain"):
+            on = {item["connector"] for loop in domain.params["loops"] for item in loop}
+            if entity.id not in on:
+                continue
+            inflation = domain.params["generator"]["inflation"]
+            if inflation is None or entity.id not in inflation["connectors"]:
+                continue
+            how = f"{inflation['layers']} from {inflation['first_height']:g}"
+            if inflation.get("slide"):
+                how += ", running into the neighbouring curves"
+            lines.append(f"into {domain.name}: {how}")
+        label = QLabel("\n".join(lines) or "none")
+        label.setWordWrap(True)
+        button = QPushButton("Inflation layers…")
+        button.setToolTip("Layers grown from this curve into the domains it bounds")
+        button.clicked.connect(lambda: self.inflation_requested.emit(entity.name))
+        box = QWidget()
+        row = QVBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(label)
+        row.addWidget(button)
+        self._form.addRow("layers", box)
 
     def _preview_edits(self, *_args) -> None:
         """Where the curve's points would go with the edits not applied yet."""

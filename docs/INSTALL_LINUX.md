@@ -19,8 +19,8 @@ the downloader.
 CGNS and OpenGrid. Nothing else is installed: no conda, no compiler.
 
 ```bash
-tar -xzf OpenGrid-0.0.1-linux-x86_64.tar.gz
-cd OpenGrid-0.0.1-linux-x86_64
+tar -xzf OpenGrid-0.0.2-linux-x86_64.tar.gz
+cd OpenGrid-0.0.2-linux-x86_64
 ./opengrid                                   # the application
 ./opengrid-python examples/12a_airfoil_cases.py   # a script with OpenGrid's Python
 ./install.sh                                 # optional: menu entry, .ogp files, ~/.local/bin links
@@ -30,7 +30,7 @@ The first start takes a few seconds: it fixes the environment's paths to the fol
 so extract the archive where you will keep it (to move it, extract it again).
 
 To get it onto a machine without internet, copy it from any computer that has the file:
-`scp OpenGrid-0.0.1-linux-x86_64.tar.gz user@machine:` (or a USB disk). Nothing else is
+`scp OpenGrid-0.0.2-linux-x86_64.tar.gz user@machine:` (or a USB disk). Nothing else is
 needed: the bundle never downloads anything.
 
 The machine needs glibc 2.28 or newer (`ldd --version`; openSUSE Leap 15.3 and later, SLES 15

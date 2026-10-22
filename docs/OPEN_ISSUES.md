@@ -342,8 +342,8 @@ history). Phase tags show where each item came from.
   of a downloaded copy); large (a whole conda environment with Qt, VTK, OCCT, Netgen). Building
   it needs conda, rattler-build and conda-pack, and network access to conda-forge.
 - **No AppImage** [9c]: the conda package is the Linux deliverable.
-- **Package metadata** [9c]: version 0.0.1, license `LicenseRef-OpenGrid` and a placeholder home
-  page; set them before publishing.
+- **Package metadata** [9c]: version 0.0.2 (0.0.1 was the first Linux bundle), license
+  `LicenseRef-OpenGrid` and a placeholder home page; set them before publishing.
 
 ## Multi-block smoothing (Phase 10)
 - **Laplace control only in groups** [10a]: no Thomas-Middlecoff or attraction functions.

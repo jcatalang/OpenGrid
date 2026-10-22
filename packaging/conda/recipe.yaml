@@ -3,7 +3,7 @@
 #       -c conda-forge --output-dir packaging/output
 # The same recipe builds on linux-64, linux-aarch64, osx-arm64 and osx-64.
 context:
-  version: "0.0.1"
+  version: "0.0.2"
 
 package:
   name: opengrid

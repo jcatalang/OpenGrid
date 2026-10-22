@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(OpenGrid VERSION 0.0.1 LANGUAGES CXX)
+project(OpenGrid VERSION 0.0.2 LANGUAGES CXX)
 
 option(OG_BUILD_TESTS "Build the C++ GoogleTest suite" ON)
 option(OG_BUILD_PYTHON "Build the nanobind Python extension" ON)

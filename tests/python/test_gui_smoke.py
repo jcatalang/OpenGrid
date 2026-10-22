@@ -36,7 +36,7 @@ def test_console_evaluates(window):
 
 def test_console_has_opengrid_and_session(window):
     assert "opengrid" in window.console.namespace
-    assert window.console.run_line("print(opengrid.core_version())").strip() == "0.0.1"
+    assert window.console.run_line("print(opengrid.core_version())").strip() == "0.0.2"
     window.console.run_line("og.create_line((0, 0), (1, 0))")
     assert window.model_tree.entity_names() == ["line-1"]
 

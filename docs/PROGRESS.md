@@ -877,7 +877,9 @@ badly executed corner where two walls meet, and a curve's type that could not be
   transition off is no longer refused), and with slide an edge leaving the wall that borders
   only unstructured blocks gets points at the layer heights (periodic edges keep theirs, with
   a warning). The user's case: the top-left and bottom-right fans of tiny triangles became
-  layers running into the sides.
+  layers running into the sides. An edge between two walls (the user's next case: walls on
+  three sides, the outlet between two of them) gets the layer heights at both ends: its
+  corners went from tapering (4 degrees) to layers running into it (19.9 degrees).
 - **Two walls in a concave corner** (the user's bottom-left corner): the proximity rule
   stopped a wall's column because the other wall's layers ran beside it, leaving steps and
   3.4-degree cells; it now counts only fronts approaching within 60 degrees of head-on (two
@@ -898,7 +900,7 @@ badly executed corner where two walls meet, and a curve's type that could not be
   sketch-1-c0-1"): patch members were compared by label, and a curve that became an extruded
   side wall is labelled by its face identifier; members are now compared as members.
 - Tests: `test_messages.py`, `test_quality_view.py`, a face test, C++
-  `TwoWallsMeetInAConcaveCornerWithoutSteps`. C++ 158 / 158; Python 571 passed, 1 expected
+  `TwoWallsMeetInAConcaveCornerWithoutSteps`. C++ 158 / 158; Python 572 passed, 1 expected
   failure; lint clean.
 
 ## 3D faces with identifiers, boundary types on curves and faces, reaching hidden faces, inflation layers from curves that run into their neighbours (2026-10-22) — requested by the user

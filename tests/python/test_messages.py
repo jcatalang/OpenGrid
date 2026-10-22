@@ -166,3 +166,24 @@ def test_wrapped_panel_text_is_not_cut(window, qtbot):
     dialog = InflationDialog(["c"])
     (form,) = dialog.findChildren(QFormLayout)
     assert form.fieldGrowthPolicy() == QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+
+
+def test_sliding_layers_into_an_edge_between_two_walls():
+    """The user's trapezoid: walls on three sides of a sketch block, the fourth (an outlet)
+    between two of them: the layers of both walls run into it, at its two ends."""
+    og = opengrid.Session()
+    og.create_sketch(
+        vertices=((-0.2, 0.15, 0.0), (-0.2, 0.0, 0.0), (0.2, 0.0, 0.0), (0.2, 0.2, 0.0)),
+        blocks=((0, 1, 2, 3),),
+        spacing=0.0144,
+        name="sketch-1",
+    )
+    og.edit_sketch("sketch-1", unstructured=(0,))
+    for curve in ("sketch-1-c1-2", "sketch-1-c0-1", "sketch-1-c0-3"):
+        og.set_inflation([curve], first_height=1e-3, growth_rate=1.15, layers=10, slide=True)
+    outlet = og.entity("sketch-1-c2-3").params
+    assert outlet["distribution"]["type"] == "explicit" and len(outlet["breakpoints"]) == 2
+    mesh = og.unstructured_mesh("sketch-1-d0")
+    stops = mesh["layer_stops"]
+    assert stops["slope"] == stops["proximity"] == stops["transition"] == 0
+    assert np.min(og.domain_quality("sketch-1-d0")["min_angle"]) > 15.0  # (4 degrees before)

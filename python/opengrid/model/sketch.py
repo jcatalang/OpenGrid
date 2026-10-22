@@ -1305,7 +1305,8 @@ def plan(
             distribution = given
             if edge != key:
                 distribution = _reverse_distribution(given)
-        elif key not in wall_edges and (a in wall_at) != (b in wall_at):
+        elif key not in wall_edges and (a in wall_at or b in wall_at):
+            # (An edge between two walls, e.g. an outlet: layers slide in at both ends.)
             spaced, edge_warnings = _leaving_unstructured_wall(
                 store,
                 base,
@@ -1318,7 +1319,7 @@ def plan(
                 dimensions[key],
             )
             warnings.extend(edge_warnings)
-            if spaced is None:
+            if spaced is None and (a in wall_at) != (b in wall_at):
                 # An edge leaving a wall: clustered at the wall (a better initial guess).
                 distribution = {"type": "tanh", "begin_spacing": None, "end_spacing": None}
                 if a in wall_at:

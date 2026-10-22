@@ -194,6 +194,12 @@ struct Node {
   double target = 0.0;          // core size at the proposed point
   bool merged = false;          // shares its new point with the previous entry
   Index new_id = 0;
+  // An open chain's end column sliding along the boundary (InflationOptions::slide): the
+  // boundary vertices it can step through, in order, the next one, and the one proposed.
+  bool slider = false;
+  std::vector<Index> path{};
+  std::size_t path_pos = 0;
+  Index target_vertex = -1;
 };
 
 struct Chain {
@@ -266,6 +272,7 @@ class Inflator {
   }
 
   InflationResult run(bool even_loops) {
+    consumed_.assign(points_.size(), false);
     build_chains();
     for (Chain& chain : chains_) {
       const std::size_t n = chain.nodes.size();
@@ -409,6 +416,10 @@ class Inflator {
           chain.nodes.push_back(Node{verts[(k + run) % m]});
           chain.nodes.front().active = false;
           chain.nodes.back().active = false;
+          if (options_.slide) {
+            add_slider(chain.nodes.front(), verts, is_wall, k, -1);
+            add_slider(chain.nodes.back(), verts, is_wall, (k + run) % m, 1);
+          }
           pieces.push_back({true, static_cast<Index>(chains_.size())});
           chains_.push_back(std::move(chain));
           step += run;
@@ -417,6 +428,78 @@ class Inflator {
       (void)none;
       loops_.push_back(std::move(pieces));
     }
+  }
+
+  // The boundary vertices an open chain's end column can slide through: from its junction
+  // (verts[junction]) along the non-wall boundary (direction -1: backwards in loop order), up
+  // to a corner (a turn above 30 degrees) and never onto the start or end of another wall.
+  void add_slider(Node& node, const std::vector<Index>& verts, const std::vector<bool>& is_wall,
+                  std::size_t junction, int direction) {
+    const std::size_t m = verts.size();
+    const double straight = std::cos(30.0 * std::numbers::pi / 180.0);
+    std::vector<Index> path;
+    std::size_t at = junction;
+    P2 previous{};
+    for (std::size_t step = 0; step + 1 < m; ++step) {
+      std::size_t next = (at + m - 1) % m;
+      bool wall_segment = is_wall[next];  // segment verts[next] -> verts[at]
+      bool beyond_is_wall = is_wall[(next + m - 1) % m];
+      if (direction > 0) {
+        next = (at + 1) % m;
+        wall_segment = is_wall[at];  // segment verts[at] -> verts[next]
+        beyond_is_wall = is_wall[next];
+      }
+      if (wall_segment) {
+        break;
+      }
+      const P2& a = points_[u(verts[at])];
+      const P2& b = points_[u(verts[next])];
+      const P2 dir = normalize({b[0] - a[0], b[1] - a[1]});
+      if (step > 0 && dot(dir, previous) < straight) {
+        break;
+      }
+      if (beyond_is_wall) {
+        break;  // verts[next] is where another wall starts or ends
+      }
+      path.push_back(verts[next]);
+      previous = dir;
+      at = next;
+    }
+    if (!path.empty()) {
+      node.slider = true;
+      node.active = true;
+      node.path = std::move(path);
+    }
+  }
+
+  // A sliding column's step: its next boundary vertex, if it stands for about the layer
+  // height across the front (else, or past its path or a vertex another one took, it stops).
+  void propose_slider(Node& node, double h) {
+    if (node.path_pos >= node.path.size() || consumed_[u(node.path[node.path_pos])]) {
+      node.active = false;
+      return;
+    }
+    const Index vertex = node.path[node.path_pos];
+    const P2& here = points_[u(node.point)];
+    const P2& there = points_[u(vertex)];
+    P2 front = node.n_prev;
+    if (front[0] == 0.0 && front[1] == 0.0) {
+      front = node.n_next;
+    }
+    const P2 step = {there[0] - here[0], there[1] - here[1]};
+    const double across = std::fabs(dot(step, front));
+    if (across < h / options_.slide_ratio || across > h * options_.slide_ratio) {
+      node.active = false;
+      return;
+    }
+    node.target =
+        std::min((*size_)(there[0], there[1]), std::max(node.spacing, node.origin_spacing));
+    if (options_.transition && h >= options_.transition_ratio * node.target) {
+      node.active = false;
+      return;
+    }
+    node.next = there;
+    node.target_vertex = vertex;
   }
 
   void add_fans() {
@@ -534,6 +617,11 @@ class Inflator {
           node.n_prev = node.preset_normal;
           node.n_next = node.preset_normal;
         }
+        if (node.slider && node.active && node.path_pos < node.path.size()) {
+          // Along the boundary it slides on (its neighbours' normals are smoothed towards it).
+          const P2& there = points_[u(node.path[node.path_pos])];
+          node.normal = normalize({there[0] - here[0], there[1] - here[1]});
+        }
       }
       // Normal smoothing (Jacobi), keeping every normal visible from both of its segments.
       for (int sweep = 0; sweep < options_.normal_smoothing; ++sweep) {
@@ -578,6 +666,10 @@ class Inflator {
         const P2& here = points_[u(node.point)];
         node.next = here;
         if (!node.active) {
+          continue;
+        }
+        if (node.slider) {
+          propose_slider(node, h);
           continue;
         }
         const P2 next = {here[0] + h * node.scale * node.normal[0],
@@ -645,7 +737,7 @@ class Inflator {
       for (std::size_t j = 0; j + 1 < n; ++j) {
         Node& a = chain.nodes[j];
         Node& b = chain.nodes[j + 1];
-        if (!a.active || !b.active || a.merged || a.point == b.point) {
+        if (!a.active || !b.active || a.merged || a.point == b.point || a.slider || b.slider) {
           continue;
         }
         const double old_length = distance(points_[u(a.point)], points_[u(b.point)]);
@@ -697,6 +789,8 @@ class Inflator {
         Node& node = chain.nodes[j];
         if (!node.active) {
           node.new_id = node.point;
+        } else if (node.slider) {
+          node.new_id = node.target_vertex;  // an existing boundary vertex
         } else if (node.merged && j > 0) {
           node.new_id = chain.nodes[j - 1].new_id;
         } else {
@@ -752,7 +846,8 @@ class Inflator {
       const std::size_t n = chain.nodes.size();
       for (std::size_t j = 0; j < n; ++j) {
         const Node& node = chain.nodes[j];
-        if (node.active && !(node.merged && j > 0)) {
+        // (A sliding column's edge is a boundary segment already.)
+        if (node.active && !(node.merged && j > 0) && !node.slider) {
           new_.push_back({points_[u(node.point)],
                           node.next,
                           node.point,
@@ -946,6 +1041,8 @@ class Inflator {
         const Node& node = chain.nodes[j];
         if (!node.active) {
           new_index[j] = node.point;
+        } else if (node.slider) {
+          new_index[j] = node.target_vertex;
         } else if (node.merged && j > 0) {
           new_index[j] = new_index[j - 1];
         } else {
@@ -988,6 +1085,10 @@ class Inflator {
           node.layers += 1;
           node.height += layer_height_;
         }
+        if (node.active && node.slider) {
+          consumed_[u(node.point)] = true;  // a corner of layer cells, off the core loops
+          node.path_pos += 1;
+        }
         node.point = new_index[j];
         if (node.merged && j > 0) {
           continue;
@@ -1006,7 +1107,9 @@ class Inflator {
       std::vector<Index> loop;
       for (const Piece& piece : pieces) {
         if (!piece.is_chain) {
-          loop.push_back(piece.value);
+          if (!consumed_[u(piece.value)]) {
+            loop.push_back(piece.value);
+          }
           continue;
         }
         const Chain& chain = chains_[u(piece.value)];
@@ -1159,6 +1262,7 @@ class Inflator {
   std::vector<P2> points_;
   std::vector<Chain> chains_;
   std::vector<std::vector<Piece>> loops_;
+  std::vector<bool> consumed_;  // input vertices a sliding column passed (off the core loops)
   std::vector<Segment> old_;
   std::vector<Segment> new_;
   std::vector<std::array<Index, 3>> triangles_;
@@ -1177,7 +1281,7 @@ InflationResult inflate(const TriangulationInput& input, const std::vector<bool>
   if (!(options.first_height > 0.0) || !(options.growth_rate >= 1.0) || options.max_layers < 0 ||
       (options.total_thickness && !(*options.total_thickness > 0.0)) ||
       !(options.transition_ratio > 0.0) || !(options.fan_step_deg > 0.0) ||
-      !(options.proximity >= 0.0) || !(options.max_slope > 0.0)) {
+      !(options.proximity >= 0.0) || !(options.max_slope > 0.0) || !(options.slide_ratio > 1.0)) {
     throw std::invalid_argument(
         "inflation: first height and total thickness must be positive, growth rate >= 1, "
         "layers >= 0");

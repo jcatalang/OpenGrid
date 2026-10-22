@@ -204,6 +204,100 @@ TEST(Inflation, StraightWallHeightsAndGrowthAreExact) {
   }
 }
 
+// Channel [0, 4] x [0, 1] with a wall at the bottom and, on the inlet (x = 0) and outlet
+// (x = 4), vertices at the layer heights up to the layers' thickness, then coarser.
+Case layered_channel(int layers, double first, double growth) {
+  Case c;
+  const int n = 80;
+  std::vector<double> ys;  // heights on the side walls, from the bottom
+  double y = 0.0;
+  double h = first;
+  for (int k = 0; k < layers; ++k) {
+    y += h;
+    ys.push_back(y);
+    h *= growth;
+  }
+  const double top = ys.back();
+  for (int j = 1; j <= 12; ++j) {
+    ys.push_back(top + (1.0 - top) * j / 13.0);
+  }
+  std::vector<Point> pts;
+  for (int i = 0; i < n; ++i) {
+    pts.push_back({4.0 * i / n, 0.0});
+  }
+  const std::size_t wall_count = pts.size();
+  pts.push_back({4.0, 0.0});
+  for (const double v : ys) {
+    pts.push_back({4.0, v});
+  }
+  pts.push_back({4.0, 1.0});
+  for (int i = n - 1; i > 0; --i) {
+    pts.push_back({4.0 * i / n, 1.0});
+  }
+  pts.push_back({0.0, 1.0});
+  for (auto it = ys.rbegin(); it != ys.rend(); ++it) {
+    pts.push_back({0.0, *it});
+  }
+  c.in.points = pts;
+  for (std::size_t k = 0; k < pts.size(); ++k) {
+    c.in.segments.push_back(
+        {static_cast<MeshIndex>(k), static_cast<MeshIndex>((k + 1) % pts.size())});
+    c.wall.push_back(k < wall_count);
+  }
+  return c;
+}
+
+TEST(Inflation, SlidingEndsRunTheLayersIntoTheNeighbouringBoundary) {
+  const int layers = 8;
+  Case c = layered_channel(layers, 1e-3, 1.25);
+  og::DomainMeshOptions options;
+  options.wall = c.wall;
+  options.inflation.first_height = 1e-3;
+  options.inflation.growth_rate = 1.25;
+  options.inflation.max_layers = layers;
+  options.inflation.transition = false;
+  // Tapered ends (the default): fewer layer cells than a full stack over the 80 wall segments.
+  const auto tapered = og::mesh_domain(c.in, options);
+  expect_valid(c, tapered);
+  EXPECT_LT(tapered.quads.size(), std::size_t{80 * layers});
+  // Sliding ends: every layer runs from the inlet to the outlet, on their own vertices (the
+  // input points are all kept, every boundary segment is a cell edge).
+  options.inflation.slide = true;
+  const auto slid = og::mesh_domain(c.in, options);
+  expect_valid(c, slid);
+  EXPECT_EQ(slid.layers, layers);
+  EXPECT_EQ(slid.quads.size(), std::size_t{80 * layers});
+  EXPECT_NEAR(total_area(slid), 4.0, 1e-12);
+  // The layer next to the inlet: its cells' left sides are the inlet's segments.
+  int on_inlet = 0;
+  for (const auto& q : slid.quads) {
+    int count = 0;
+    for (const MeshIndex v : q) {
+      count += static_cast<int>(slid.points[u(v)][0] == 0.0);
+    }
+    on_inlet += static_cast<int>(count == 2);
+  }
+  EXPECT_EQ(on_inlet, layers);
+  // Vertices too far from the layer heights: the end column stops, the layers taper as before.
+  Case coarse = layered_channel(layers, 3e-3, 1.25);
+  options.wall = coarse.wall;
+  const auto stopped = og::mesh_domain(coarse.in, options);
+  expect_valid(coarse, stopped);
+  EXPECT_LT(stopped.quads.size(), std::size_t{80 * layers});
+}
+
+TEST(Inflation, ClusteredInletNextToACoarseWallRefinesToAnEnd) {
+  // The channel's inlet and outlet clustered at the bottom (1e-3) next to a bottom of 0.05
+  // segments: the thin triangles between them cannot be repaired without splitting the bottom
+  // segments, and their centroid splits used to cascade until the point limit (hours).
+  Case c = layered_channel(8, 1e-3, 1.25);
+  og::DomainMeshOptions options;  // no inflation: the bare triangulation
+  const auto mesh = og::mesh_domain(c.in, options);
+  expect_valid(c, mesh);
+  EXPECT_LT(mesh.points.size(), std::size_t{4000});
+  EXPECT_NEAR(total_area(mesh), 4.0, 1e-12);
+}
+
 TEST(Inflation, CylinderFirstHeightTransitionAndCore) {
   for (const auto element : {og::ElementType::triangles, og::ElementType::quads}) {
     Case c;

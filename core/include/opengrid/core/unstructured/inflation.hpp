@@ -31,7 +31,13 @@
 //    committed layer is valid.
 //  * Open wall chains (wall meeting a non-wall boundary) keep their end nodes fixed (the
 //    neighbouring connectors' nodes are shared with other entities); layers taper to zero towards
-//    the ends through the slope rule.
+//    the ends through the slope rule. With slide, each end column instead slides along the
+//    neighbouring boundary through its own vertices, one per layer (so no boundary node is added
+//    or lost), and the layers run into that boundary: it needs vertices at the layer heights near
+//    the wall (the caller distributes them so). A step whose height across the front is not
+//    within a factor slide_ratio of the layer's stops that column (the layers then taper from it);
+//    it never passes a corner of the boundary (a turn above 30 degrees) or another wall. The
+//    vertices passed are corners of the layer cells, no longer of the core loops.
 //  * Layer cells are quads; triangles appear at fans, merges and where a column stops next to an
 //    advancing one.
 // The final fronts and the non-wall boundary form the loops of the core region, which the caller
@@ -63,6 +69,8 @@ struct InflationOptions {
   double max_angle_deg = 165.0;
   double max_slope = 0.5;
   int normal_smoothing = 5;
+  bool slide = false;        // end columns of open wall chains slide along the boundary
+  double slide_ratio = 2.0;  // a slide step's height may differ from the layer's by this factor
 };
 
 struct InflationResult {

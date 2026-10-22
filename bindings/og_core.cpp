@@ -964,7 +964,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
          std::int64_t max_points, const std::string& smoothing, int smoothing_iterations,
          bool edge_swap, const std::vector<bool>& wall, double first_height,
          double inflation_growth, int layers, std::optional<double> total_thickness,
-         bool transition) {
+         bool transition, bool slide) {
         og::DomainMeshOptions options;
         options.wall = wall;
         options.inflation.first_height = first_height;
@@ -972,6 +972,7 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
         options.inflation.max_layers = layers;
         options.inflation.total_thickness = total_thickness;
         options.inflation.transition = transition;
+        options.inflation.slide = slide;
         if (algorithm == "delaunay") {
           options.algorithm = og::TriangleAlgorithm::delaunay;
         } else if (algorithm == "advancing_front") {
@@ -1062,11 +1063,13 @@ NB_MODULE(_core, m) {  // NOLINT(bugprone-signed-bitwise): inside the nanobind m
       nb::arg("edge_swap") = true, nb::arg("wall") = std::vector<bool>{},
       nb::arg("first_height") = 1e-3, nb::arg("inflation_growth") = 1.2, nb::arg("layers") = 30,
       nb::arg("total_thickness") = nb::none(), nb::arg("transition") = true,
+      nb::arg("slide") = false,
       "Mesh a 2D domain bounded by oriented segments (domain on the left): triangulation "
       "(algorithm), element type ('triangles', 'quad_dominant', 'quads'), smoothing ('none', "
       "'laplacian', 'length_weighted', 'angle_based') with optional edge swapping, untangling. "
       "wall: one flag per segment; flagged segments get inflation layers (first_height, "
-      "inflation_growth, layers, total_thickness, transition). Returns (points (n, 2), triangles "
+      "inflation_growth, layers, total_thickness, transition; slide: layers run into the "
+      "neighbouring boundaries along their vertices). Returns (points (n, 2), triangles "
       "(m, 3), quads (k, 4), rejected, warnings, layers).");
 
   nb::class_<og::Nurbs, og::Curve>(m, "Nurbs")

@@ -228,9 +228,11 @@ class Mesher {
       }
       Index created = try_insert(target, ti, queue);
       // Fallback for oversized interior triangles only: a centroid split does not improve
-      // angles (it would cascade into ever thinner triangles), and on a boundary triangle it
-      // leaves a triangle on the same segment.
-      if (created == kNone && too_big && !on_boundary) {
+      // angles (it would cascade into ever thinner triangles, so thin ones are left as they
+      // are: their size is held by a boundary segment that cannot be split), and on a boundary
+      // triangle it leaves a triangle on the same segment.
+      const bool thin = radius > ratio_limit * std::sqrt(shortest) * (1.0 + 1e-12);
+      if (created == kNone && too_big && !on_boundary && !thin) {
         created = try_insert(centroid, ti, queue);
       }
       if (created == kNone) {

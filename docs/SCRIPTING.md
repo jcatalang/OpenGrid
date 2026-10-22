@@ -151,20 +151,29 @@ assembles the edges automatically. Elliptic smoothing with wall control:
 `og.smooth_domain(name)`.
 
 ### Hybrid 2D mesh with boundary layers
+Layers are set from the curves they grow from: every unstructured domain the curves bound
+gets them, in one undo step.
 ```python
-og.create_unstructured_domain(
-    connectors=["c-upper", "c-lower", "c-far"],
-    generator={
-        "inflation": {
-            "connectors": ["c-upper", "c-lower"],
-            "first_height": 1e-5,
-            "growth_rate": 1.2,
-            "layers": 40,
-        }
-    },
-    name="flow",
-)
+og.create_unstructured_domain(connectors=["c-upper", "c-lower", "c-far"], name="flow")
+og.set_inflation(["c-upper", "c-lower"], first_height=1e-5, growth_rate=1.2, layers=40)
+og.set_inflation(["c-lower"], remove=True)  # this curve stops growing layers
 ```
+Where a wall meets a boundary curve that is not a wall (a channel's wall and its inlet), the
+layers taper towards it in steps by default. `slide=True` runs them into that curve instead:
+`set_inflation` gives the curve points at the layer heights near the wall (explicit points
+over the layers' thickness, longer by 1 / sin(angle) along a leaning curve, a breakpoint, a
+tanh beyond) and each layer ends on one of them. Only where the angle inside the domain is
+between 45 and 135 degrees: a sharper wedge would squeeze the layers into thin cells, a
+wider opening (a wall continuing into a symmetry line) has nothing to run into, so those
+ends keep the taper; a sketch's curve, a periodic one, a side of a structured domain or a
+curve too short for the layers keeps its points too. `og.last_warnings` names them.
+```python
+og.set_inflation(["wall"], first_height=1e-3, growth_rate=1.25, layers=10, slide=True)
+```
+In 3D, `set_inflation` takes surfaces: the volumes they bound grow layers from them (volume
+layers slide on planar neighbouring faces). The generator's `inflation` dict
+(`create_unstructured_domain(generator={"inflation": {...}})`) is the same setting written
+out.
 
 ### 3D: blocks, volumes and boundary layers
 - `create_block(faces=[six structured domains])` (any order and orientation) or

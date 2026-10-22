@@ -1,0 +1,33 @@
+{
+ "blocks": [],
+ "connectors": [
+  {"breakpoints": [], "dimension": 81, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 5, "mode": "arc_length", "name": "wall", "propagate_spacing": true, "segments": [{"curve": 1, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [{"distribution": {"begin_spacing": 0.009313225746154782, "end_spacing": null, "growth_ratio": null, "type": "tanh"}, "index": 10, "position": 0.03325290298461914}], "dimension": 30, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "positions": [0.0, 0.030072562400417852, 0.06766326540094017, 0.11465164415159307, 0.17338711758990916, 0.24680645938780432, 0.33858063663517324, 0.4532983581943844, 0.5966955101433984, 0.7759419500796658, 1.0], "type": "explicit"}, "id": 6, "mode": "arc_length", "name": "outlet", "propagate_spacing": true, "segments": [{"curve": 2, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 61, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 7, "mode": "arc_length", "name": "top", "propagate_spacing": true, "segments": [{"curve": 3, "t0": 0.0, "t1": 1.0}], "type": "connector"},
+  {"breakpoints": [], "dimension": 21, "distribution": {"begin_spacing": null, "end_spacing": null, "growth_ratio": null, "type": "uniform"}, "id": 8, "mode": "arc_length", "name": "inlet", "propagate_spacing": true, "segments": [{"curve": 4, "t0": 0.0, "t1": 1.0}], "type": "connector"}
+ ],
+ "database": [
+  {"id": 1, "name": "bottom", "p0": [0.0, 0.0, 0.0], "p1": [4.0, 0.0, 0.0], "type": "line"},
+  {"id": 2, "name": "right", "p0": [4.0, 0.0, 0.0], "p1": [4.0, 1.0, 0.0], "type": "line"},
+  {"id": 3, "name": "ceiling", "p0": [4.0, 1.0, 0.0], "p1": [1.7320508075688776, 1.0, 0.0], "type": "line"},
+  {"id": 4, "name": "left", "p0": [1.7320508075688776, 1.0, 0.0], "p1": [0.0, 0.0, 0.0], "type": "line"}
+ ],
+ "domains": [
+  {"generator": {"algorithm": "delaunay", "edge_swap": true, "element_type": "triangles", "growth_rate": 1.2, "inflation": {"connectors": [5], "first_height": 0.001, "growth_rate": 1.25, "layers": 10, "slide": true, "total_thickness": null, "transition": false}, "max_points": 2000000, "max_size": null, "min_angle": 25.0, "refine": true, "smoothing": "none", "smoothing_iterations": 5, "sources": []}, "id": 9, "loops": [[{"connector": 5, "reversed": false}, {"connector": 6, "reversed": false}, {"connector": 7, "reversed": false}, {"connector": 8, "reversed": false}]], "name": "flow", "surface": null, "type": "unstructured_domain"}
+ ],
+ "format": "opengrid-project",
+ "groups": [],
+ "name_counters": {},
+ "next_id": 14,
+ "patches": [
+  {"id": 10, "members": [{"connector": 5}], "name": "wall-2", "patch_type": "wall", "periodic": null, "type": "patch"},
+  {"id": 11, "members": [{"connector": 8}], "name": "inlet-2", "patch_type": "inlet", "periodic": null, "type": "patch"},
+  {"id": 12, "members": [{"connector": 6}], "name": "outlet-2", "patch_type": "outlet", "periodic": null, "type": "patch"},
+  {"id": 13, "members": [{"connector": 7}], "name": "symmetry", "patch_type": "symmetry", "periodic": null, "type": "patch"}
+ ],
+ "settings": {},
+ "tolerance": 1e-09,
+ "units": "m",
+ "version": 1,
+ "zones": []
+}

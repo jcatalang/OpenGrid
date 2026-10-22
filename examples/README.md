@@ -21,6 +21,7 @@ too but not committed. Several scripts take `--gui` to open their model in the a
 | Script | What it builds |
 |---|---|
 | [`12a_airfoil_cases.py`](12a_airfoil_cases.py) | A NACA 2412 in a far field and a periodic NACA 6412 cascade from the standard shapes: clustered connectors, an unstructured domain with 40 inflation layers, boundary types in one step, a periodic pair, the cascade extruded one cell thick for a 3D solver, CGNS and Gmsh |
+| [`12c_sliding_layers.py`](12c_sliding_layers.py) | Inflation layers set from the curves (`set_inflation`), tapering or running into the neighbouring curves (`slide`), and a wedge too sharp for them |
 | [`12b_bodies_in_a_box.py`](12b_bodies_in_a_box.py) | A sphere and a closed swept wing in boxes: surface meshes with shared edges (`mesh_surfaces`), tetrahedra with prism layers and trailing-edge fans, wall and far-field patches, CGNS and Gmsh |
 | [`04_solver_ready.py`](04_solver_ready.py) | A backward-facing step (three blocks) and a NACA 0012 C-grid with patches and zones, exported to CGNS (checked by `cgnscheck` when installed), Gmsh (read back by meshio) and VTKHDF (read back by VTK) |
 
@@ -30,7 +31,7 @@ too but not committed. Several scripts take `--gui` to open their model in the a
 |---|---|
 | Geometry, projects, distributions | [`01_geometry.py`](01_geometry.py), [`02_connectors.py`](02_connectors.py) |
 | Structured 2D grids | [`03_airfoil_grids.py`](03_airfoil_grids.py) (O- and C-grids with wall spacing), [`03_backward_step.py`](03_backward_step.py) (three blocks), [`11a_wall_layers.py`](11a_wall_layers.py) (orthogonal wall layers) |
-| Unstructured 2D meshes | [`05a_unstructured.py`](05a_unstructured.py) (Delaunay), [`05b_advancing_front.py`](05b_advancing_front.py), [`05c_quads.py`](05c_quads.py) (quad-dominant, all-quad), [`06_inflation.py`](06_inflation.py) (boundary layers) |
+| Unstructured 2D meshes | [`05a_unstructured.py`](05a_unstructured.py) (Delaunay), [`05b_advancing_front.py`](05b_advancing_front.py), [`05c_quads.py`](05c_quads.py) (quad-dominant, all-quad), [`06_inflation.py`](06_inflation.py) (boundary layers), [`12c_sliding_layers.py`](12c_sliding_layers.py) (layers from curves, sliding) |
 | Structured 3D blocks | [`07a_blocks.py`](07a_blocks.py), [`07b_smoothing.py`](07b_smoothing.py) (hyperbolic extrusion, 3D elliptic smoothing) |
 | Unstructured 3D volumes | [`08a_volumes.py`](08a_volumes.py) (tetrahedra), [`08b_inflation.py`](08b_inflation.py) (prism / hexahedron layers), [`08c_optimisation_mixed.py`](08c_optimisation_mixed.py) (fans, optimisation, mixed models), [`12b_bodies_in_a_box.py`](12b_bodies_in_a_box.py) |
 | Multi-block topology and smoothing groups | [`09b_topology_golden.py`](09b_topology_golden.py), [`10a_multiblock_smoothing.py`](10a_multiblock_smoothing.py), [`10b_multiblock_3d.py`](10b_multiblock_3d.py), [`10e_templates_auto.py`](10e_templates_auto.py) (templates, automatic topology) |

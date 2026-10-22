@@ -79,6 +79,19 @@ history). Phase tags show where each item came from.
     a second; on larger models it waits for Refresh (and shows no rows meanwhile).
   - A click on the bottom of a box extruded from a domain may select that domain rather than
     the block's `kmin` face (both are drawn there); either works as the patch member.
+- **Sliding layers** [2026-10-22]:
+  - Only in 2D domains, between 45 and 135 degrees; sharper wedges and wider openings taper
+    as before (layers converging into a wedge would be squeezed into slivers).
+  - The neighbouring curve's points are set when sliding is switched on; changing the layers
+    later through the domain's own fields re-spaces it only when slide stays on. A sketch's,
+    periodic or structured-domain curve keeps its points (the layers taper there).
+  - Layers stopped by the core size (transition) leave the curve's finest points in the core.
+  - 3D faces slide only on planar neighbours (the volume layers' own rule).
+- **Faces and picking** [2026-10-22]:
+  - Clicking through hidden faces ray-casts every drawn face mesh at each click (fine to a few
+    million cells); with blocks coloured by quality, cut or shrunk, faces are not picked.
+  - Faces are listed under their block or volume; a model with hundreds of blocks makes a long
+    tree (collapsed by default).
 - **Linux on GitHub Actions** [2026-10-21]:
   - The SLES 15 SP3 / SP6 base images have no desktop packages: the bundle is checked there
     headless only (imports, meshing, exports); the window is checked on openSUSE Leap 15.6

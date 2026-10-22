@@ -126,7 +126,11 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
 - **2D inflation layers** (quads in a triangle or quad core) with first height, growth and
   layer count, smoothed normals, fans at sharp corners and trailing edges, and termination where
   layers would cross or come too close. The first height is suggested from the boundary
-  spacing when left empty.
+  spacing when left empty. Layers are set on the curves they grow from (`set_inflation`; in
+  3D, on the surfaces of a volume). Where a wall meets a boundary that is not a wall, the
+  layers taper, or with `slide` run into that boundary through its own points, which are
+  spaced like the layers (between 45 and 135 degrees: sharper wedges and wider openings keep
+  the taper), instead of ending in a stair of slivers.
 - **Regions between curves:** select an outer boundary and the bodies inside it, and one
   domain meshes the space between them (the bodies are holes).
 - **Surface meshes of 3D shapes** (`mesh_surfaces`): an unstructured domain on each plane,
@@ -167,11 +171,13 @@ More pictures: [`examples/output/`](examples/output) (one figure per example).
   separatrices traced into a block decomposition.
 
 ### Boundary conditions
-- **Patches** (wall, inlet, outlet, symmetry, farfield, periodic, interface, user) and **zones**,
-  validated before export: every boundary in exactly one patch, interfaces detected
-  automatically (a connector shared by two domains takes no type), clear messages naming the
-  entity and what is wrong. `set_boundary_type` puts a selection into a patch of a type in
-  one step.
+- **Boundary types** (wall, inlet, outlet, symmetry, farfield, periodic, interface, user) given
+  to curves in 2D and to faces in 3D (every face of a block or volume has an identifier:
+  `block-1.imin` … `kmax`, `volume-1.top`, `bottom`, `side-1` …), and **zones**, validated
+  before export: every boundary typed exactly once, interfaces detected automatically (a curve
+  shared by two domains takes no type), clear messages naming the entity and what is wrong.
+  `set_boundary_type` types a selection in one step (the boundaries of one type are exported
+  together, under the type's name unless another name is given).
 - **Periodic pairs** (translational and rotational, about any axis) of 2D connectors and 3D
   faces (block faces, volume faces, the ends and side walls of extruded volumes), matched node
   by node and written as periodic connectivity (CGNS 2D: translational). `make_periodic_pair`
@@ -371,10 +377,15 @@ the reference readers (VTK, Gmsh, meshio, `cgnscheck`) in the tests.
   read-only.
 - **Boundary conditions in 3D.** A click on a block or volume selects the face under the
   pointer (a block's `imin` … `kmax`, an extruded volume's top, bottom or side walls; Shift
-  adds faces, a second click selects the whole block); the face's panel, the Boundary panel
-  and the right-click menu give it a type, the Boundary panel's rows select their faces, and
-  Colour by patch fills the faces with their patches' colours (unassigned: red). Extrude 2D
-  model carries the 2D curves' types over to the side faces.
+  adds faces); clicking again at the same place takes the next face behind, then the whole
+  block, so hidden faces are reached too. The model tree lists every block's and volume's
+  faces under it with their types (selectable there). The face's panel, the Boundary panel
+  and the right-click menu give it a type, and Colour by patch fills the faces with their
+  types' colours (unassigned: red). There is no separate list of patches: the types are on
+  the curves and faces. Extrude 2D model carries the 2D curves' types over to the side faces.
+- **Inflation layers from the curves.** Select the curves (3D: surfaces) and use Create >
+  Inflation layers… (or the right-click menu, or a curve's panel): first height, growth,
+  layers, and "run into the neighbouring curves" instead of tapering into steps.
 - Drawing tools for points, curves, freehand curves and sketch blocks (toolbar icons, keys
   `S P L A W B N D K`); snapping to points, curve ends and, with the reference grid shown, its
   lines; live drag previews of handles; double-click adds or removes curve points. A selected

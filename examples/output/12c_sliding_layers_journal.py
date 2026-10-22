@@ -1,0 +1,17 @@
+import opengrid
+
+og = opengrid.Session()
+og.create_line(p0=(0.0, 0.0, 0.0), p1=(4.0, 0.0, 0.0), name='bottom')
+og.create_line(p0=(4.0, 0.0, 0.0), p1=(4.0, 1.0, 0.0), name='right')
+og.create_line(p0=(4.0, 1.0, 0.0), p1=(0.577350269189626, 1.0, 0.0), name='ceiling')
+og.create_line(p0=(0.577350269189626, 1.0, 0.0), p1=(0.0, 0.0, 0.0), name='left')
+og.create_connector(segments=({'curve': 'bottom', 't0': 0.0, 't1': 1.0},), dimension=81, mode='arc_length', distribution={'type': 'uniform', 'begin_spacing': None, 'end_spacing': None, 'growth_ratio': None}, breakpoints=(), propagate_spacing=True, name='wall')
+og.create_connector(segments=({'curve': 'right', 't0': 0.0, 't1': 1.0},), dimension=21, mode='arc_length', distribution={'type': 'uniform', 'begin_spacing': None, 'end_spacing': None, 'growth_ratio': None}, breakpoints=(), propagate_spacing=True, name='outlet')
+og.create_connector(segments=({'curve': 'ceiling', 't0': 0.0, 't1': 1.0},), dimension=61, mode='arc_length', distribution={'type': 'uniform', 'begin_spacing': None, 'end_spacing': None, 'growth_ratio': None}, breakpoints=(), propagate_spacing=True, name='top')
+og.create_connector(segments=({'curve': 'left', 't0': 0.0, 't1': 1.0},), dimension=21, mode='arc_length', distribution={'type': 'uniform', 'begin_spacing': None, 'end_spacing': None, 'growth_ratio': None}, breakpoints=(), propagate_spacing=True, name='inlet')
+og.create_unstructured_domain(loops=(({'connector': 'wall', 'reversed': False}, {'connector': 'outlet', 'reversed': False}, {'connector': 'top', 'reversed': False}, {'connector': 'inlet', 'reversed': False}),), generator={'algorithm': 'delaunay', 'refine': True, 'min_angle': 25.0, 'growth_rate': 1.2, 'max_size': None, 'sources': (), 'max_points': 2000000, 'element_type': 'triangles', 'smoothing': 'none', 'smoothing_iterations': 5, 'edge_swap': True, 'inflation': None}, surface=None, name='flow')
+og.set_boundary_type(['wall'], 'wall', name=None)
+og.set_boundary_type(['inlet'], 'inlet', name=None)
+og.set_boundary_type(['outlet'], 'outlet', name=None)
+og.set_boundary_type(['top'], 'symmetry', name=None)
+og.set_inflation(['wall'], first_height=0.001, growth_rate=1.25, layers=10, transition=False, slide=True)

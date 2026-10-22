@@ -848,6 +848,58 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## 3D faces with identifiers, boundary types on curves and faces, reaching hidden faces, inflation layers from curves that run into their neighbours (2026-10-22) — requested by the user
+The user (the openSUSE bundle "opened smoothly") asked: 3D faces registered with identifiers,
+hidden faces selectable, inflation layers set from the curves rather than in the domain,
+layers that extend to the neighbouring edge instead of a stair (at least as a mode), faces
+named as surfaces not curves, and no patches section: the curves (2D) and surfaces (3D)
+themselves carry the boundary types. Then, on corners and wedges: converging layers give odd
+cells, so the stair is acceptable there.
+- **Faces** (`model/faces.py`): every face of a block (`block-1.imin` ... `kmax`) and volume
+  (`volume-1.bottom`, `top`, `side-1` ... `side-n` in its base's loop order; a volume of
+  domains: those domains) has an identifier, converted to and from patch members; patches,
+  `set_boundary_type`, `make_periodic_pair` and the pairing transform take identifiers; the 3D
+  report and the Boundary panel label faces by them; the journal keeps each member's form.
+- **The model tree**: no Patches category; curves show their type ("line, 21 pts · wall",
+  "periodic ↔ c-right"); every block and volume lists its faces under it with their types,
+  selectable there (`selection_changed(ids, faces)`). Panels say "exported as" for the patch
+  name; the Boundary panel's columns follow.
+- **Hidden faces**: clicking again at the same place takes the next thing under the pointer
+  (`Scene.pick_stack`: what pick_display picks, then every face, domain and surface the view
+  ray crosses, front to back, by VTK ray casts through the drawn faces; then their blocks);
+  the selected face's identifier and its place ("2 of 4 under the pointer") in the status bar.
+- **Layers from curves** (`Session.set_inflation`, topology edit, one step; Create > Inflation
+  layers… and the right-click menu on selected curves, a curve panel's button and the list of
+  domains it grows layers into; 3D: surfaces, for the volumes they bound).
+- **Sliding layers** (2D `inflation["slide"]`, C++ `InflationOptions::slide`): an open wall
+  chain's end columns step along the neighbouring boundary through its own vertices, one per
+  layer, so no boundary node is added or lost (exports, interfaces, periodic matches and
+  extrusions keep working on the connectors' nodes); the neighbouring curves get points at the
+  layer heights near the wall (`model/layer_spacing.py`: explicit nodes over the layers'
+  thickness, a breakpoint, a tanh beyond), whenever slide is set (set_inflation or the domain
+  panel / set_unstructured_generator). Corners and wedges, as the user pointed out: only where
+  the wall and its neighbour meet between 45 and 135 degrees inside the domain (both in C++
+  and in the spacing, which lengthens the steps by 1 / sin(angle) along a leaning curve so the
+  height across the layers stays the layer height); sharper wedges (layers would converge into
+  slivers) and wider openings (a wall continuing into a symmetry line) keep the taper; a step
+  far from the layer height, a corner of the neighbour or another wall stops the column, and
+  the layers taper from it. Walls meeting walls are one chain as before (fans at convex
+  corners, merged columns at concave ones). Measured on the channel of example 12c (10 layers
+  from 1e-3, growth 1.25): tapering, the worst cell has a 1.1 degree angle (scaled Jacobian
+  0.023); sliding, every layer reaches the inlet and the outlet (800 quads) and the worst
+  angle is 15.6 degrees (0.31) with the inlet at 90 degrees, 15.5 (0.31) at 60 and 17.3
+  (0.34) at 45; at 30 degrees the inlet end tapers (1.1 degrees) and only the outlet end
+  slides.
+- **A refinement hang found on the way** (pre-existing): an inlet clustered at a wall (1e-3)
+  next to a coarse wall (0.05) made the Delaunay refinement cascade until its 20 million point
+  limit (hours): thin oversized triangles reaching from the coarse segment, whose
+  circumcentre is refused (boundary segments are never split), were split at their centroid,
+  making thinner ones; they are now left as they are. The channel meshes in 0.04 s.
+- Example `12c_sliding_layers.py` (taper, slide, a 30-degree wedge). Tests: C++ sliding,
+  angle limits, the refinement regression; `test_faces_3d.py` (identifiers, tree rows, cycling,
+  periodic faces), `test_sliding_layers.py` (set_inflation, slide, wedges, short curves,
+  volumes, the window). C++ 157 / 157; Python 562 passed, 1 expected failure; lint clean.
+
 ## A tidier repository root, dependencies by need, Linux machines without internet (2026-10-21) — requested by the user
 The user asked why `.clang-format`, `.clang-tidy`, `.gitignore` and `CLAUDE.md` were in the
 repository, found the dependency list inconvenient for their SLES 15 machine, and could not

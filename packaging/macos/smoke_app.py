@@ -17,6 +17,10 @@ import numpy as np  # noqa: E402
 import opengrid  # noqa: E402
 
 print("opengrid", opengrid.__version__, "core", opengrid.core_version(), opengrid.__file__)
+from importlib.metadata import metadata  # noqa: E402
+
+# The OpenGrid just built, not a cached older package of the same version.
+assert metadata("opengrid")["License-Expression"] == "MIT", "a stale OpenGrid package"
 assert sys.prefix in opengrid.__file__
 
 import netgen  # noqa: E402, F401

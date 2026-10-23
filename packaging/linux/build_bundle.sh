@@ -63,6 +63,9 @@ ls "$BUILD/channel/linux-64/"
 # The intermediate environments go as soon as they are done (a CI runner has ~14 GB free).
 rm -rf "$BUILD/channel/bld" "$BUILD/channel/src_cache"
 step "runtime environment"
+# conda reuses a cached package of the same file name (the package cache is kept between CI
+# runs): OpenGrid's must be the one just built.
+rm -rf "$CONDA"/pkgs/opengrid-"$OG_VERSION"-*
 conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" -c conda-forge \
   "opengrid=$OG_VERSION" python=3.12
 step "licences of the bundled packages (from the package cache: a packed environment has none)"

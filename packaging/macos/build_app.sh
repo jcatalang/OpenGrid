@@ -40,6 +40,11 @@ fi
 # 2. A fresh environment with the package, then packed (relocatable).
 rm -rf "$WORK" "$APP"
 mkdir -p "$WORK"
+# conda reuses a cached package of the same file name: OpenGrid's must be the one just built
+# (a rebuilt 0.0.2 has the same name as the 0.0.2 before it).
+for pkgs in $(conda info --json | "$TOOLS/bin/python" -c "import json, sys; print(' '.join(json.load(sys.stdin)['pkgs_dirs']))"); do
+  rm -rf "$pkgs"/opengrid-"$VERSION"-*
+done
 conda create -y -q -p "$WORK/env" --override-channels -c "file://$CHANNEL" -c conda-forge \
   "opengrid=$VERSION" python=3.12
 # The licence texts of every bundled package (in the package cache, not in a packed env).

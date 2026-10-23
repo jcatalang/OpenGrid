@@ -357,6 +357,7 @@ class MainWindow(QMainWindow):
         self._last_pointer: tuple[float, float] | None = None
         self._right_press_position: tuple[float, float] | None = None
         self._report_seconds = 0.0  # how long the last 3D boundary report took
+        self._long_running = False  # a worker thread runs a long operation (_run_long)
         self._boundary_timer = QTimer(self)  # the Boundary panel follows the model (coalesced)
         self._boundary_timer.setSingleShot(True)
         self._boundary_timer.setInterval(100)
@@ -1736,7 +1737,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_boundary(self) -> None:
         """The Boundary panel after a change: recomputed (a 3D report reuses the meshes drawn
-        in the view), unless the last 3D report was slow: then it waits for Refresh."""
+        in the view), unless the last 3D report was slow: then it waits for Refresh. Not while
+        a long operation runs in the worker thread (it would mesh the same volumes at once)."""
+        if self._long_running:
+            self._boundary_timer.start()
+            return
         if self.session.is_3d() and self._report_seconds > SLOW_REPORT_SECONDS:
             self.boundary_dock.mark_stale()
             return
@@ -3167,6 +3172,7 @@ class MainWindow(QMainWindow):
 
         self._hover_timer.stop()
         self.scene.set_hover(None)
+        self._long_running = True
         try:
             with self.batch_updates():
                 return run_blocking(self, label, function, cancel)
@@ -3175,6 +3181,8 @@ class MainWindow(QMainWindow):
             log.warning("%s", text)
             self.statusBar().showMessage(text.splitlines()[0], 8000)
             return None
+        finally:
+            self._long_running = False
 
     def _run_meshed(self, function):
         """A command that creates a meshed entity: the mesh is computed in a worker thread

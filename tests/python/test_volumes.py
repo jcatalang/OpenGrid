@@ -405,3 +405,37 @@ def test_gui_extrudes_an_unstructured_domain_to_a_volume(qtbot):
     assert window.create_patch_from_selection("rim", "wall") == "rim"
     assert og.boundary_report().issues == []
     window.close()
+
+
+def test_one_volume_meshed_from_two_threads_at_once():
+    """The window meshes in a worker thread while its main thread may ask for the same volume
+    (the boundary check): Netgen's one task manager per process deadlocked when both ran it.
+    The second request waits for the first and takes its result."""
+    import threading
+
+    og = opengrid.Session()
+    faces = box(og, (0, 0, 0), (1, 1, 1), 5, "b", "unstructured_domain")
+    og.create_volume(faces, generator={"max_size": 0.2}, name="v")
+    results = {}
+    worker = threading.Thread(target=lambda: results.update(worker=og.volume_mesh("v")))
+    worker.start()
+    results["main"] = og.volume_mesh("v")
+    worker.join(timeout=120)
+    assert not worker.is_alive()
+    assert results["worker"] is results["main"]
+
+
+def test_the_boundary_check_waits_for_a_long_operation(qtbot):
+    from opengrid.app.main_window import MainWindow
+
+    window = MainWindow(off_screen=True)
+    qtbot.addWidget(window)
+    calls = []
+    window.validate_boundary = lambda *a, **k: calls.append(1)
+    window._long_running = True
+    window._refresh_boundary()
+    assert calls == [] and window._boundary_timer.isActive()
+    window._long_running = False
+    window._refresh_boundary()
+    assert calls == [1]
+    window.close()

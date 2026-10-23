@@ -31,6 +31,7 @@ supported, dynamically linked way to drive it, and keeps it an optional run-time
 
 import hashlib
 import math
+import threading
 from collections import OrderedDict
 
 import numpy as np
@@ -382,6 +383,11 @@ def assemble_shell(session, face_ids, where: str) -> dict:
 
 
 # ------------------------------------------------------------------------------ backends
+# Netgen's task manager is one per process: two volume meshes generated at once (the window's
+# worker thread and its main thread, e.g. the boundary check) deadlocked in it.
+_NETGEN_LOCK = threading.Lock()
+
+
 class TetBackend:
     name = "abstract"
 
@@ -412,9 +418,10 @@ class NetgenBackend(TetBackend):
             options["maxh"] = max_size
         # Netgen's own thread pool (its parallel optimisation passes give the same mesh for
         # any number of threads), sized like OpenGrid's.
-        pyngcore.SetNumThreads(_core.thread_count())
-        with pyngcore.TaskManager():
-            m.GenerateVolumeMesh(ng.MeshingParameters(**options))
+        with _NETGEN_LOCK:
+            pyngcore.SetNumThreads(_core.thread_count())
+            with pyngcore.TaskManager():
+                m.GenerateVolumeMesh(ng.MeshingParameters(**options))
         coords = np.array(m.Coordinates(), dtype=float).reshape(-1, 3)
         elements = m.Elements3D().NumPy()
         if len(elements) == 0:
@@ -513,6 +520,7 @@ class VolumeEvaluator:
     def __init__(self, session):
         self.session = session
         self._cache: OrderedDict[str, dict] = OrderedDict()
+        self._lock = threading.RLock()  # (see mesh)
         # Assembled shells by the digest of their face meshes (assembly is the costly part of
         # a cache lookup on large surfaces). Shells are read-only.
         self._shells: OrderedDict[str, dict] = OrderedDict()
@@ -534,6 +542,13 @@ class VolumeEvaluator:
         return shell
 
     def mesh(self, entity_id: int) -> dict:
+        """The volume's mesh (see _mesh), computed once even when asked from two threads at
+        once (the window's worker thread and its main thread): the second waits and takes the
+        first's result."""
+        with self._lock:
+            return self._mesh(entity_id)
+
+    def _mesh(self, entity_id: int) -> dict:
         """{"points", "tets", "pyramids", "prisms", "hexes", "n_surface", "faces": {domain:
         boundary cells}, "shells", "enclosed_volume", "inflation", "quality" (floor summary),
         "cell_quality" (read-only per-cell metrics, see volume_quality), "warnings"} (points:

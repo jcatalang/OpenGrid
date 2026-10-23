@@ -876,6 +876,12 @@ The Linux bundle failed its test twice in a row (deterministic): example 09a's f
   there); the bundle test records the CPU model and core count.
 - A test race fixed on the way: the CAD import tests wrote one temporary `part.step` and ctest
   runs them in parallel (one read it while another wrote it); each test now has its own files.
+- **A Netgen deadlock in the window** (the Ubuntu test run hung 34 minutes in a GUI test on a
+  plain box; an intermittent hang there on 2026-10-21 too): a long operation runs in a worker
+  thread while the main thread processes events, and the Boundary panel's refresh asked for
+  the same volume, so two Netgen runs shared its one task manager per process. Netgen runs
+  are serialised (a lock), a volume is meshed once when asked from two threads (the second
+  waits and takes the result), and the boundary refresh waits while a long operation runs.
 - Tests: C++ `Inflation3D.PerNodeLayerLimits`; Python `test_cells_stuck_on_a_layer_front_lower_it`
   (spacing 0.039). C++ 160 / 160 (three runs in parallel); Python 573 passed, 1 expected
   failure.

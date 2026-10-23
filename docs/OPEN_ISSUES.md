@@ -96,6 +96,8 @@ history). Phase tags show where each item came from.
   - Layers much thicker than the gaps between walls (example 09a's bracket with 12 layers from
     4e-3) still give overlapping fronts, which Netgen refuses ("the volume mesher produced no
     tetrahedra"); the 3D proximity rule does not stop them early enough.
+  - Netgen runs one at a time (its task manager is one per process): two volumes meshed from
+    different threads wait for each other.
   - The same OpenGrid code gave different 3D meshes in two Linux bundles a day apart (same
     packages, same thread count): the cause (compiler of the package build or the machine)
     was not found; the bundle test now records the CPU.

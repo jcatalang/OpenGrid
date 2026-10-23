@@ -155,12 +155,12 @@ def test_sheared_block_misses_a_strict_floor(tmp_path):
     assert any("sheared" in i and "quality floor" in i for i in issues)
 
 
-def test_cells_stuck_on_a_layer_front_lower_it():
-    """Example 09a's bracket at a spacing where Netgen lays slivers flat on the layer front:
-    all their nodes are fixed, so no node move or swap reaches them. A point inserted above
-    one lifts it; the others make the volume mesh again with the front one layer lower at
-    their columns (Linux builds met this at the default spacing). Every cell then meets the
-    floor and the cells still fill the volume exactly."""
+def test_cells_stuck_on_a_layer_front_are_repaired():
+    """Example 09a's bracket at a spacing where Netgen lays slivers flat on the layer front (on
+    this Mac; meshes differ between machines): all their nodes are fixed, so no node move or
+    swap reaches them; a point inserted above them, or the volume meshed again with the front
+    one layer lower at their columns, repairs them. Every cell meets the floor and the cells
+    still fill the volume exactly."""
     import importlib
     import sys
     from pathlib import Path
@@ -181,6 +181,33 @@ def test_cells_stuck_on_a_layer_front_lower_it():
     )
     mesh = og.volume_mesh("fluid")
     assert mesh["quality"]["below_floor"] == 0
-    assert mesh["inflation"]["lowered"] > 0
-    assert mesh["inflation"]["stops"].get("limit", 0) > 0
     assert not [w for w in mesh["warnings"] if "fill" in w or "inverted" in w]
+
+
+def test_stuck_cells_lower_their_columns():
+    """A sliver whose four nodes are the tops of four layer columns (all fixed): the columns get
+    a limit of one layer fewer than they grew; a cell with a movable node, or one that meets
+    the floor, lowers nothing."""
+    from opengrid.model.volumes import DEFAULT_VOLUME_GENERATOR, _lower_stuck_columns
+
+    floor = {"min_jacobian": 0.05, "max_skewness": 0.95}
+    assert DEFAULT_VOLUME_GENERATOR["quality_floor"] in (None, floor)
+    wall = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)]
+    tops = [(0.0, 0.0, 0.1), (1.0, 0.0, 0.1), (1.0, 1.0, 0.1001), (0.0, 1.0, 0.1)]  # a sliver
+    apex = (0.5, 0.5, 0.8)  # a movable node
+    points = np.asarray([*wall, *tops, apex])
+    info = {"layers": np.asarray([3, 3, 3, 3]), "top": np.asarray([4, 5, 6, 7])}
+
+    def cells(tet):
+        return {"tets": np.asarray([tet], dtype=np.int64)}
+
+    limits, count = _lower_stuck_columns(points, cells([4, 5, 6, 7]), info, 8, floor, None)
+    assert count == 4 and limits == [2, 2, 2, 2]
+    # Next time the columns grew to their limits: one layer fewer again.
+    grown = {"layers": np.asarray([2, 2, 2, 2]), "top": info["top"]}
+    limits, count = _lower_stuck_columns(points, cells([4, 5, 6, 7]), grown, 8, floor, limits)
+    assert count == 4 and limits == [1, 1, 1, 1]
+    # A movable node (the optimiser's job) or a good cell: nothing.
+    assert _lower_stuck_columns(points, cells([4, 5, 7, 8]), info, 8, floor, None)[1] == 0
+    good = np.asarray([*wall, (0.5, 0.5, 0.8)])
+    assert _lower_stuck_columns(good, cells([0, 1, 3, 4]), info, 5, floor, None)[1] == 0

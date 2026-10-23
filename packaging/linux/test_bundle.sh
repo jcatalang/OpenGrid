@@ -55,7 +55,7 @@ cd "$B"
 step "licences (OpenGrid's and every bundled package's)"
 grep -q "MIT License" LICENSE
 grep -q "^qt6-main " licenses/README.txt && test -d licenses/qt6-main && test -d licenses/netgen
-echo "   $(find licenses -mindepth 1 -maxdepth 1 -type d | wc -l) packages' licence texts"
+echo "   $(ls -d licenses/*/ | wc -l) packages' licence texts"
 step "first start and the imports (the OpenGrid just built: MIT-licensed, not a cached older build)"
 ./opengrid-python -c "from importlib.metadata import metadata; assert metadata('opengrid')['License-Expression'] == 'MIT', 'a stale OpenGrid package'"
 ./opengrid-python -c "import opengrid, opengrid._core as c, opengrid._occt, netgen.meshing; print('   OpenGrid', opengrid.__version__, '- core', opengrid.core_version(), '- CGNS', c.cgns_available(), '- OpenMP', c.openmp_enabled(), '- threads', opengrid.threads())"

@@ -35,7 +35,7 @@ step "licences (OpenGrid's and every bundled package's)"
 grep -q "MIT License" "$APP/Contents/Resources/LICENSE"
 grep -q "^qt6-main " "$APP/Contents/Resources/licenses/README.txt"
 test -d "$APP/Contents/Resources/licenses/qt6-main" && test -d "$APP/Contents/Resources/licenses/netgen"
-echo "   $(find "$APP/Contents/Resources/licenses" -mindepth 1 -maxdepth 1 -type d | wc -l) packages' licence texts"
+echo "   $(ls -d "$APP"/Contents/Resources/licenses/*/ | wc -l) packages' licence texts"
 
 step "signature"
 codesign --verify --strict "$APP"

@@ -3,8 +3,10 @@
 #
 # The bundle holds a relocatable conda environment (conda-pack) with the OpenGrid conda package
 # (packaging/conda/recipe.yaml) and its conda-forge dependencies (Qt, VTK, Netgen, OpenCASCADE,
-# libomp, ...), started by a small launcher. Signed ad hoc (no Developer ID: Gatekeeper asks for
-# confirmation on first launch from a download).
+# libomp, ...), started by a small launcher: nothing else is needed on the Mac. Its library
+# links are relative (relink_macho.py; checked by check_app.py), so it runs wherever it is
+# copied. Signed ad hoc (no Developer ID: Gatekeeper asks for confirmation on first launch from
+# a download). packaging/macos/test_app.sh checks the DMG as a user would get it.
 #
 #   packaging/macos/build_app.sh            # builds the conda package first if missing
 #   packaging/macos/build_app.sh --rebuild  # always rebuild the conda package
@@ -40,16 +42,23 @@ rm -rf "$WORK" "$APP"
 mkdir -p "$WORK"
 conda create -y -q -p "$WORK/env" --override-channels -c "file://$CHANNEL" -c conda-forge \
   "opengrid=$VERSION" python=3.12
+# The licence texts of every bundled package (in the package cache, not in a packed env).
+"$TOOLS/bin/python" "$HERE/../collect_licenses.py" "$WORK/env" "$WORK/licenses"
 "$TOOLS/bin/conda-pack" -p "$WORK/env" -o "$WORK/env.tar.gz" --quiet
 
 # 3. The bundle.
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/env"
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
+cp -R "$WORK/licenses" "$APP/Contents/Resources/licenses"
 tar -xzf "$WORK/env.tar.gz" -C "$APP/Contents/Resources/env"
 # conda-pack / conda-unpack rewrite prefixes inside binaries: re-sign them (ad hoc) before
 # anything in the environment runs, and again after conda-unpack.
 "$TOOLS/bin/python" "$HERE/sign_macho.py" "$APP/Contents/Resources/env"
 # (conda-unpack starts with "#!/usr/bin/env python": run it with the bundled interpreter.)
 "$APP/Contents/Resources/env/bin/python" "$APP/Contents/Resources/env/bin/conda-unpack"
+# conda-unpack wrote this folder's path into a few libraries' links (libncurses -> libtinfo,
+# ...): relative links instead, so the app runs wherever it is copied.
+"$TOOLS/bin/python" "$HERE/relink_macho.py" "$APP/Contents/Resources/env"
 "$TOOLS/bin/python" "$HERE/sign_macho.py" "$APP/Contents/Resources/env"
 # Byte-code caches written by conda-unpack would be rewritten on first run anyway.
 find "$APP/Contents/Resources/env" -name "__pycache__" -type d -prune -exec rm -rf {} +
@@ -110,9 +119,11 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 4. Ad-hoc signature of the bundle itself (its binaries were signed above).
+# 4. Ad-hoc signature of the bundle itself (its binaries were signed above), and nothing it
+# links outside itself and macOS.
 codesign --force --sign - "$APP"
 codesign --verify "$APP"
+"$TOOLS/bin/python" "$HERE/check_app.py" "$APP"
 
 # 5. Disk image.
 DMG="$DIST/OpenGrid-$VERSION-macos-$ARCH.dmg"

@@ -34,3 +34,8 @@ If the window does not open
       sudo zypper install Mesa-libGL1 Mesa-libEGL1 Mesa-dri
   * Over ssh: connect with ssh -X (or -Y); or render off screen with xvfb-run.
 Build from source instead: README.md of the repository, "Building from source", Linux.
+
+Licences
+OpenGrid is MIT-licensed (LICENSE). The folder licenses/ holds the licence texts of every
+third-party package in env/ (Python, Qt, VTK, Netgen, OpenCASCADE, HDF5, CGNS, ...), listed with
+their versions in licenses/README.txt.

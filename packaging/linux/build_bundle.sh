@@ -65,6 +65,8 @@ rm -rf "$BUILD/channel/bld" "$BUILD/channel/src_cache"
 step "runtime environment"
 conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" -c conda-forge \
   "opengrid=$OG_VERSION" python=3.12
+step "licences of the bundled packages (from the package cache: a packed environment has none)"
+"$CONDA/envs/pack/bin/python" "$WORK/packaging/collect_licenses.py" "$BUILD/env" "$BUILD/licenses"
 step "conda-pack"
 "$CONDA/envs/pack/bin/conda-pack" -p "$BUILD/env" -o "$BUILD/env.tar.gz" --quiet
 rm -rf "$BUILD/env"
@@ -75,6 +77,8 @@ tar -xzf "$BUILD/env.tar.gz" -C "$B/env"
 rm -f "$BUILD/env.tar.gz"
 step "launchers, examples, README"
 cp -r "$WORK/packaging/linux/bundle/." "$B/"
+cp "$WORK/LICENSE" "$B/LICENSE"
+rm -rf "$B/licenses" && mv "$BUILD/licenses" "$B/licenses"
 chmod +x "$B/opengrid" "$B/opengrid-python" "$B/install.sh"
 cp "$WORK/docs/images/opengrid_icon.png" "$B/opengrid.png"
 mkdir -p "$B/examples" "$B/tests"

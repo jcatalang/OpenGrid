@@ -12,8 +12,8 @@
 //    with the type's ideal smallest / largest dihedral angle (a_lo, a_hi): tetrahedron 70.53 /
 //    70.53, pyramid 54.74 / 109.47, prism 60 / 90, hexahedron 90 / 90. 0 is ideal, 1 degenerate.
 // Reference: P. M. Knupp, "Achieving finite element mesh quality via optimization of the
-// Jacobian matrix norm and associated quantities", Int. J. Numer. Meth. Engng 48 (2000); equiangle
-// skewness is the definition CFD solvers' mesh checks use.
+// Jacobian matrix norm and associated quantities", Int. J. Numer. Meth. Engng 48 (2000); the
+// equiangle skewness is the definition CFD solvers' mesh checks use.
 // Cell node order: CGNS / VTK (tetrahedron (0, 1, 2) normal towards 3, pyramid base normal
 // towards the apex, prism / hexahedron first face normal towards the second).
 #pragma once

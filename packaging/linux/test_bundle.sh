@@ -49,6 +49,10 @@ mkdir -p /home/user && cd /home/user
 tar -xzf /bundle.tar.gz
 B="$(ls -d /home/user/OpenGrid-*-linux-x86_64)"
 cd "$B"
+step "licences (OpenGrid's and every bundled package's)"
+grep -q "MIT License" LICENSE
+grep -q "^qt6-main " licenses/README.txt && test -d licenses/qt6-main && test -d licenses/netgen
+echo "   $(find licenses -mindepth 1 -maxdepth 1 -type d | wc -l) packages' licence texts"
 step "first start and the imports"
 ./opengrid-python -c "import opengrid, opengrid._core as c, opengrid._occt, netgen.meshing; print('   OpenGrid', opengrid.__version__, '- core', opengrid.core_version(), '- CGNS', c.cgns_available(), '- OpenMP', c.openmp_enabled(), '- threads', opengrid.threads())"
 step "headless: a 2D case extruded, CGNS and Gmsh (no display, no OpenGL)"

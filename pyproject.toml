@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+requires = ["scikit-build-core>=0.11", "nanobind>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -7,6 +7,9 @@ name = "opengrid"
 version = "0.0.2"
 description = "Interactive structured / unstructured / hybrid mesh generator"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "jcatalang" }]
 requires-python = ">=3.10"
 # Required: NumPy. The rest is optional, by feature (none is needed for scripting 2D grids
 # with Plot3D export): the application, VTKHDF / HDF5 export, the IPython console, the tests.

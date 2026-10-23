@@ -5,8 +5,8 @@
 <h1 align="center">OpenGrid</h1>
 
 **An interactive mesh generator for CFD: structured, unstructured and hybrid meshes in 2D and 3D,
-multi-block smoothing, CAD import, solver-ready export and high-order (curved)
-elements for continuous and discontinuous Galerkin solvers.**
+multi-block smoothing, CAD import, solver-ready export and high-order (curved) elements for
+continuous and discontinuous Galerkin solvers.**
 
 C++20 geometry and meshing core, Python bindings (nanobind), a PySide6 + VTK desktop
 application, and a Python scripting API that the GUI itself uses: everything you do is an
@@ -523,6 +523,15 @@ pip install --no-build-isolation -e .   # rerun after C++ changes
 Every step, the system packages for a server without a desktop, and troubleshooting are in
 [`docs/INSTALL_LINUX.md`](docs/INSTALL_LINUX.md).
 
+### macOS (Apple silicon)
+- **No compilation:** download `OpenGrid-<version>-macos-arm64.dmg` from the
+  [Releases](https://github.com/jcatalang/OpenGrid/releases), open it and drag
+  **OpenGrid.app** to Applications (a self-contained app: Python, Qt, VTK, Netgen,
+  OpenCASCADE and OpenGrid; macOS 11 or newer). It is signed ad hoc, not notarised: the first
+  time, right-click it and choose Open (or `xattr -dr com.apple.quarantine
+  /Applications/OpenGrid.app`). `.ogp` projects then open with a double-click.
+- **From source:** conda-forge as above (and the compiler note below).
+
 ### C++ only
 ```bash
 cmake --preset release && cmake --build --preset release && ctest --preset release
@@ -550,8 +559,9 @@ uv pip install --no-build-isolation -e ".[gui,test]"
 ### Packages
 - **conda package:** `rattler-build build --recipe packaging/conda/recipe.yaml -m
   packaging/conda/variants.yaml -c conda-forge --output-dir packaging/output`.
-- **Self-contained macOS app + DMG:** `packaging/macos/build_app.sh` (conda-pack; ad-hoc
-  signed).
+- **Self-contained macOS app + DMG:** `packaging/macos/build_app.sh` (conda-pack; relative
+  library links, checked; ad-hoc signed); `packaging/macos/test_app.sh` checks the DMG as a
+  user gets it (the app copied elsewhere, run with an empty environment).
 - **Development launcher app (macOS):** `packaging/macos/install_launcher.sh`;
   `python tools/check_launcher.py` says whether the installed one is current.
 
@@ -649,5 +659,8 @@ experimental, are collected in [`docs/OPEN_ISSUES.md`](docs/OPEN_ISSUES.md).
 
 ## Licence
 
-No licence has been chosen yet; the repository is private and all rights are reserved by the
-author. Third-party components keep their own licences (above).
+OpenGrid is released under the [MIT licence](LICENSE) (Copyright (c) 2026 jcatalang): use,
+modify and redistribute it freely, keeping the copyright notice; it comes without warranty.
+Third-party components keep their own licences (above); the downloadable bundles carry the
+licence texts of everything they contain (`licenses/` in the Linux folder,
+`OpenGrid.app/Contents/Resources/licenses/` on macOS).

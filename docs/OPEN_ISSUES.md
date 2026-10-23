@@ -338,12 +338,19 @@ history). Phase tags show where each item came from.
   meshes in our checks, which Netgen itself does not promise.
 - **VTKHDF export dominates 2D timings** [9c]: about 1.7–2.4 s of each 1M-cell case
   (HDF5 writes from Python; not parallelised).
-- **App bundle** [9c]: arm64 only; signed ad hoc, not notarised (Gatekeeper asks on first launch
-  of a downloaded copy); large (a whole conda environment with Qt, VTK, OCCT, Netgen). Building
-  it needs conda, rattler-build and conda-pack, and network access to conda-forge.
+- **App bundle** [9c]: arm64 only (Apple silicon; no Intel build); signed ad hoc, not notarised
+  (Gatekeeper asks on first launch of a downloaded copy: right-click > Open); large (a whole
+  conda environment with Qt, VTK, OCCT, Netgen). Building it needs conda, rattler-build and
+  conda-pack, and network access to conda-forge; it is built on this Mac, not on GitHub
+  (macOS runners cost ten times Linux minutes on a private repository). [2026-10-23] Its
+  library links are relative (a copy elsewhere had three pointing into the build folder:
+  `import readline` failed); text files still name the build folder (scripts' first lines in
+  `env/bin`, build settings, a Jupyter kernel file), none used when the app runs. PySide6's
+  modules for Qt components conda-forge does not ship (WebEngine, Multimedia, 3D, ...) are
+  there but cannot be imported.
 - **No AppImage** [9c]: the conda package is the Linux deliverable.
-- **Package metadata** [9c]: version 0.0.2 (0.0.1 was the first Linux bundle), license
-  `LicenseRef-OpenGrid` and a placeholder home page; set them before publishing.
+- **Package metadata** [9c]: version 0.0.2 (0.0.1 was the first Linux bundle); MIT licence and
+  the GitHub home page set on 2026-10-23.
 
 ## Multi-block smoothing (Phase 10)
 - **Laplace control only in groups** [10a]: no Thomas-Middlecoff or attraction functions.

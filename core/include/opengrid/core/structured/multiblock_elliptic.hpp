@@ -33,8 +33,8 @@
 // (util/anderson.hpp) over node positions and wall sources; sliding nodes are put back on
 // their curve after each extrapolation.
 // References: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
-// ch. VI (multiblock grids); P. R. Eiseman, "Multiblock grid generation with
-// automatic zoning", NASA CP-3291 (1995); A. Hilgenstock, Numerical Grid Generation in CFD '88
+// ch. VI (multiblock grids); P. R. Eiseman, "Multiblock grid generation with automatic
+// zoning", NASA CP-3291 (1995); A. Hilgenstock, Numerical Grid Generation in CFD '88
 // (1988) 137-146; W. A. Spekreijse (1995), above.
 #pragma once
 

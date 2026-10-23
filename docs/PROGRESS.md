@@ -848,6 +848,43 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Before making the repository public: MIT licence, neutral wording, licence texts in the downloads (2026-10-23) — requested by the user
+- **No other products named**: the README and every other file (code comments, docs, the
+  original brief) describe OpenGrid in its own terms; literature references keep their authors
+  and titles (P. R. Eiseman, "Multiblock grid generation with automatic zoning", NASA CP-3291).
+  The history is rewritten the same way (below).
+- **MIT licence** (`LICENSE`, Copyright (c) 2026 jcatalang): `pyproject.toml` (`license = "MIT"`,
+  PEP 639; scikit-build-core >= 0.11), the conda recipe (licence, licence file, home page), the
+  README's Licence section.
+- **Licence texts in the downloads**: conda keeps a package's licence files in the package
+  cache, so the packed environments carried none; `packaging/collect_licenses.py` copies them
+  from every package of the runtime environment (Qt / PySide6 LGPL-3.0, Netgen and OpenCASCADE
+  LGPL-2.1, readline GPL-3.0, VTK, HDF5, CGNS, ...) into `licenses/` with a list of versions
+  and licences (`licenses/README.txt`), next to OpenGrid's `LICENSE`: the Linux folder's top,
+  `OpenGrid.app/Contents/Resources/` on macOS; both bundle tests check them.
+
+## Releases 0.0.2: Linux bundle and macOS app (2026-10-22 / 23) — requested by the user
+- **Version 0.0.2** (CMake, pyproject, the conda recipe, `opengrid.__version__`).
+- **Linux bundle** (GitHub Actions, as 0.0.1): the first build failed at the package's import
+  test (`libOpenCL.so.1` missing): GitHub's Ubuntu images now have an OpenCL loader, which
+  CMake found and linked into the experimental GPU sweeps without the package shipping it; the
+  recipe builds Linux without OpenCL. Then PASS on openSUSE Leap 15.6 and Rocky Linux 8 (full)
+  and SLES 15 SP6 / SP3 (headless); the strict build, ctest and pytest pass on Ubuntu. Release
+  v0.0.2 (870 MB).
+- **macOS app in the release** ("the dmg needs to include all the dependencies in the same way
+  as the linux one"): `build_app.sh` packs the whole environment into OpenGrid.app, as before;
+  checking a copy taken out of the DMG into another folder, with the build folder moved away,
+  found three libraries linked to their neighbours by absolute path into the build folder
+  (`libncurses` -> `libtinfo`, `libncursesw`, `libpython3`: `import readline` failed). The
+  build now makes every link into the app relative (`relink_macho.py`, before the ad-hoc
+  re-signing) and fails unless every dependency of every binary resolves inside the app or
+  to macOS (`check_app.py`). `test_app.sh` checks the DMG as a user gets it: the app copied
+  elsewhere, its signature and links, then runs with its own Python and an empty environment
+  (`smoke_app.py`: imports incl. readline and curses, 2D layers, CGNS / Gmsh, 3D Netgen
+  volumes with prism layers, the window offscreen with Qt's plugins from the app; example 09a:
+  STEP and IGES). A `.pkg` installer (the user's suggestion) was not needed: the app runs
+  wherever it is dragged, without fixing its paths at install.
+
 ## Messages on screen, a plain log, quality on the mesh, panel text, wall corners (2026-10-22) — requested by the user
 The user, trying the new inflation layers on a sketch block: they did not generate (the
 refusal only reached the status bar and the log, whose lines were hard to read: "those error

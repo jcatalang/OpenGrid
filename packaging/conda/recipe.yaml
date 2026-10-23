@@ -46,7 +46,7 @@ requirements:
   host:
     - python
     - pip
-    - scikit-build-core >=0.10
+    - scikit-build-core >=0.11
     - nanobind >=2.0
     - eigen
     - hdf5
@@ -94,8 +94,9 @@ tests:
         - packaging_smoke.py
 
 about:
-  homepage: https://example.invalid/opengrid
-  license: LicenseRef-OpenGrid
+  homepage: https://github.com/jcatalang/OpenGrid
+  license: MIT
+  license_file: LICENSE
   summary: Interactive structured / unstructured / hybrid mesh generator (2D / 3D)
   description: |
     OpenGrid: a C++20 meshing core (TFI, elliptic and hyperbolic grids, Delaunay and advancing

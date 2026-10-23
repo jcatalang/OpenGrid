@@ -356,7 +356,7 @@ removed), as a double-click on a handle does in the GUI. One undo step.
 ### `create_smoothing_group(domains=(), walls=(), slide='auto', name: str | None = None, omega: float = 1.0, max_iterations: int = 2000, tolerance: float = 1e-06, acceleration: int = 20, blocks=(), joints: str = 'fixed', pinned=(), slide_limit: float = 0.5, symmetry=()) -> str`
 
 Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one grid
-: interfaces and block corners move, grid lines continue across
+(as one grid): interfaces and block corners move, grid lines continue across
 interfaces, and irregular points (3 or 5+ domains around a node) are relaxed too.
 ``walls``: connectors (or dicts ``{"connector", "spacing" (None: the initial
 first-cell height), "decay", "relaxation", "max_source", "layers", "growth"}``) with
@@ -399,7 +399,7 @@ boundaries), else the connector's own nodes.
 
 ### `create_sketch(vertices, blocks, dimensions=(), spacing: float | None = None, curves=(), surfaces=(), walls=(), fixed=(), pinned=(), symmetry=(), distributions=(), relax: bool = True, tolerance: float = 1e-08, max_iterations: int = 4000, extrude=None, interval_multiple: int = 1, connectors=(), unstructured=(), generator=None, name: str | None = None) -> str`
 
-Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
+Sketch topology (a wireframe of blocks, opengrid.model.sketch): ``vertices``
 (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
 2D, counter-clockwise or not; 8 in 3D, VTK hexahedron order). ``dimensions``: points
 per edge, ``{(a, b): n}`` on any edge of each edge family (or ``spacing`` for the

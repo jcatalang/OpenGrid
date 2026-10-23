@@ -913,7 +913,7 @@ class Session:
         symmetry=(),
     ) -> str:
         """Smooth planar structured ``domains`` (or six-face ``blocks``, 3D) together as one grid
-       : interfaces and block corners move, grid lines continue across
+        (as one grid): interfaces and block corners move, grid lines continue across
         interfaces, and irregular points (3 or 5+ domains around a node) are relaxed too.
         ``walls``: connectors (or dicts ``{"connector", "spacing" (None: the initial
         first-cell height), "decay", "relaxation", "max_source", "layers", "growth"}``) with
@@ -1002,7 +1002,7 @@ class Session:
         generator=None,
         name: str | None = None,
     ) -> str:
-        """Sketch topology (wireframe of blocks, opengrid.model.sketch): ``vertices``
+        """Sketch topology (a wireframe of blocks, opengrid.model.sketch): ``vertices``
         (points drawn loosely around the geometry) and ``blocks`` (4 vertex indices each in
         2D, counter-clockwise or not; 8 in 3D, VTK hexahedron order). ``dimensions``: points
         per edge, ``{(a, b): n}`` on any edge of each edge family (or ``spacing`` for the

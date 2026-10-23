@@ -62,7 +62,8 @@ in VTK). Its edges and faces are those of the blocks, shared where blocks share 
 
 Method: the topology is a floating wireframe (blocks drawn freely, corners projected onto the
 geometry, the grid relaxed with its block corners and interfaces free); the smoothing is that
-of opengrid.model.groups. References: P. R. Eiseman, "Multiblock grid generation with automatic zoning", NASA CP-3291 (1995); J. F. Thompson, B. K. Soni, N. P. Weatherill (eds.), Handbook of
+of opengrid.model.groups. References: P. R. Eiseman, "Multiblock grid generation with automatic
+zoning", NASA CP-3291 (1995); J. F. Thompson, B. K. Soni, N. P. Weatherill (eds.), Handbook of
 Grid Generation, CRC Press (1999), ch. 13 (multiblock topology).
 """
 

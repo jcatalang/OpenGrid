@@ -3,7 +3,7 @@
 Method: a structured domain needs the same number of points on opposite edges, so changing one
 connector's dimension must change the connectors topologically opposite to it, across every
 structured domain that uses it (and through the domains that are the faces of blocks, which
-share their connectors). The change spreads
+share their connectors), as re-dimensioning a connector should. The change spreads
 breadth first: for each domain using a changed connector, the opposite edge is brought to the
 same point count by changing one of its connectors that is still free - the only one when the
 edge is a single connector, else the longest (a warning says which) - and that connector's

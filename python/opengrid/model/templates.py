@@ -31,7 +31,7 @@ smoothing group (10d), so nothing is placed by hand. ``layers`` / ``growth`` (ev
 wall layers on all its walls (11a: the first layers marched normal to the wall and kept);
 ``interval_multiple``: interval counts rounded up to multiples (for order-p meshes, 11e).
 
-Method: the standard multi-block topologies of Thompson, Warsi and Mastin;
+Method: the standard multi-block topologies (Thompson, Warsi and Mastin; Eiseman);
 references: J. F. Thompson, Z. U. A. Warsi, C. W. Mastin, Numerical Grid Generation (1985),
 ch. VI-VII; P. R. Eiseman, NASA CP-3291 (1995).
 """

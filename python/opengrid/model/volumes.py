@@ -60,6 +60,9 @@ INFLATION_INTERNALS = {
     "fan_threshold": 60.0,
     "fan_step": 30.0,
 }
+# Meshing again with the layer front lowered where core cells could not reach the quality
+# floor: at most this many times (_lower_stuck_columns).
+LAYER_RETRIES = 3
 # Internal settings of the mesh optimisation (opengrid._core.optimize_3d; not in projects).
 OPTIMIZATION_INTERNALS = {"threshold": 0.3, "passes": 4}
 # Apex height of pyramids on quads of an inflation front, in mean edge lengths.
@@ -560,123 +563,155 @@ class VolumeEvaluator:
         block_faces = set()
         for block in store.entities("block"):
             block_faces.update(session.blocks.evaluate(block.id)["faces"].values())
-        faces: dict[int, list] = {}
-        layer = {key: np.zeros((0, n), dtype=np.int64) for key, n, _ in CELL_TYPES}
-        info = None
-        warnings: list[str] = []
-        if generator["inflation"] is None:
-            core = [(c, f, False) for c, f in zip(shell["cells"], shell["cell_face"], strict=True)]
-        else:
-            points, layer, core, faces, info = self._inflate(entity, shell, generator)
-            warnings.extend(info["warnings"])
-        # The surface of the region to fill with tetrahedra: boundary cells (face: their domain)
-        # and the final inflation front (face None; its quads are faces of layer cells, so they
-        # always get pyramids).
-        triangles = []
-        pyramids = []
-        apexes = []
-        n_points = len(points)
-        for cell, face, front in core:
-            cell = np.asarray(cell, dtype=np.int64)
-            if len(cell) == 3:
-                triangles.append(cell)
+
+        def attempt(node_layers):
+            """Layers (at most node_layers per wall node, None: no limits), the core's tetrahedra
+            and the optimisation: (points, cells, faces, info, optimization, warnings, number of
+            fixed points: the shell's and the layers')."""
+            points = shell["points"]
+            faces: dict[int, list] = {}
+            layer = {key: np.zeros((0, n), dtype=np.int64) for key, n, _ in CELL_TYPES}
+            info = None
+            warnings: list[str] = []
+            if generator["inflation"] is None:
+                core = [
+                    (c, f, False) for c, f in zip(shell["cells"], shell["cell_face"], strict=True)
+                ]
+            else:
+                points, layer, core, faces, info = self._inflate(
+                    entity, shell, generator, node_layers
+                )
+                warnings.extend(info["warnings"])
+            # The surface of the region to fill with tetrahedra: boundary cells (face: their domain)
+            # and the final inflation front (face None; its quads are faces of layer cells, so they
+            # always get pyramids).
+            triangles = []
+            pyramids = []
+            apexes = []
+            n_points = len(points)
+            for cell, face, front in core:
+                cell = np.asarray(cell, dtype=np.int64)
+                if len(cell) == 3:
+                    triangles.append(cell)
+                    if face is not None:
+                        faces.setdefault(face, []).append(cell)
+                    continue
+                mode = generator["pyramids"]
+                if not front and (mode == "never" or (mode == "auto" and face not in block_faces)):
+                    for half in (cell[[0, 1, 2]], cell[[0, 2, 3]]):
+                        triangles.append(half)
+                        faces.setdefault(face, []).append(half)
+                    continue
                 if face is not None:
                     faces.setdefault(face, []).append(cell)
-                continue
-            mode = generator["pyramids"]
-            if not front and (mode == "never" or (mode == "auto" and face not in block_faces)):
-                for half in (cell[[0, 1, 2]], cell[[0, 2, 3]]):
-                    triangles.append(half)
-                    faces.setdefault(face, []).append(half)
-                continue
-            if face is not None:
-                faces.setdefault(face, []).append(cell)
-            p = points[cell]
-            normal = np.cross(p[2] - p[0], p[3] - p[1])  # outward of the region
-            normal = normal / np.linalg.norm(normal)
-            size = np.mean(np.linalg.norm(p - np.roll(p, -1, axis=0), axis=1))
-            # Boundary quads: apex height 0.3 h, so the side faces rise at ~31 degrees and
-            # pyramids on two faces meeting at a right angle do not touch (at 0.5 h their sides
-            # would coincide). Inflation fronts are smooth: the apex goes to FRONT_APEX h.
-            ratio = 0.3
-            if front:
-                ratio = FRONT_APEX
-            apex = p.mean(axis=0) - ratio * size * normal
-            index = n_points + len(apexes)
-            apexes.append(apex)
-            pyramids.append([cell[0], cell[3], cell[2], cell[1], index])
-            for k in range(4):
-                # Side triangle of the pyramid, oriented out of the remaining region (that is,
-                # into the pyramid): the face edge in its own direction, then the apex.
-                triangles.append([cell[k], cell[(k + 1) % 4], index])
-        if apexes:
-            points = np.concatenate([points, np.asarray(apexes)])
-        triangles = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
-        # The backend gets only the points of the core surface.
-        used = np.unique(triangles)
-        local = np.full(len(points), -1, dtype=np.int64)
-        local[used] = np.arange(len(used))
-        coords, tets = backend(generator["backend"]).mesh(
-            points[used], local[triangles], generator["max_size"], generator["grading"]
-        )
-        if len(coords) < len(used) or not np.array_equal(coords[: len(used)], points[used]):
-            raise ValidationError(
-                [Issue(entity.name, "the backend moved or reordered boundary points")]
+                p = points[cell]
+                normal = np.cross(p[2] - p[0], p[3] - p[1])  # outward of the region
+                normal = normal / np.linalg.norm(normal)
+                size = np.mean(np.linalg.norm(p - np.roll(p, -1, axis=0), axis=1))
+                # Boundary quads: apex height 0.3 h, so the side faces rise at ~31 degrees and
+                # pyramids on two faces meeting at a right angle do not touch (at 0.5 h their sides
+                # would coincide). Inflation fronts are smooth: the apex goes to FRONT_APEX h.
+                ratio = 0.3
+                if front:
+                    ratio = FRONT_APEX
+                apex = p.mean(axis=0) - ratio * size * normal
+                index = n_points + len(apexes)
+                apexes.append(apex)
+                pyramids.append([cell[0], cell[3], cell[2], cell[1], index])
+                for k in range(4):
+                    # Side triangle of the pyramid, oriented out of the remaining region (that is,
+                    # into the pyramid): the face edge in its own direction, then the apex.
+                    triangles.append([cell[k], cell[(k + 1) % 4], index])
+            if apexes:
+                points = np.concatenate([points, np.asarray(apexes)])
+            triangles = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+            # The backend gets only the points of the core surface.
+            used = np.unique(triangles)
+            local = np.full(len(points), -1, dtype=np.int64)
+            local[used] = np.arange(len(used))
+            coords, tets = backend(generator["backend"]).mesh(
+                points[used], local[triangles], generator["max_size"], generator["grading"]
             )
-        to_global = np.concatenate([used, len(points) + np.arange(len(coords) - len(used))])
-        tets = to_global[tets]
-        points = np.concatenate([points, coords[len(used) :]])
-        volumes = _tet_volume(points[tets])
-        flip = volumes < 0
-        tets[flip] = tets[flip][:, [0, 2, 1, 3]]
-        if np.any(np.abs(volumes) <= 1e-14 * shell["volume"] / max(len(tets), 1)):
-            warnings.append("some tetrahedra are degenerate")
-        cells = {
-            "tets": np.concatenate([layer["tets"], tets]),
-            "pyramids": np.concatenate(
-                [layer["pyramids"], np.asarray(pyramids, dtype=np.int64).reshape(-1, 5)]
-            ),
-            "prisms": layer["prisms"],
-            "hexes": layer["hexes"],
-        }
-        optimization = None
-        if generator["optimize"]:
-            # Movable: the backend's interior nodes and the pyramid apexes. Boundary and layer
-            # nodes stay, and layer tetrahedra are never swapped. (Moving the centres of layer
-            # transition cells only trades their tetrahedra against their pyramids: their shape
-            # is set by the layer's anisotropy.)
-            movable = np.zeros(len(points), dtype=bool)
-            movable[n_points:] = True
-            out = _core.optimize_3d(
-                np.ascontiguousarray(points),
-                np.ascontiguousarray(cells["tets"]),
-                np.ascontiguousarray(cells["pyramids"]),
-                np.ascontiguousarray(cells["prisms"]),
-                np.ascontiguousarray(cells["hexes"]),
-                movable.tolist(),
-                n_fixed_tets=len(layer["tets"]),
-                **OPTIMIZATION_INTERNALS,
-                floor_jacobian=generator["quality_floor"]["min_jacobian"],
-                floor_skewness=generator["quality_floor"]["max_skewness"],
-            )
-            points = out["points"]
-            cells["tets"] = out["tets"]
-            optimization = {
-                key: out[key]
-                for key in (
-                    "moved",
-                    "swaps_23",
-                    "swaps_32",
-                    "worst_before",
-                    "worst_after",
-                    "below_before",
-                    "below_after",
-                    "below_floor_before",
-                    "below_floor_after",
+            if len(coords) < len(used) or not np.array_equal(coords[: len(used)], points[used]):
+                raise ValidationError(
+                    [Issue(entity.name, "the backend moved or reordered boundary points")]
                 )
+            to_global = np.concatenate([used, len(points) + np.arange(len(coords) - len(used))])
+            tets = to_global[tets]
+            points = np.concatenate([points, coords[len(used) :]])
+            volumes = _tet_volume(points[tets])
+            flip = volumes < 0
+            tets[flip] = tets[flip][:, [0, 2, 1, 3]]
+            if np.any(np.abs(volumes) <= 1e-14 * shell["volume"] / max(len(tets), 1)):
+                warnings.append("some tetrahedra are degenerate")
+            cells = {
+                "tets": np.concatenate([layer["tets"], tets]),
+                "pyramids": np.concatenate(
+                    [layer["pyramids"], np.asarray(pyramids, dtype=np.int64).reshape(-1, 5)]
+                ),
+                "prisms": layer["prisms"],
+                "hexes": layer["hexes"],
             }
-            if out["inverted_after"]:
-                warnings.append(f"{out['inverted_after']} cells are inverted after optimisation")
+            optimization = None
+            if generator["optimize"]:
+                # Movable: the backend's interior nodes and the pyramid apexes. Boundary and layer
+                # nodes stay, and layer tetrahedra are never swapped. (Moving the centres of layer
+                # transition cells only trades their tetrahedra against their pyramids: their shape
+                # is set by the layer's anisotropy.)
+                movable = np.zeros(len(points), dtype=bool)
+                movable[n_points:] = True
+                out = _core.optimize_3d(
+                    np.ascontiguousarray(points),
+                    np.ascontiguousarray(cells["tets"]),
+                    np.ascontiguousarray(cells["pyramids"]),
+                    np.ascontiguousarray(cells["prisms"]),
+                    np.ascontiguousarray(cells["hexes"]),
+                    movable.tolist(),
+                    n_fixed_tets=len(layer["tets"]),
+                    **OPTIMIZATION_INTERNALS,
+                    floor_jacobian=generator["quality_floor"]["min_jacobian"],
+                    floor_skewness=generator["quality_floor"]["max_skewness"],
+                )
+                points = out["points"]
+                cells["tets"] = out["tets"]
+                optimization = {
+                    key: out[key]
+                    for key in (
+                        "moved",
+                        "swaps_23",
+                        "swaps_32",
+                        "inserted",
+                        "worst_before",
+                        "worst_after",
+                        "below_before",
+                        "below_after",
+                        "below_floor_before",
+                        "below_floor_after",
+                    )
+                }
+                if out["inverted_after"]:
+                    warnings.append(
+                        f"{out['inverted_after']} cells are inverted after optimisation"
+                    )
+            return points, cells, faces, info, optimization, warnings, n_points
+
+        # Core tetrahedra the optimiser cannot lift to the quality floor because all their nodes
+        # are fixed (e.g. slivers lying on a nearly flat layer front): the layer front is
+        # lowered by one layer at the columns under them and the volume meshed again.
+        node_layers = None
+        lowered = 0
+        for retry in range(LAYER_RETRIES + 1):
+            points, cells, faces, info, optimization, warnings, n_points = attempt(node_layers)
+            if info is None or retry == LAYER_RETRIES:
+                break
+            node_layers, count = _lower_stuck_columns(
+                points, cells, info, n_points, generator["quality_floor"], node_layers
+            )
+            if count == 0:
+                break
+            lowered += count
+        if info is not None:
+            info = {**info, "lowered": lowered}
         # Drop points no cell uses (interior nodes of re-meshed sliding faces), keeping the order.
         keep = np.zeros(len(points), dtype=bool)
         for array in cells.values():
@@ -854,7 +889,7 @@ class VolumeEvaluator:
             shared.update(self.session.blocks.evaluate(block.id)["faces"].values())
         return shared & set(entity.params["faces"])
 
-    def _inflate(self, entity, shell, generator):
+    def _inflate(self, entity, shell, generator, node_layers=None):
         """Inflation layers from the wall faces (opengrid._core.inflate_3d), the sliding faces
         re-meshed around them. Returns (points, layer cells, core surface, boundary faces,
         info)."""
@@ -904,6 +939,7 @@ class VolumeEvaluator:
                 **INFLATION_INTERNALS,
                 floor_jacobian=generator["quality_floor"]["min_jacobian"],
                 floor_skewness=generator["quality_floor"]["max_skewness"],
+                node_layers=node_layers or [],
             )
         except ValueError as error:
             raise ValidationError([Issue(entity.name, str(error))]) from None
@@ -1003,6 +1039,43 @@ def volume_quality(mesh) -> dict:
     if q is None:
         q = _cell_quality(mesh)
     return {key: np.asarray(value).reshape(1, -1) for key, value in q.items()}
+
+
+def _lower_stuck_columns(points, cells, info, n_fixed, floor, node_layers):
+    """Per-node layer limits one layer lower at the columns under core tetrahedra that miss the
+    quality floor with all their nodes fixed (index below n_fixed: shell and layer nodes, which
+    no node move or swap of the optimiser reaches; e.g. slivers lying on a nearly flat layer
+    front). Returns (limits per wall node, -1: none; the number of columns lowered)."""
+    tets = cells["tets"]
+    if len(tets) == 0:
+        return node_layers, 0
+    q = _cell_quality(
+        {
+            "points": points,
+            "tets": tets,
+            "pyramids": np.zeros((0, 5), dtype=np.int64),
+            "prisms": np.zeros((0, 6), dtype=np.int64),
+            "hexes": np.zeros((0, 8), dtype=np.int64),
+        }
+    )
+    bad = (q["scaled_jacobian"] < floor["min_jacobian"]) | (q["skewness"] > floor["max_skewness"])
+    stuck = [t for t in np.flatnonzero(bad) if np.all(tets[t] < n_fixed)]
+    if not stuck:
+        return node_layers, 0
+    layers = np.asarray(info["layers"])
+    top = np.asarray(info["top"])
+    column_of = {int(top[w]): w for w in np.flatnonzero(layers > 0)}  # front node -> wall node
+    limits = np.full(len(layers), -1, dtype=np.int64)
+    if node_layers is not None:
+        limits = np.asarray(node_layers, dtype=np.int64)
+    count = 0
+    for t in stuck:
+        for v in tets[t]:
+            w = column_of.get(int(v))
+            if w is not None and (limits[w] < 0 or layers[w] - 1 < limits[w]):
+                limits[w] = layers[w] - 1
+                count += 1
+    return limits.tolist(), count
 
 
 def _cell_quality(mesh) -> dict:

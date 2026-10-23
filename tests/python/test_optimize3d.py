@@ -153,3 +153,34 @@ def test_sheared_block_misses_a_strict_floor(tmp_path):
     assert "miss the quality floor" in og.block_status("sheared")
     issues = [str(i) for i in og.boundary_report().issues]
     assert any("sheared" in i and "quality floor" in i for i in issues)
+
+
+def test_cells_stuck_on_a_layer_front_lower_it():
+    """Example 09a's bracket at a spacing where Netgen lays slivers flat on the layer front:
+    all their nodes are fixed, so no node move or swap reaches them. A point inserted above
+    one lifts it; the others make the volume mesh again with the front one layer lower at
+    their columns (Linux builds met this at the default spacing). Every cell then meets the
+    floor and the cells still fill the volume exactly."""
+    import importlib
+    import sys
+    from pathlib import Path
+
+    examples = Path(__file__).resolve().parents[2] / "examples"
+    sys.path.insert(0, str(examples))
+    example = importlib.import_module("09a_cad_import")
+    og = opengrid.Session()
+    walls = og.import_cad(example.STEP, name="bracket", spacing=0.039).domains
+    outer = example.phase8b.box_faces(og, (-1.2, -1.0, -0.8), (3.0, 1.8, 1.2), 4, "far")
+    og.create_volume(
+        list(outer.values()) + walls,
+        generator={
+            "max_size": 0.3,
+            "inflation": {"faces": walls, "first_height": 2e-3, "growth_rate": 1.2, "layers": 12},
+        },
+        name="fluid",
+    )
+    mesh = og.volume_mesh("fluid")
+    assert mesh["quality"]["below_floor"] == 0
+    assert mesh["inflation"]["lowered"] > 0
+    assert mesh["inflation"]["stops"].get("limit", 0) > 0
+    assert not [w for w in mesh["warnings"] if "fill" in w or "inverted" in w]

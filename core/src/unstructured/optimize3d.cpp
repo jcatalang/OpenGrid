@@ -85,6 +85,8 @@ struct Cell {
 };
 
 constexpr double kInvSqrt3 = std::numbers::inv_sqrt3;
+// Point insertion tries at most this many cells (the worst first).
+constexpr std::size_t kMaxInsertions = 1000;
 constexpr std::array<std::array<double, 3>, 14> kDirections = {
     {{1, 0, 0},
      {-1, 0, 0},
@@ -149,6 +151,12 @@ class Optimizer {
     r.below_floor_before = below_floor();
     if (opt_.move_nodes && r.below_floor_before > 0) {
       r.moved += rescue();
+    }
+    if (opt_.insert && opt_.swap && below_floor() > 0) {
+      r.inserted = insert_points();
+      if (r.inserted > 0 && opt_.move_nodes) {
+        r.moved += rescue();
+      }
     }
     r.below_floor_after = below_floor();
     std::tie(r.worst_after, r.below_after, r.inverted_after) = summary();
@@ -251,6 +259,237 @@ class Optimizer {
       }
     }
     return moved;
+  }
+
+  // Point insertion (optimize3d.hpp): the number of points inserted.
+  Index insert_points() {
+    build_node_cells();
+    std::vector<std::pair<double, Index>> order;
+    for (std::size_t c = 0; c < cells_.size(); ++c) {
+      Cell& cell = cells_[c];
+      cell.touched = false;
+      bool fixed = true;
+      for (std::size_t k = 0; k < 4; ++k) {
+        fixed = fixed && !movable_[u(cell.v[k])];
+      }
+      if (cell.alive && cell.n == 4 && cell.swappable && fixed) {
+        const double m = margin(cell);
+        if (m < 0.0) {
+          order.emplace_back(m, sz(c));
+        }
+      }
+    }
+    std::sort(order.begin(), order.end());
+    if (order.size() > kMaxInsertions) {
+      order.resize(kMaxInsertions);  // (the worst first)
+    }
+    Index inserted = 0;
+    for (const auto& [initial, c] : order) {
+      if (!cells_[u(c)].alive || cells_[u(c)].touched) {
+        continue;
+      }
+      std::vector<Index> cavity = {c};
+      for (int grow = 0; grow < 3; ++grow) {
+        cavity = grown(cavity);
+        if (try_star(cavity)) {
+          ++inserted;
+          break;
+        }
+      }
+    }
+    compact();
+    return inserted;
+  }
+
+  // The alive cell other than `t` with triangle `key` (-1: none), from the node lists of the
+  // pass (cells created during it are not listed: their faces count as boundary).
+  [[nodiscard]] Index across(Index t, const std::array<Index, 3>& key) const {
+    for (Index k = start_[u(key[0])]; k < start_[u(key[0]) + 1]; ++k) {
+      const Index w = node_cells_[u(k)];
+      if (w != t && cells_[u(w)].alive && has_triangle(cells_[u(w)], key)) {
+        return w;
+      }
+    }
+    return -1;
+  }
+
+  [[nodiscard]] std::array<Index, 3> face_key(const Cell& cell, const std::array<int, 3>& f) const {
+    std::array<Index, 3> key = {cell.v[u(f[0])], cell.v[u(f[1])], cell.v[u(f[2])]};
+    std::sort(key.begin(), key.end());
+    return key;
+  }
+
+  // The cavity with the swappable tetrahedra across its faces (untouched in this pass).
+  [[nodiscard]] std::vector<Index> grown(const std::vector<Index>& cavity) const {
+    std::vector<Index> out = cavity;
+    for (const Index t : cavity) {
+      for (const auto& f : cell_triangles(4)) {
+        const Index w = across(t, face_key(cells_[u(t)], f));
+        if (w >= 0 && cells_[u(w)].n == 4 && cells_[u(w)].swappable && !cells_[u(w)].touched &&
+            std::find(out.begin(), out.end(), w) == out.end()) {
+          out.push_back(w);
+        }
+      }
+    }
+    return out;
+  }
+
+  [[nodiscard]] double volume6(const std::array<Index, 4>& t) const {
+    const Vec3 a = at(points_, t[0]);
+    return std::fabs(
+        dot(at(points_, t[1]) - a, cross(at(points_, t[2]) - a, at(points_, t[3]) - a)));
+  }
+
+  // Replaces the cavity by the star of a new node when that is better (optimize3d.hpp).
+  bool try_star(const std::vector<Index>& cavity) {
+    std::vector<std::array<Index, 4>> star;
+    std::vector<Index> nodes;
+    double old_worst = std::numeric_limits<double>::infinity();
+    double old_volume = 0.0;
+    const Index p = sz(points_.size());
+    for (const Index t : cavity) {
+      const Cell& cell = cells_[u(t)];
+      old_worst = std::min(old_worst, margin(cell));
+      old_volume += volume6({cell.v[0], cell.v[1], cell.v[2], cell.v[3]});
+      for (std::size_t k = 0; k < 4; ++k) {
+        if (std::find(nodes.begin(), nodes.end(), cell.v[k]) == nodes.end()) {
+          nodes.push_back(cell.v[k]);
+        }
+      }
+      for (const auto& f : cell_triangles(4)) {
+        const Index w = across(t, face_key(cell, f));
+        if (w >= 0 && std::find(cavity.begin(), cavity.end(), w) != cavity.end()) {
+          continue;  // an inner face of the cavity
+        }
+        // The cell with its node opposite this face replaced by the new node: same
+        // orientation, positive when the node is on the same side of the face.
+        std::array<Index, 4> t4 = {cell.v[0], cell.v[1], cell.v[2], cell.v[3]};
+        t4[u(6 - f[0] - f[1] - f[2])] = p;
+        star.push_back(t4);
+      }
+    }
+    Vec3 centre{0.0, 0.0, 0.0};
+    for (const Index v : nodes) {
+      centre += at(points_, v);
+    }
+    centre = centre / static_cast<double>(nodes.size());
+    double spread = 0.0;
+    for (const Index v : nodes) {
+      spread += distance(at(points_, v), centre) / static_cast<double>(nodes.size());
+    }
+    // Starts: the cavity's centroid and each of its cells' (a flat cavity's kernel can be
+    // small); the star's worst floor margin, finite even with inverted cells (it rises as they
+    // straighten), is maximised from each, the best kept.
+    std::vector<Vec3> starts = {centre};
+    // ... and the apex of an ideal tetrahedron on each face of the bad cell (the first), on the
+    // side of its fourth node: above a layer front for a sliver lying on it.
+    const Cell& bad = cells_[u(cavity.front())];
+    for (const auto& f : cell_triangles(4)) {
+      const Vec3 a = at(points_, bad.v[u(f[0])]);
+      const Vec3 b = at(points_, bad.v[u(f[1])]);
+      const Vec3 c = at(points_, bad.v[u(f[2])]);
+      const Vec3 opposite = at(points_, bad.v[u(6 - f[0] - f[1] - f[2])]);
+      Vec3 normal = cross(b - a, c - a);
+      const double length = norm(normal);
+      if (!(length > 0.0)) {
+        continue;
+      }
+      normal = normal / length;
+      const Vec3 mid = (a + b + c) / 3.0;
+      if (dot(opposite - mid, normal) < 0.0) {
+        normal = -normal;
+      }
+      const double edge = (distance(a, b) + distance(b, c) + distance(c, a)) / 3.0;
+      starts.push_back(mid + normal * (std::sqrt(2.0 / 3.0) * edge));
+    }
+    starts.push_back((at(points_, bad.v[0]) + at(points_, bad.v[1]) + at(points_, bad.v[2]) +
+                      at(points_, bad.v[3])) /
+                     4.0);
+    points_.push_back({centre.x, centre.y, centre.z});
+    movable_.push_back(true);
+    auto worst_star = [&]() {
+      double worst = std::numeric_limits<double>::infinity();
+      for (const auto& t4 : star) {
+        Cell cell;
+        std::copy(t4.begin(), t4.end(), cell.v.begin());
+        worst = std::min(worst, margin(cell));
+      }
+      return worst;
+    };
+    double current = -std::numeric_limits<double>::infinity();
+    Vec3 chosen = centre;
+    for (const Vec3& start : starts) {
+      points_[u(p)] = {start.x, start.y, start.z};
+      double value = worst_star();
+      double step = 0.2 * spread;
+      for (int iteration = 0; iteration < 80 && step > 1e-7 * spread; ++iteration) {
+        const Vec3 here = at(points_, p);
+        Vec3 best_point = here;
+        double best = value;
+        for (const auto& d : kDirections) {
+          const Vec3 q = here + Vec3{d[0], d[1], d[2]} * step;
+          points_[u(p)] = {q.x, q.y, q.z};
+          const double trial = worst_star();
+          if (trial > best) {
+            best = trial;
+            best_point = q;
+          }
+        }
+        points_[u(p)] = {best_point.x, best_point.y, best_point.z};
+        if (best > value) {
+          value = best;
+        } else {
+          step *= 0.5;
+        }
+      }
+      if (value > current) {
+        current = value;
+        chosen = at(points_, p);
+      }
+    }
+    points_[u(p)] = {chosen.x, chosen.y, chosen.z};
+    double new_volume = 0.0;
+    bool positive = true;
+    for (const auto& t4 : star) {
+      new_volume += volume6(t4);
+      Cell cell;
+      std::copy(t4.begin(), t4.end(), cell.v.begin());
+      positive = positive && quality(cell) > 0.0;
+    }
+    const bool tiles =
+        positive && std::fabs(new_volume - old_volume) <= 1e-9 * std::max(old_volume, 1e-300);
+    // Kept only when it reaches the floor: otherwise the cell stays for the caller, which can
+    // still remedy cells whose nodes are all fixed (the volume generator lowers the layers).
+    if (!tiles || !(current >= 0.0) || !(current > old_worst)) {
+      points_.pop_back();
+      movable_.pop_back();
+      return false;
+    }
+    for (const Index t : cavity) {
+      cells_[u(t)].alive = false;
+      cells_[u(t)].touched = true;
+    }
+    for (const auto& t4 : star) {
+      Cell cell;
+      std::copy(t4.begin(), t4.end(), cell.v.begin());
+      cell.swappable = true;
+      cell.touched = true;
+      cells_.push_back(cell);
+    }
+    return true;
+  }
+
+  // Drops dead cells, keeping the order with the fixed ones first (as after a swap pass).
+  void compact() {
+    std::vector<Cell> kept;
+    kept.reserve(cells_.size());
+    for (const Cell& cell : cells_) {
+      if (cell.alive) {
+        kept.push_back(cell);
+      }
+    }
+    std::stable_partition(kept.begin(), kept.end(), [](const Cell& c) { return !c.swappable; });
+    cells_ = std::move(kept);
   }
 
   // f(v) for every movable node with cells (others: +infinity), in parallel.
@@ -692,16 +931,7 @@ class Optimizer {
         ++s32;
       }
     }
-    // Drop dead cells, keeping the order (fixed tetrahedra first).
-    std::vector<Cell> kept;
-    kept.reserve(cells_.size());
-    for (const Cell& cell : cells_) {
-      if (cell.alive) {
-        kept.push_back(cell);
-      }
-    }
-    std::stable_partition(kept.begin(), kept.end(), [](const Cell& c) { return !c.swappable; });
-    cells_ = std::move(kept);
+    compact();
     return {s23, s32};
   }
 

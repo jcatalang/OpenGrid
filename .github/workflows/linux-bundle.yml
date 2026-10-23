@@ -16,6 +16,15 @@ on:
         description: "Build with warnings as errors and run the C++ and Python tests"
         type: boolean
         default: true
+  # Also called by ci.yml (the tests on every push, once the repository is public).
+  workflow_call:
+    inputs:
+      bundle:
+        type: boolean
+        default: false
+      tests:
+        type: boolean
+        default: true
 
 permissions:
   contents: read

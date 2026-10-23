@@ -418,6 +418,9 @@ class Inflator {
         in_.node_group.size() != points_.size()) {
       throw std::invalid_argument("inflate_3d: wall / face_group / node_group sizes do not match");
     }
+    if (!in_.max_layers.empty() && in_.max_layers.size() != points_.size()) {
+      throw std::invalid_argument("inflate_3d: max_layers needs one value per point");
+    }
     std::map<std::pair<Index, Index>, std::vector<Index>> edges;
     for (std::size_t f = 0; f < nf; ++f) {
       const auto& face = in_.faces[f];
@@ -1030,6 +1033,16 @@ class Inflator {
     h_ = h;
     for (Column& col : cols_) {
       col.pinned = false;
+    }
+    // Per-node layer limits (Inflation3DInput::max_layers): a column stops once it has them.
+    if (!in_.max_layers.empty()) {
+      for (std::size_t c = 0; c < cols_.size(); ++c) {
+        const Column& col = cols_[c];
+        const int limit = in_.max_layers[u(col.base)];
+        if (col.active && limit >= 0 && col.layers >= limit) {
+          stop(sz(c), "limit");
+        }
+      }
     }
     // Inward normals of the current front faces.
     for (WallFace& w : walls_) {

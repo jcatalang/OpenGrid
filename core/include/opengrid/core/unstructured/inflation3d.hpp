@@ -74,6 +74,10 @@ struct Inflation3DInput {
   std::vector<bool> wall;                        // per face
   std::vector<std::int64_t> face_group;          // per face (e.g. its domain); >= 0
   std::vector<std::int64_t> node_group;          // per point: plane group it may slide in, or -1
+  // Per point: at most this many layers on its column (reason "limit"), -1: no limit; empty: no
+  // limits. (The volume generator lowers the front this way where the core mesh had cells it
+  // could not lift to the quality floor.)
+  std::vector<int> max_layers;
 };
 
 struct Inflation3DResult {

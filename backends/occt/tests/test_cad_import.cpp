@@ -31,10 +31,17 @@ TopoDS_Shape part() {
   return BRepAlgoAPI_Cut(box, cylinder).Shape();
 }
 
+// A file of the running test (ctest runs the tests in parallel: one name per test, or one test
+// reads a file another is writing).
 std::string temp_file(const std::string& name) {
   const auto dir = std::filesystem::temp_directory_path() / "og_occt_tests";
   std::filesystem::create_directories(dir);
-  return (dir / name).string();
+  const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
+  std::string prefix;
+  if (test != nullptr) {
+    prefix = std::string(test->test_suite_name()) + "." + test->name() + ".";
+  }
+  return (dir / (prefix + name)).string();
 }
 
 std::string write_step() {

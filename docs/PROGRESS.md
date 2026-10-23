@@ -848,6 +848,38 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## 3D cells that the optimiser could not reach, CI on every push (2026-10-23) — requested by the user
+The Linux bundle failed its test twice in a row (deterministic): example 09a's fluid volume had
+5 of 140558 cells below the quality floor (scaled Jacobian 0.04). The user asked why Linux
+"always fails the first time", and agreed to fix the cause before the release.
+- **The cause:** core tetrahedra lying flat on the layer front (slivers ~0.03 across, 0.001
+  thick): two of their faces are front faces and all four nodes are fixed layer nodes, so the
+  optimiser's node moves cannot reach them, and the edge between their free nodes has four
+  tetrahedra around it (a 3-2 swap needs three). Reproduced here at import spacings 0.038,
+  0.039 and 0.045 (1-2 cells); the Linux mesh at the default spacing had differed from the
+  Mac's (81006 against 56475 tetrahedra, same code and packages).
+- **Point insertion** (`optimize3d.cpp`): such a cell's cavity (the cell and the core
+  tetrahedra across its faces, grown up to twice more) becomes the star of a new movable
+  node, placed by compass search from the cavity's centroid, the cell's and the apex of an
+  ideal tetrahedron on each of its faces; kept only when it tiles the cavity and every star
+  cell meets the floor. At most 1000 cells, all of whose nodes are fixed (a first version
+  that tried every cell below the floor made a strict-floor test take minutes).
+- **The layer front lowered** where insertion is not enough (`volumes.py`,
+  `_lower_stuck_columns`; `inflate_3d(node_layers=...)`, a per-node layer limit, reason
+  "limit"): the volume is meshed again with one layer fewer at the columns under the cells
+  still stuck, up to three times. Example 09a's bracket at 25 settings (spacings 0.030-0.050,
+  two far-field sizes, two first heights): every cell meets the floor, 2-4 columns lowered
+  where needed, insertion alone enough at spacings 0.030-0.032.
+- **CI** (`.github/workflows/ci.yml`): the Linux build with warnings as errors and the C++ and
+  Python tests on every push to master and every pull request, through the "Linux bundle"
+  workflow's tests job (now also `workflow_call`), only while the repository is public (free
+  there); the bundle test records the CPU model and core count.
+- A test race fixed on the way: the CAD import tests wrote one temporary `part.step` and ctest
+  runs them in parallel (one read it while another wrote it); each test now has its own files.
+- Tests: C++ `Inflation3D.PerNodeLayerLimits`; Python `test_cells_stuck_on_a_layer_front_lower_it`
+  (spacing 0.039). C++ 160 / 160 (three runs in parallel); Python 573 passed, 1 expected
+  failure.
+
 ## Before making the repository public: MIT licence, neutral wording, licence texts in the downloads (2026-10-23) — requested by the user
 - **No other products named**: the README and every other file (code comments, docs, the
   original brief) describe OpenGrid in its own terms; literature references keep their authors

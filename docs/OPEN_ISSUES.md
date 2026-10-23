@@ -88,6 +88,17 @@ history). Phase tags show where each item came from.
   - A sketch edge leaving an unstructured block's wall is still clustered at the wall when the
     layers taper (as for structured blocks; it keeps periodic pairs matched); a tiny first
     height then gives a strongly stretched edge (warned).
+- **3D quality floor** [2026-10-23]:
+  - Cells that miss the floor are repaired by point insertion and, failing that, by meshing
+    the volume again with the layer front lowered at their columns (up to three times, a few
+    seconds each). A stuck cell at a fan column (several columns on one wall node) is not
+    lowered; non-tetrahedral cells (pyramids, prisms, hexahedra) below it are only reported.
+  - Layers much thicker than the gaps between walls (example 09a's bracket with 12 layers from
+    4e-3) still give overlapping fronts, which Netgen refuses ("the volume mesher produced no
+    tetrahedra"); the 3D proximity rule does not stop them early enough.
+  - The same OpenGrid code gave different 3D meshes in two Linux bundles a day apart (same
+    packages, same thread count): the cause (compiler of the package build or the machine)
+    was not found; the bundle test now records the CPU.
 - **Closed wall loops** [2026-10-22]: columns are not merged across a closed chain's seam;
   the seam is put as far as possible from the corners, so only a smooth loop whose layers
   converge everywhere (the inside of a pipe, layers about as thick as its radius) could still

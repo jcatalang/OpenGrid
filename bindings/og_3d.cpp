@@ -673,7 +673,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
          double first_height, double growth_rate, int layers, std::optional<double> total_thickness,
          bool transition, std::optional<double> max_size, double min_jacobian, double max_scale,
          double max_slope, double proximity, double fan_threshold, double fan_step,
-         double floor_jacobian, double floor_skewness) {
+         double floor_jacobian, double floor_skewness, const std::vector<int>& node_layers) {
         og::Inflation3DInput input;
         input.points.resize(points.shape(0));
         const double* d = points.data();
@@ -684,6 +684,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         input.wall = wall;
         input.face_group = face_group;
         input.node_group = node_group;
+        input.max_layers = node_layers;
         og::Inflation3DOptions options;
         options.first_height = first_height;
         options.growth_rate = growth_rate;
@@ -737,9 +738,12 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       nb::arg("min_jacobian") = 0.2, nb::arg("max_scale") = 2.0, nb::arg("max_slope") = 0.5,
       nb::arg("proximity") = 1.0, nb::arg("fan_threshold") = 60.0, nb::arg("fan_step") = 30.0,
       nb::arg("floor_jacobian") = 0.05, nb::arg("floor_skewness") = 0.95,
+      nb::arg("node_layers") = std::vector<int>{},
       "3D boundary-layer inflation (see inflation3d.hpp). faces: closed surface oriented out of "
       "the region; wall / face_group per face; node_group per point (plane group a wall node "
-      "may slide in, or -1). Returns a dict: points (input first), tets, pyramids, prisms, "
+      "may slide in, or -1); node_layers per point (at most that many layers, -1: no limit; "
+      "empty: none)."
+      " Returns a dict: points (input first), tets, pyramids, prisms, "
       "hexes, front / front_face, sides / side_face, top, height, layers, max_layers, stops, "
       "warnings.");
 
@@ -793,6 +797,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
         out["inverted_after"] = r.inverted_after;
         out["below_floor_before"] = r.below_floor_before;
         out["below_floor_after"] = r.below_floor_after;
+        out["inserted"] = r.inserted;
         return out;
       },
       nb::arg("points"), nb::arg("tets"), nb::arg("pyramids"), nb::arg("prisms"), nb::arg("hexes"),
@@ -802,7 +807,7 @@ void bind_3d(nb::module_& m) {  // NOLINT(misc-use-internal-linkage): called fro
       "Quality optimisation of a mixed 3D mesh (see optimize3d.hpp): node moves of movable points "
       "and 2-3 / 3-2 swaps of the tetrahedra after the first n_fixed_tets. Cell arrays are "
       "int64 (n, 4 / 5 / 6 / 8). Returns a dict: points, tets (fixed ones first), moved, "
-      "swaps_23, swaps_32, worst_before, worst_after, below_before, below_after, "
+      "swaps_23, swaps_32, inserted, worst_before, worst_after, below_before, below_after, "
       "inverted_after.");
 
   m.def(

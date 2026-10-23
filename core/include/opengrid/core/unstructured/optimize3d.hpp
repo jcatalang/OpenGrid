@@ -29,6 +29,17 @@
 //    maximise the smallest floor margin min(SJ - min_jacobian, max_skewness - skewness) of their
 //    cells by the same compass search (a pure max-min objective, right for a cell that must
 //    reach the floor; it never takes a cell around the node below the floor).
+//  * Point insertion: a swappable tetrahedron still missing the floor whose nodes are all fixed
+//    (e.g. a sliver on two nearly coplanar faces of a layer front, which no node move or swap
+//    can lift; at most 1000, the worst first) is replaced, with the swappable tetrahedra across its
+//    faces (its cavity, grown once more when that is not enough), by the star of a new movable
+//    node: every boundary face of the cavity joined to it. The node moves by the rescue's compass
+//    search, from the centroid of the cavity's nodes, the cell's centroid and the apex of an ideal
+//    tetrahedron on each of its faces, to maximise the smallest floor margin of the star; the star
+//    is kept when all its cells are positive, it fills the cavity's volume (so it tiles the
+//    cavity) and every cell meets the floor (otherwise the cell stays as it was, all its nodes
+//    fixed, for the caller: the volume generator lowers the layers there). Then the rescue
+//    runs again.
 // Deterministic: nodes and swaps are processed in a fixed order (worst quality, then index).
 #pragma once
 
@@ -45,6 +56,7 @@ struct Optimize3DOptions {
   int passes = 4;
   bool move_nodes = true;
   bool swap = true;
+  bool insert = true;  // point insertion for tetrahedra the rescue cannot lift (see above)
   QualityFloor floor;  // cells below it get a final rescue pass (see above)
 };
 
@@ -59,11 +71,12 @@ struct Optimize3DInput {
 };
 
 struct Optimize3DResult {
-  std::vector<std::array<double, 3>> points;
+  std::vector<std::array<double, 3>> points;      // the input points, then any inserted ones
   std::vector<std::array<std::int64_t, 4>> tets;  // the fixed ones first, unchanged
   std::int64_t moved = 0;                         // accepted node moves
   std::int64_t swaps_23 = 0;
   std::int64_t swaps_32 = 0;
+  std::int64_t inserted = 0;  // points inserted (each replacing a cavity by its star)
   double worst_before = 1.0;
   double worst_after = 1.0;
   std::int64_t below_before = 0;  // cells below the threshold

@@ -1,0 +1,21 @@
+# Continuous integration: the Linux build with warnings as errors and the C++ and Python tests
+# (the "Linux bundle" workflow's tests job) on every push to master and every pull request, so
+# a problem shows when it is made, not when a release is built. Only while the repository is
+# public: GitHub Actions is free for public repositories, a private one pays per minute.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/linux-bundle.yml
+    with:
+      bundle: false
+      tests: true

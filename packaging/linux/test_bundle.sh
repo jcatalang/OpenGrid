@@ -23,6 +23,9 @@ cat > "$OUT/test_inside.sh" <<'INSIDE'
 set -euo pipefail
 step() { echo "== $(date +%H:%M:%S) $*"; }
 step "$(. /etc/os-release && echo "$PRETTY_NAME"), $(uname -m), glibc $(ldd --version | head -1 | awk '{print $NF}')"
+# (Meshes depend slightly on the CPU: Netgen amplifies rounding differences of CPU-specific
+# kernels. The machine is recorded with every result.)
+echo "   CPU:$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2), $(nproc) cores"
 step "desktop packages only (Mesa, fonts, X11 helpers) and a virtual display"
 if command -v zypper >/dev/null; then
   zypper --non-interactive --quiet refresh || echo "   (repositories not reachable)"

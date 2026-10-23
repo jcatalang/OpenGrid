@@ -363,6 +363,43 @@ TEST(Inflation3D, HexLayersOnQuads) {
   }
 }
 
+TEST(Inflation3D, PerNodeLayerLimits) {
+  // A body's central face node limited to two of four layers (the volume generator lowers the
+  // front this way where core cells could not reach the quality floor): its column stops there
+  // (reason "limit"), the cells stay valid and closed, the other columns keep four layers.
+  Builder b;
+  b.box({0, 0, 0}, {4, 4, 4}, 4, 1.0, true, false);
+  b.box({1.5, 1.5, 1.5}, {2.5, 2.5, 2.5}, 12, -1.0, true, true);
+  auto o = options(4);
+  o.fan_threshold_deg = 180.0;
+  std::size_t centre = b.in.points.size();
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    const P3& p = b.in.points[i];
+    if (std::abs(p[0] - 2.0) < 0.01 && std::abs(p[1] - 2.0) < 0.01 && p[2] == 1.5) {
+      centre = i;
+    }
+  }
+  ASSERT_LT(centre, b.in.points.size());
+  b.in.max_layers.assign(b.in.points.size(), -1);
+  b.in.max_layers[centre] = 2;
+  const auto r = og::inflate_3d(b.in, o);
+  EXPECT_EQ(r.layers[centre], 2);
+  EXPECT_EQ(r.reason[centre], "limit");
+  EXPECT_EQ(r.stops.at("limit"), 1);
+  expect_positive(r);
+  expect_floor(r);
+  expect_closed_layers(b.in, r);
+  int full = 0;
+  for (std::size_t i = 0; i < b.in.points.size(); ++i) {
+    if (!r.reason[i].empty() && i != centre && r.layers[i] == 4) {
+      ++full;
+    }
+  }
+  EXPECT_GT(full, 100);
+  b.in.max_layers.pop_back();
+  EXPECT_THROW(og::inflate_3d(b.in, o), std::invalid_argument);
+}
+
 TEST(Inflation3D, FixedNodesTaperAndTransitionCells) {
   // Only the top face of the body is a wall: its boundary nodes touch non-wall faces of other
   // planes, so they are fixed and the layers taper towards them.

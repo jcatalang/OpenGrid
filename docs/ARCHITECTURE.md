@@ -797,6 +797,16 @@ segment, so derivative jumps at knots never cost accuracy.
     cascaded into stopping the whole wing at about 8 layers.
   - The optimiser rescues the movable nodes of core cells below it (max-min of the floor
     margin).
+  - Core tetrahedra below it whose nodes are all fixed (slivers Netgen lays flat on a nearly
+    planar layer front: no node move or swap reaches them) get a point inserted above them:
+    their cavity (the cell and the core tetrahedra across its faces, grown up to twice more)
+    becomes the star of a new movable node, kept only when every star cell meets the floor and
+    the star tiles the cavity. Those still left lower the layer front: the volume is meshed
+    again with at most one layer fewer at the columns under them (per-node limits of
+    `inflate_3d`, reason "limit"), up to three times (`LAYER_RETRIES`). Example 09a's bracket
+    at 25 settings (spacings 0.030-0.050, two far-field sizes, two first heights): every cell
+    meets the floor (before: 2 to 5 cells missed it at some spacings; one Linux build at the
+    default one).
 - **Reported, never silently kept:** `mesh["quality"]` (floor, cells, below_floor, worst values,
   failing cell indices), the volume / block status, a warning, and a boundary-report issue per
   failing block or volume, so every export refuses such a model.

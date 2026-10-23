@@ -848,6 +848,36 @@ and O-grid / butterfly helpers for multi-block hexahedral meshes, as agreed at t
 - Strict CI build, clang-tidy on changed C++ files, ruff (incl. Markdown code blocks),
   clang-format, ternary check; all demos 01–09b run, earlier outputs unchanged.
 
+## Locked bundle environments (2026-10-23) — requested by the user
+The Linux bundle had failed for reasons from outside the code (an OpenCL library new on
+GitHub's images, a cached package): each build solved its environment afresh against
+whatever conda-forge had published since. The user agreed to lock it after the release.
+- **Locks** (`packaging/locks/linux-64.txt`, `osx-arm64.txt`): conda's explicit format, every
+  package's URL and md5 in install order, without OpenGrid's own package; made from the
+  environments Release v0.0.2 shipped (351 and 220 packages), so the next builds ship what
+  was tested. `packaging/lock_env.py` (run with conda's Python): `write` (a lock from an
+  environment), `explicit` (the lock plus the freshly built OpenGrid package, which `conda
+  create --file` installs without solving), `check` (every package's dependencies and
+  constraints met: an explicit list is installed unchecked, so it fails the build when the
+  new OpenGrid package asks for something the lock does not hold).
+- **Both builds use them** (`build_bundle.sh`, `build_app.sh`); `OG_RELOCK=1` solves afresh
+  and writes a new lock (Linux: `packaging/dist/linux/linux-64.txt` and its differences, the
+  workflow's new `relock` input uploads them as the artifact `linux-64-lock`; macOS: the lock
+  itself), to be committed after its bundle passed. The workflow's cache key includes the lock.
+- **Pinned builds**: the compilers (GCC 16, Clang 23) and the host packages OpenGrid is
+  compiled against (nanobind 3.1.0, scikit-build-core 1.1.1, Eigen 5.0.1, OCCT 8.0.1, CGNS
+  4.5.2, HDF5 2.2.0, llvm-openmp 23.1.4: the versions v0.0.2 was built with) in
+  `packaging/conda/variants.yaml` (the recipe names nanobind and scikit-build-core without
+  versions so that the variants apply); the Linux build tools by version (Miniforge
+  26.7.2-1, rattler-build 0.76.1, conda-pack 0.9.2; the pack environment is recreated when
+  its rattler-build differs).
+- `tests/python/test_packaging_locks.py`: the locks are well formed, hold the recipe's run
+  requirements and fit the pinned compilers and host packages (OCCT / CGNS run exports, the
+  C++ runtime).
+- **macOS**: the app rebuilt from the lock holds exactly the locked packages (its own lock
+  written again: identical), `check` 221 packages, 0 unmet; `test_app.sh` PASS (licences,
+  signature, 1557 Mach-O with 0 unresolved, smoke test, STEP / IGES).
+
 ## 3D cells that the optimiser could not reach, CI on every push (2026-10-23) — requested by the user
 The Linux bundle failed its test twice in a row (deterministic): example 09a's fluid volume had
 5 of 140558 cells below the quality floor (scaled Jacobian 0.04). The user asked why Linux

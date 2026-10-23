@@ -10,6 +10,12 @@
 #
 #   packaging/macos/build_app.sh            # builds the conda package first if missing
 #   packaging/macos/build_app.sh --rebuild  # always rebuild the conda package
+#   OG_RELOCK=1 packaging/macos/build_app.sh   # a fresh solve: rewrites the lock (below)
+#
+# The environment is the lock packaging/locks/osx-<arch>.txt (exact package builds, installed
+# without solving; packaging/lock_env.py), so a rebuild ships the same packages. OG_RELOCK=1
+# solves afresh and rewrites that lock: test the app (test_app.sh), then commit the lock. The
+# compilers and host packages are pinned in packaging/conda/variants.yaml.
 #
 # Tools: rattler-build and conda-pack (conda create -n opengrid-pack -c conda-forge
 # rattler-build conda-pack), found in $OPENGRID_PACK_ENV (default: that environment).
@@ -25,6 +31,13 @@ DIST="$ROOT/packaging/dist"
 WORK="$DIST/work"
 APP="$DIST/OpenGrid.app"
 ARCH="$(uname -m)"
+SUBDIR="osx-$ARCH"
+if [[ "$ARCH" == "x86_64" ]]; then
+  SUBDIR="osx-64"
+fi
+LOCK="$ROOT/packaging/locks/$SUBDIR.txt"
+# conda's own Python (packaging/lock_env.py uses conda's package records).
+CONDA_PYTHON="$CONDA_BASE/bin/python"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "build_app.sh: macOS only" >&2
@@ -32,7 +45,8 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 # 1. The conda package.
-if [[ "${1:-}" == "--rebuild" ]] || ! ls "$CHANNEL"/*/opengrid-"$VERSION"-*.conda >/dev/null 2>&1; then
+if [[ "${1:-}" == "--rebuild" ]] || ! ls "$CHANNEL/$SUBDIR"/opengrid-"$VERSION"-*.conda >/dev/null 2>&1; then
+  rm -f "$CHANNEL/$SUBDIR"/opengrid-"$VERSION"-*.conda
   "$TOOLS/bin/rattler-build" build --recipe "$ROOT/packaging/conda/recipe.yaml" \
     -m "$ROOT/packaging/conda/variants.yaml" -c conda-forge --output-dir "$CHANNEL"
 fi
@@ -45,8 +59,17 @@ mkdir -p "$WORK"
 for pkgs in $(conda info --json | "$TOOLS/bin/python" -c "import json, sys; print(' '.join(json.load(sys.stdin)['pkgs_dirs']))"); do
   rm -rf "$pkgs"/opengrid-"$VERSION"-*
 done
-conda create -y -q -p "$WORK/env" --override-channels -c "file://$CHANNEL" -c conda-forge \
-  "opengrid=$VERSION" python=3.12
+if [[ -n "${OG_RELOCK:-}" ]]; then
+  conda create -y -q -p "$WORK/env" --override-channels -c "file://$CHANNEL" -c conda-forge \
+    "opengrid=$VERSION" python=3.12
+  "$CONDA_PYTHON" "$HERE/../lock_env.py" write "$WORK/env" "$LOCK" "a fresh solve on $(date +%F)"
+else
+  PACKAGE="$(ls -t "$CHANNEL/$SUBDIR"/opengrid-"$VERSION"-*.conda | head -1)"
+  "$CONDA_PYTHON" "$HERE/../lock_env.py" explicit "$LOCK" "$PACKAGE" "$WORK/explicit.txt"
+  conda create -y -q -p "$WORK/env" --file "$WORK/explicit.txt"
+fi
+# An explicit list is installed unchecked: every dependency met (OpenGrid's included)?
+"$CONDA_PYTHON" "$HERE/../lock_env.py" check "$WORK/env"
 # The licence texts of every bundled package (in the package cache, not in a packed env).
 "$TOOLS/bin/python" "$HERE/../collect_licenses.py" "$WORK/env" "$WORK/licenses"
 "$TOOLS/bin/conda-pack" -p "$WORK/env" -o "$WORK/env.tar.gz" --quiet

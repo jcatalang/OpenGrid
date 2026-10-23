@@ -362,6 +362,15 @@ history). Phase tags show where each item came from.
   modules for Qt components conda-forge does not ship (WebEngine, Multimedia, 3D, ...) are
   there but cannot be imported.
 - **No AppImage** [9c]: the conda package is the Linux deliverable.
+- **Locked bundle environments** [2026-10-23]: both downloads install the exact packages of
+  Release v0.0.2 (`packaging/locks`), so they get no fixes from conda-forge (security
+  updates included) until the lock is refreshed on purpose (`OG_RELOCK=1`; for Linux, the
+  workflow's `relock` input, as this Mac cannot build Linux). A package conda-forge withdraws
+  (marked broken) fails the build until then. The lock covers the runtime environment; the
+  build and host environments are pinned by version (compilers, nanobind, Eigen, OCCT, CGNS,
+  HDF5, scikit-build-core), not by exact build, so their other packages can still change.
+  `environment.yml` (development, the CI tests) is not locked: those tests see new
+  conda-forge packages first.
 - **Package metadata** [9c]: version 0.0.2 (0.0.1 was the first Linux bundle); MIT licence and
   the GitHub home page set on 2026-10-23.
 

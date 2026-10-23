@@ -930,7 +930,14 @@ segment, so derivative jumps at knots never cost accuracy.
   installed into a fresh environment, made relocatable with conda-pack, placed in
   `OpenGrid.app/Contents/Resources/env` behind a launcher script, signed ad hoc, and wrapped in
   a DMG. Qt, VTK, Netgen and OpenCASCADE stay separate shared libraries inside the bundle
-  (LGPL relinking requirement, §2). An AppImage was not made: the conda package covers Linux,
+  (LGPL relinking requirement, §2). Both downloads install their environment from a lock
+  (`packaging/locks/<platform>.txt`: conda's explicit format, every package's URL and md5,
+  without OpenGrid's own package) instead of solving, and `packaging/lock_env.py check` fails
+  the build when the freshly built OpenGrid package needs something the lock does not hold;
+  the compilers and host libraries are pinned in `packaging/conda/variants.yaml`, the build
+  tools (Miniforge, rattler-build, conda-pack) in the Linux build script. A new lock is made
+  on purpose (`OG_RELOCK=1`, the workflow's `relock` input) and committed after its bundle
+  passed; `tests/python/test_packaging_locks.py` checks that the locks and the pins agree. An AppImage was not made: the conda package covers Linux,
   and an AppImage of the same environment would need a Linux machine to build and test.
 
 ### Multi-block smoothing groups (Phase 10a)

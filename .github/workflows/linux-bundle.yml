@@ -16,6 +16,10 @@ on:
         description: "Build with warnings as errors and run the C++ and Python tests"
         type: boolean
         default: true
+      relock:
+        description: "Solve the bundle's environment afresh (artifact: the new lock, linux-64.txt)"
+        type: boolean
+        default: false
   # Also called by ci.yml (the tests on every push, once the repository is public).
   workflow_call:
     inputs:
@@ -25,6 +29,9 @@ on:
       tests:
         type: boolean
         default: true
+      relock:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,10 +54,25 @@ jobs:
           path: |
             ~/.local/share/opengrid/bundle-conda/pkgs
             ~/.cache/rattler
-          key: bundle-${{ hashFiles('packaging/conda/recipe.yaml', 'packaging/conda/variants.yaml') }}
+          key: bundle-${{ hashFiles('packaging/conda/recipe.yaml', 'packaging/conda/variants.yaml', 'packaging/locks/linux-64.txt') }}
           restore-keys: bundle-
       - name: Build the bundle (rattler-build, conda-pack)
-        run: OG_NATIVE=1 packaging/linux/build_bundle.sh
+        run: |
+          # The locked environment (packaging/locks/linux-64.txt), or a fresh solve.
+          if [ "${{ inputs.relock }}" = "true" ]; then
+            export OG_RELOCK=1
+          fi
+          OG_NATIVE=1 packaging/linux/build_bundle.sh
+      - name: Upload the new lock
+        if: ${{ inputs.relock }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-64-lock
+          path: |
+            packaging/dist/linux/linux-64.txt
+            packaging/dist/linux/linux-64.diff
+          retention-days: 30
+          if-no-files-found: error
       - name: Upload the bundle
         uses: actions/upload-artifact@v4
         with:

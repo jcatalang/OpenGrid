@@ -44,10 +44,11 @@ requirements:
         - cross-python_${{ target_platform }}
         - nanobind >=2.0
   host:
+    # Versions of the host packages: variants.yaml (scikit-build-core >= 0.11, nanobind >= 2.0).
     - python
     - pip
-    - scikit-build-core >=0.11
-    - nanobind >=2.0
+    - scikit-build-core
+    - nanobind
     - eigen
     - hdf5
     - cgns

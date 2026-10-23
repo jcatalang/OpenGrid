@@ -7,6 +7,7 @@
 #   packaging/linux/build_bundle.sh            # -> packaging/dist/linux/ (in Docker)
 #   OG_DETACH=1 packaging/linux/build_bundle.sh   # in the background (docker logs -f ...)
 #   OG_NATIVE=1 packaging/linux/build_bundle.sh   # directly on this Linux x86_64 machine
+#   OG_RELOCK=1 ...                               # a fresh solve and a new lock (see below)
 #
 # The conda package from packaging/conda/recipe.yaml (rattler-build, conda-forge's GCC), a
 # fresh runtime environment with it, conda-pack, the launchers; in a Docker container
@@ -14,6 +15,13 @@
 # the machine itself (a Linux x86_64 with internet: the GitHub workflow
 # .github/workflows/linux-bundle.yml does this). Then check it with
 # packaging/linux/test_bundle.sh in clean containers.
+#
+# The runtime environment is the lock packaging/locks/linux-64.txt (exact package builds,
+# installed without solving; packaging/lock_env.py), so a rebuild ships the same packages.
+# OG_RELOCK=1 solves afresh instead and writes the new lock to packaging/dist/linux/
+# linux-64.txt: review it, test that bundle, then commit it as packaging/locks/linux-64.txt.
+# The tools are pinned too (Miniforge, rattler-build, conda-pack), and the compilers and host
+# packages in packaging/conda/variants.yaml.
 set -euo pipefail
 IMAGE="${OG_IMAGE:-opensuse/leap:15.6}"
 PLATFORM="${OG_PLATFORM:-linux/amd64}"
@@ -36,19 +44,24 @@ command -v tar >/dev/null && command -v gzip >/dev/null || {
 }
 # Paths: the container's, or (OG_NATIVE) folders of the checkout given by the caller.
 CONDA="${OG_CONDA:-/opt/miniforge}"
+MINIFORGE=26.7.2-1
+RATTLER_BUILD=0.76.1
+CONDA_PACK=0.9.2
 WORK="${OG_WORK:-/work}"
 BUILD="${OG_BUILD:-/build}"
 OUTDIR="${OG_OUT:-/out}"
 if [ ! -x "$CONDA/bin/conda" ]; then
-  step "Miniforge"
+  step "Miniforge $MINIFORGE"
   curl -fsSL -o /tmp/miniforge.sh \
-    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-$(uname -m).sh"
+    "https://github.com/conda-forge/miniforge/releases/download/$MINIFORGE/Miniforge3-$MINIFORGE-Linux-$(uname -m).sh"
   bash /tmp/miniforge.sh -b -u -p "$CONDA" >/dev/null
 fi
 source "$CONDA/etc/profile.d/conda.sh"
-if [ ! -x "$CONDA/envs/pack/bin/rattler-build" ]; then
-  step "tools: rattler-build, conda-pack"
-  conda create -y -q -n pack -c conda-forge --override-channels rattler-build conda-pack
+if [ "$("$CONDA/envs/pack/bin/rattler-build" --version 2>/dev/null)" != "rattler-build $RATTLER_BUILD" ]; then
+  step "tools: rattler-build $RATTLER_BUILD, conda-pack $CONDA_PACK"
+  rm -rf "$CONDA/envs/pack"
+  conda create -y -q -n pack -c conda-forge --override-channels "rattler-build=$RATTLER_BUILD" \
+    "conda-pack=$CONDA_PACK"
 fi
 mkdir -p "$WORK" "$BUILD"
 if [ -z "${OG_NATIVE:-}" ]; then
@@ -62,12 +75,30 @@ step "conda package (rattler-build; its own build and test environments)"
 ls "$BUILD/channel/linux-64/"
 # The intermediate environments go as soon as they are done (a CI runner has ~14 GB free).
 rm -rf "$BUILD/channel/bld" "$BUILD/channel/src_cache"
-step "runtime environment"
 # conda reuses a cached package of the same file name (the package cache is kept between CI
 # runs): OpenGrid's must be the one just built.
 rm -rf "$CONDA"/pkgs/opengrid-"$OG_VERSION"-*
-conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" -c conda-forge \
-  "opengrid=$OG_VERSION" python=3.12
+LOCK="$WORK/packaging/locks/linux-64.txt"
+if [ -n "${OG_RELOCK:-}" ]; then
+  step "runtime environment: solved afresh (OG_RELOCK), a new lock"
+  conda create -y -q -p "$BUILD/env" --override-channels -c "file://$BUILD/channel" \
+    -c conda-forge "opengrid=$OG_VERSION" python=3.12
+  "$CONDA/bin/python" "$WORK/packaging/lock_env.py" write "$BUILD/env" "$OUTDIR/linux-64.txt" \
+    "a fresh solve on $(date +%F)"
+  if [ -f "$LOCK" ]; then
+    diff <(grep -v '^#' "$LOCK") <(grep -v '^#' "$OUTDIR/linux-64.txt") \
+      > "$OUTDIR/linux-64.diff" || true
+    echo "   changes against the current lock: $(grep -c '^[<>]' "$OUTDIR/linux-64.diff") lines"
+  fi
+else
+  step "runtime environment: the lock (packaging/locks/linux-64.txt)"
+  PACKAGE="$(ls "$BUILD"/channel/linux-64/opengrid-"$OG_VERSION"-*.conda)"
+  "$CONDA/bin/python" "$WORK/packaging/lock_env.py" explicit "$LOCK" "$PACKAGE" \
+    "$BUILD/explicit.txt"
+  conda create -y -q -p "$BUILD/env" --file "$BUILD/explicit.txt"
+fi
+# An explicit list is installed unchecked: every dependency met (OpenGrid's included)?
+"$CONDA/bin/python" "$WORK/packaging/lock_env.py" check "$BUILD/env"
 step "licences of the bundled packages (from the package cache: a packed environment has none)"
 "$CONDA/envs/pack/bin/python" "$WORK/packaging/collect_licenses.py" "$BUILD/env" "$BUILD/licenses"
 step "conda-pack"
@@ -138,7 +169,7 @@ if [ -n "${OG_NATIVE:-}" ]; then
 fi
 NAME="opengrid-linux-bundle"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
-ARGS=(--name "$NAME" --platform "$PLATFORM" -e OG_VERSION="$VERSION"
+ARGS=(--name "$NAME" --platform "$PLATFORM" -e OG_VERSION="$VERSION" -e OG_RELOCK
   -v "opengrid-linux-conda-${PLATFORM//\//-}:/opt/miniforge"
   -v "opengrid-linux-rattler-cache:/root/.cache"
   -v "$ROOT/build/linux-check/source.tar.gz:/source.tar.gz:ro"

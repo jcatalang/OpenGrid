@@ -52,6 +52,15 @@ On any Linux x86_64 machine with internet: `OG_NATIVE=1 packaging/linux/build_bu
 (no Docker; `packaging/linux/test_bundle.sh [archive] [image]` then checks it in a clean
 container).
 
+**The same packages every time.** The bundle's environment is the lock
+`packaging/locks/linux-64.txt`: the exact builds of every package (from Release v0.0.2),
+installed as they are, without asking conda-forge for newer ones. To take newer packages on
+purpose (security fixes, new versions), run the workflow with **relock** ticked (or
+`OG_RELOCK=1` with the script): it solves afresh, tests that bundle as usual, and its artifact
+**linux-64-lock** holds the new lock and its differences from the current one; commit it as
+`packaging/locks/linux-64.txt`. The compilers and the libraries OpenGrid is compiled against
+are pinned in `packaging/conda/variants.yaml`; move them together with the lock.
+
 ## 2. The installer script (compiles on the machine)
 
 From a checkout of the repository:
